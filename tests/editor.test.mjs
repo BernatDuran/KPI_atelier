@@ -9,7 +9,7 @@ async function editor(){
  const add=(owner,event,fn)=>{const key=owner+':'+event;handlers.set(key,[...(handlers.get(key)||[]),fn]);};
  for(const match of source.matchAll(/^import \{([^}]+)\} from '([^']+)';$/gm)){const mod=await import(new URL(match[2],appURL));for(const name of match[1].split(','))context[name.trim()]=mod[name.trim()];}
  source=source.replace(/^import .*;$/gm,'');
- const node=id=>{if(!nodes.has(id))nodes.set(id,{innerHTML:'',textContent:'',dataset:{},style:{setProperty(){}},classList:{add(){},remove(){},toggle(){}},get firstElementChild(){return this;},querySelector(s){return node(s);},querySelectorAll(){return [];},contains(){return false;},addEventListener(event,fn){add(id,event,fn);},setAttribute(){},focus(){},getBoundingClientRect(){return {left:0,top:0,width:100,height:100,right:100,bottom:100};},showModal(){this.open=true;},close(){this.open=false;}});return nodes.get(id);};
+ const node=id=>{if(!nodes.has(id))nodes.set(id,{innerHTML:'',textContent:'',dataset:{},style:{setProperty(){}},classList:{add(){},remove(){},toggle(){}},get firstElementChild(){return this;},querySelector(s){return node(s);},querySelectorAll(){return [];},contains(){return false;},addEventListener(event,fn){add(id,event,fn);},setAttribute(){},focus(){},getBoundingClientRect(){return {left:0,top:0,width:100,height:100,right:100,bottom:100};},setPointerCapture(){},hasPointerCapture(){return true;},releasePointerCapture(){},closest(s){if(s.includes(id))return this;return null;},showModal(){this.open=true;},close(){this.open=false;}});return nodes.get(id);};
  const fire=(owner,event,e)=>{for(const f of handlers.get(owner+':'+event)||[])f(e);};
  const button=dataset=>({dataset,closest(selector){if(selector.includes('button'))return this;if(selector==='[data-layout]'&&dataset.layout)return this;return null;}});
  Object.assign(context,{structuredClone,Date,Intl,crypto:webcrypto,setTimeout(){},clearTimeout(){},requestAnimationFrame(){},localStorage:{getItem(k){return storage.get(k)??null;},setItem(k,v){storage.set(k,v);}},document:{querySelector:node,querySelectorAll(){return [];},activeElement:{tagName:'BODY',focus(){}},getElementById(){return null;},addEventListener(event,fn){add('document',event,fn);}},window:{addEventListener(event,fn){add('window',event,fn);}},fire,button});
@@ -935,3 +935,95 @@ test('Advanced Duplicates, Hierarchical Content Inspector, Stacking & Dynamic Re
   assert.ok(barHtml.includes('icon-btn format-painter-btn'), 'Format painter must use subtle icon-btn style');
   `);
 });
+
+test('Flawless Element Dragging & Card Resizing Sync: Border and Dimensions Stay 100% Synced', async () => {
+  const run = await editor();
+  await run(`
+  loadDesign(BASE);
+  // 1. Element Dragging & Selection Border Sync
+  selectElement('title');
+  assert.equal(selectedElement, 'title');
+  const overlay = $('#selection-overlay');
+  assert.equal(overlay.hidden, false);
+  assert.ok(overlay.innerHTML.includes('Título del KPI'));
+
+  const titleNode = {
+    dataset: { element: 'title' },
+    closest(sel) {
+      if (sel.includes('data-element')) return this;
+      return null;
+    },
+    getBoundingClientRect() { return { left: 40, top: 40, width: 120, height: 20 }; }
+  };
+  fire('#app', 'pointerdown', {
+    button: 0,
+    pointerId: 1,
+    clientX: 100,
+    clientY: 100,
+    target: titleNode,
+    preventDefault(){}
+  });
+  assert.ok(gesture);
+  assert.equal(gesture.id, 'title');
+  assert.equal(gesture.kind, 'move');
+
+  // Drag 40px right, 20px down (scale in mock is 100/440 => 40 / (100/440) = 176px, 20 / (100/440) = 88px)
+  fire('#app', 'pointermove', {
+    pointerId: 1,
+    clientX: 140,
+    clientY: 120
+  });
+  assert.equal(c.elements.title.x, 176);
+  assert.equal(c.elements.title.y, 88);
+  assert.equal(overlay.hidden, false, 'Selection overlay border must remain visible and synced during drag');
+
+  // Finish element drag gesture
+  fire('#app', 'pointerup', { pointerId: 1 });
+  assert.equal(gesture, null);
+  assert.equal(selectedElement, 'title');
+  assert.equal(c.elements.title.x, 176);
+  assert.equal(c.elements.title.y, 88);
+  assert.ok(overlay.innerHTML.includes('Título del KPI'), 'Selection badge and handles must remain valid after gesture');
+
+  // 2. Card Resizing & Handles/Border Sync
+  selectCard();
+  assert.equal(cardSelected, true);
+  assert.equal(overlay.hidden, false);
+  assert.ok(overlay.innerHTML.includes('Tarjeta · 440 × 400 px'));
+  assert.ok(overlay.innerHTML.includes('handle-e'));
+  assert.ok(overlay.innerHTML.includes('handle-s'));
+  assert.ok(overlay.innerHTML.includes('handle-se'));
+
+  // Start card resize via SE handle
+  const seHandle = { dataset: { cardResize: 'se' }, closest(sel){ return sel.includes('card-resize') ? this : null; } };
+  fire('#app', 'pointerdown', {
+    button: 0,
+    pointerId: 2,
+    clientX: 200,
+    clientY: 200,
+    target: seHandle,
+    preventDefault(){}
+  });
+  assert.ok(gesture);
+  assert.equal(gesture.card, true);
+  assert.equal(gesture.kind, 'se');
+
+  // Drag +60px width, +40px height
+  fire('#app', 'pointermove', {
+    pointerId: 2,
+    clientX: 260,
+    clientY: 240
+  });
+  assert.equal(c.width, 704);
+  assert.equal(c.height, 576);
+  assert.ok(overlay.innerHTML.includes('Tarjeta · 704 × 576 px'), 'Overlay badge must track real-time resized dimensions');
+
+  // Release card handle
+  fire('#app', 'pointerup', { pointerId: 2 });
+  assert.equal(gesture, null);
+  assert.equal(c.width, 704);
+  assert.equal(c.height, 576);
+  assert.ok(overlay.innerHTML.includes('Tarjeta · 704 × 576 px'), 'Final dimensions must be committed and synced');
+  `);
+});
+
