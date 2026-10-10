@@ -301,7 +301,7 @@ function fitMain(){
   return;
  }
  const v=$('#card-fit'),inner=$('#main-card');if(!v||!inner)return;
- inner.style.transform='';const available=Math.max(210,$('#stage').clientWidth-62),factor=gesture?.scale||Math.min(1,available/c.width)*zoom/100;
+ inner.style.transform='';const factor=gesture?.scale||(zoom/100);
  inner.style.transform=`scale(${factor})`;
  // Freeze legacy flow at its current measured positions before editing.
  if(c.geometryVersion!==2){const wasClean=!dirty(),actualHeight=inner.firstElementChild?.offsetHeight||c.height;let migrated=c;
@@ -501,17 +501,32 @@ document.addEventListener('click',e=>{
  'zoom-in':()=>{zoom=Math.min(200,zoom+10);renderStage();},
  'zoom-out':()=>{zoom=Math.max(25,zoom-10);renderStage();},
  'zoom-fit':()=>{
+  const stage=$('#stage');
   if(context){
-   const stage=$('#stage');
    const [resW, resH] = contextResolution==='1920x1080' ? [1920, 1080] : [1280, 720];
    const availW=Math.max(300,(stage?.clientWidth||800)-80);
    const availH=Math.max(240,(stage?.clientHeight||500)-80);
    const fitRatio=Math.min(availW/resW,availH/resH);
    zoom=Math.max(25,Math.min(100,Math.round(fitRatio*100)));
   } else {
-   zoom=100;
+   const cardH=$('#main-card')?.firstElementChild?.offsetHeight||c.height||300;
+   const cardW=c.width||400;
+   const availW=Math.max(200,(stage?.clientWidth||800)-72);
+   const availH=Math.max(160,(stage?.clientHeight||460)-110);
+   const fitRatio=Math.min(availW/cardW,availH/cardH);
+   const fittedZoom=Math.max(25,Math.min(100,Math.round(fitRatio*100)));
+   if(zoom===fittedZoom&&fittedZoom<100){
+    zoom=100;
+   } else {
+    zoom=fittedZoom;
+   }
+  }
+  if(stage){
+   stage.scrollTop=0;
+   stage.scrollLeft=0;
   }
   renderStage();
+  toast(`Vista ajustada (${zoom} %)`);
  },
  'context-res':()=>{
   contextResolution=t.dataset.res||'1280x720';
@@ -1184,14 +1199,20 @@ function appearanceRange(key,label,value){return `<div class="field"><label for=
 function appearanceColor(key,label,value){return `<div class="field"><label for="appearance-${key}">${label}</label><div class="element-color-row"><input id="appearance-${key}" type="color" data-appearance="${key}" value="${value}"><span>HEX</span><input id="appearance-${key}-hex" data-appearance="${key}" data-hex maxlength="7" spellcheck="false" aria-label="${label}, código hexadecimal" value="${value.toUpperCase()}"></div><div class="element-color-swatches">${['accent','text','muted','background','positive','warning','negative'].map(role=>`<button data-element-color="${key}" data-role-color="${role}" title="${COLOR_ROLES.find(x=>x[0]===role)?.[1]||role}: ${c[role]}" aria-label="Usar ${c[role]}" style="background:${c[role]}"></button>`).join('')}</div></div>`;}
 function elementAppearancePanel(id){
  const baseId=id?.replace(/_copy\d+$/,'');
+ const isTrend=baseId==='trend';
+ const isProgress=baseId==='progress';
+ const elState=elementState(c,id);
+ const chartKind=isTrend?(elState.chartKind||c.chartKind):c.chartKind;
+ const trendStyle=isTrend?(elState.trendStyle||c.trendStyle):c.trendStyle;
  const p=appearance(c,id),spec=COLOR_SPEC[id]||COLOR_SPEC[baseId]||{role:'text'},data=sampleData(c),resolved=elementColor(c,id,data);
  const names={theme:'Seguir el tema',semantic:'Según el resultado del KPI',custom:'Color personalizado',linked:'Seguir la barra de progreso'};
- let html=appearanceSelect('colorMode',id==='progress'?'Color de la barra':id==='trend'?(c.chartKind==='donut'?'Color del anillo':'Color de línea y puntos'):'Color del elemento',p.colorMode,colorModes(id).map(key=>[key,names[key]]));
+ let html=appearanceSelect('colorMode',isProgress?'Color de la barra':isTrend?(chartKind==='donut'?'Color del anillo':'Color de línea y puntos'):'Color del elemento',p.colorMode,colorModes(id).map(key=>[key,names[key]]));
  html+=p.colorMode==='custom'?appearanceColor('color','Color personalizado',p.color):`<div class="appearance-source"><i style="background:${resolved}"></i><span>${p.colorMode==='linked'?'Vinculado a la barra':p.colorMode==='semantic'?'Favorable, alerta o desfavorable según el KPI':'Se actualiza al cambiar de tema'}</span></div>`;
- if(spec.background&&(id!=='trend'||c.chartKind==='donut')){html+=appearanceSelect('backgroundMode',['progress','trend'].includes(id)?'Fondo de la pista':'Fondo del elemento',p.backgroundMode,[['auto',id==='progress'?'Texto secundario del tema':'Seguir el color del elemento'],['custom','Color personalizado'],['none','Sin fondo']]);
+ if(spec.background&&(!isTrend||chartKind==='donut')){
+  html+=appearanceSelect('backgroundMode',[isProgress,isTrend].some(Boolean)?'Fondo de la pista':'Fondo del elemento',p.backgroundMode,[['auto',isProgress?'Texto secundario del tema':'Seguir el color del elemento'],['custom','Color personalizado'],['none','Sin fondo']]);
   if(p.backgroundMode!=='none')html+=(p.backgroundMode==='custom'?appearanceColor('backgroundColor','Color de fondo',p.backgroundColor):'')+appearanceRange('backgroundOpacity','Opacidad del fondo',p.backgroundOpacity);
  }
- if(id==='trend'&&c.chartKind!=='donut'&&c.trendStyle==='area')html+=appearanceSelect('fillMode','Color del área',p.fillMode,[['linked','Seguir la línea'],['custom','Color personalizado']])+(p.fillMode==='custom'?appearanceColor('fillColor','Color del área',p.fillColor):'');
+ if(isTrend&&chartKind!=='donut'&&trendStyle==='area')html+=appearanceSelect('fillMode','Color del área',p.fillMode,[['linked','Seguir la línea'],['custom','Color personalizado']])+(p.fillMode==='custom'?appearanceColor('fillColor','Color del área',p.fillColor):'');
  html+=appearanceRange('opacity','Opacidad del elemento',p.opacity);
  if(id==='status'||p.colorMode==='semantic')html+=`<details class="semantic-colors"><summary>Colores de estado · compartidos</summary><p class="field-help">Estos colores se comparten con los indicadores que siguen el resultado.</p>${field('positive','Favorable','color')}${id!=='delta'?field('warning','Alerta','color'):''}${id==='delta'||id==='status'?field('negative','Desfavorable','color'):''}</details>`;
  return html+btn('reset-appearance','Restablecer apariencia','reset','button quiet appearance-reset');
@@ -1203,7 +1224,7 @@ function editAppearance(input){
  const patch={[key]:value};
  if(key==='colorMode'&&value==='custom'&&p.colorMode!=='custom')patch.color=elementColor(c,id,data);
  if(key==='backgroundMode'&&value==='custom'&&p.backgroundMode!=='custom')patch.backgroundColor=(p.backgroundMode==='none'?(id==='progress'?c.muted:elementColor(c,id,data)):elementBackground(c,id,data).slice(0,7));
- if(key==='fillMode'&&value==='custom'&&p.fillMode!=='custom')patch.fillColor=trendFill(c);
+ if(key==='fillMode'&&value==='custom'&&p.fillMode!=='custom')patch.fillColor=trendFill(c,id);
  const now=Date.now();if(now-lastEdit>700||input.tagName==='SELECT')record();lastEdit=now;
  c=sanitizeConfig(updateElement(c,id,patch));persist();refreshCard();updateHistoryButtons();
  if(input.type==='range')input.nextElementSibling.textContent=value+'%';
@@ -2163,20 +2184,54 @@ const ELEMENT_TO_FIELD={
 function dataSummaryCard(){
  const rows=[];
  if(pbipModel){
-  rows.push(`<div class="data-summary-row"><span>Modelo PBIP</span><strong title="${esc(pbipModel.modelName)}">${esc(pbipModel.modelName)} <span class="data-summary-badge">${pbipModel.measures.length} fx</span></strong></div>`);
+  const isLive=Boolean(pbipModel.isLiveConnection);
+  const repName=getFriendlyReportName(pbipModel);
+  const badgeText=isLive?`⚡ ${pbipModel.measures.length} fx`:`${pbipModel.measures.length} fx`;
+  rows.push(`<div class="data-summary-row"><span>Modelo PBIP</span><strong title="${esc(repName)}">${esc(repName)} <span class="data-summary-badge ${isLive?'connected-live':''}">${badgeText}</span></strong></div>`);
  }
  rows.push(
-  `<div class="data-summary-row"><span>Medida principal</span><strong>${esc(c.measure||'Sin asignar')}</strong></div>`,
-  `<div class="data-summary-row"><span>Nombre salida DAX</span><strong>${esc(c.measureName||'Sin asignar')}</strong></div>`
+  `<div class="data-summary-row"><span>Medida principal</span><strong title="${esc(c.measure||'Sin asignar')}">${c.measure?esc(c.measure):'<em class="data-unassigned">Sin asignar</em>'}</strong></div>`,
+  `<div class="data-summary-row"><span>Nombre salida DAX</span><strong title="${esc(c.measureName||'Sin asignar')}">${esc(c.measureName||'Sin asignar')}</strong></div>`
  );
  if(needsDate(c)){
-  rows.push(`<div class="data-summary-row"><span>Calendario</span><strong>${esc(c.dateTable)} [${esc(c.dateColumn)}]</strong></div>`);
+  rows.push(`<div class="data-summary-row"><span>Calendario</span><strong title="${esc(c.dateTable)} [${esc(c.dateColumn)}]">${esc(c.dateTable)} [${esc(c.dateColumn)}]</strong></div>`);
+  if(needsTrend(c)){
+   const granNames={auto:'Automática',day:'Diaria',week:'Semanal',month:'Mensual'};
+   rows.push(`<div class="data-summary-row"><span>Granularidad</span><strong>${granNames[c.granularity]||'Automática'}</strong></div>`);
+  }
  }
  if(needsGoal(c)||c.comparison==='target'){
-  rows.push(`<div class="data-summary-row"><span>Medida objetivo</span><strong>${esc(c.targetMeasure||'Sin asignar')}</strong></div>`);
+  rows.push(`<div class="data-summary-row"><span>Medida objetivo</span><strong title="${esc(c.targetMeasure||'Sin asignar')}">${c.targetMeasure?esc(c.targetMeasure):'<em class="data-unassigned">Sin asignar</em>'}</strong></div>`);
  }
  if(needsCompare(c)&&c.comparison==='custom'){
-  rows.push(`<div class="data-summary-row"><span>Referencia</span><strong>${esc(c.compareMeasure||'Sin asignar')}</strong></div>`);
+  rows.push(`<div class="data-summary-row"><span>Referencia</span><strong title="${esc(c.compareMeasure||'Sin asignar')}">${c.compareMeasure?esc(c.compareMeasure):'<em class="data-unassigned">Sin asignar</em>'}</strong></div>`);
+ }
+ const activeDupIds=Object.keys(c.elements||{}).filter(id=>{
+  const def=resolveElementDef(id);
+  const st=elementState(c,id);
+  if(!def?.isDuplicate||st.deleted||st.hidden)return false;
+  if(def.baseId==='value')return true;
+  if(def.baseId==='delta')return (st.comparison||c.comparison)==='custom';
+  if(['goalLabel','progressLabel','progress'].includes(def.baseId))return needsGoal(c)||(st.comparison||c.comparison)==='target';
+  if(def.baseId==='trend')return true;
+  return false;
+ });
+ if(activeDupIds.length){
+  rows.push(`<div class="data-summary-divider"></div><div class="data-summary-subhead">Elementos duplicados (${activeDupIds.length})</div>`);
+  for(const dupId of activeDupIds){
+   const def=resolveElementDef(dupId);
+   const st=elementState(c,dupId);
+   if(def.baseId==='trend'){
+    rows.push(`<div class="data-summary-row"><span>${esc(def.label)} (medida)</span><strong title="${esc(st.measure||c.measure||'Hereda principal')}">${esc(st.measure||c.measure||'Hereda principal')}</strong></div>`);
+    rows.push(`<div class="data-summary-row"><span>${esc(def.label)} (fecha)</span><strong title="${esc(st.dateTable||c.dateTable||'Calendario')} [${esc(st.dateColumn||c.dateColumn||'Fecha')}]">${esc(st.dateTable||c.dateTable||'Calendario')} [${esc(st.dateColumn||c.dateColumn||'Fecha')}]</strong></div>`);
+   }else if(def.baseId==='value'){
+    rows.push(`<div class="data-summary-row"><span>${esc(def.label)}</span><strong title="${esc(st.measure||c.measure||'Hereda principal')}">${esc(st.measure||c.measure||'Hereda principal')}</strong></div>`);
+   }else if(def.baseId==='delta'){
+    rows.push(`<div class="data-summary-row"><span>${esc(def.label)} (ref.)</span><strong title="${esc(st.compareMeasure||'Sin asignar')}">${st.compareMeasure?esc(st.compareMeasure):'<em class="data-unassigned">Sin asignar</em>'}</strong></div>`);
+   }else if(['goalLabel','progressLabel','progress'].includes(def.baseId)){
+    rows.push(`<div class="data-summary-row"><span>${esc(def.label)} (objetivo)</span><strong title="${esc(st.targetMeasure||c.targetMeasure||'Sin asignar')}">${(st.targetMeasure||c.targetMeasure)?esc(st.targetMeasure||c.targetMeasure):'<em class="data-unassigned">Sin asignar</em>'}</strong></div>`);
+   }
+  }
  }
  return `<div class="data-summary-card">${rows.join('')}</div>`;
 }

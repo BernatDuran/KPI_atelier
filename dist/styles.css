@@ -4174,6 +4174,9 @@ dialog #toast {
 .data-summary-row span:first-child{color:#899d7c}
 .data-summary-row strong{font-weight:600;color:#415934;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px}
 .data-summary-badge{font-size:8px;padding:2px 5px;border-radius:3px;background:#e5edd9;color:#506e3d}
+.data-summary-card em.data-unassigned{font-style:italic;font-weight:400;color:#92a48b}
+.data-summary-divider{height:1px;background:#dce6d2;margin:3px 0}
+.data-summary-subhead{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#637b56;margin-top:2px}
 
 /* PBIP Connection Bar */
 .pbip-bar{display:flex;align-items:center;justify-content:space-between;gap:14px;background:#f5f7f0;border:1px solid #d8e2ce;border-radius:9px;padding:10px 14px;margin-bottom:14px;transition:all .2s ease}

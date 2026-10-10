@@ -1229,5 +1229,39 @@ test('Duplicate chart SVG rendering, DAX isolation, comparison label tracking, a
   assert.ok(css.includes('scrollbar-gutter:stable'), 'styles.css must configure scrollbar-gutter:stable');
 });
 
+test('Duplicate chart appearance excludes background opacity, expanded data summary includes duplicate bindings, and zoom-fit fits card', async () => {
+  const run = await editor();
+  run(`
+  loadDesign(BASE);
+
+  // 1. Duplicate chart appearance panel does NOT have background opacity
+  resolveElementDef('trend_copy1');
+  c = updateElement(c, 'trend_copy1', { chartKind: 'trend', trendStyle: 'area' });
+  selectedElement = 'trend_copy1';
+  tab = 'element';
+  renderInspector();
+  const inspHTML = $('#inspector-fields').innerHTML;
+  assert.ok(!inspHTML.includes('Opacidad del fondo'), 'Duplicate trend must NOT have Opacidad del fondo');
+  assert.ok(!inspHTML.includes('Fondo del elemento'), 'Duplicate trend must NOT have Fondo del elemento');
+  assert.ok(inspHTML.includes('Color del área'), 'Duplicate area trend must have Color del área');
+
+  // 2. Data tab dataSummaryCard expands with duplicate bindings
+  tab = 'data';
+  renderInspector();
+  const dataHTML = $('#inspector-fields').innerHTML;
+  assert.ok(dataHTML.includes('data-summary-card'), 'Must contain data-summary-card');
+  assert.ok(dataHTML.includes('Elementos duplicados'), 'Must list Elementos duplicados');
+  assert.ok(dataHTML.includes('trend_copy1') || dataHTML.includes('Gráfico'), 'Must include duplicate trend in summary');
+
+  // 3. Zoom-fit action calculates fitting zoom and centers stage
+  zoom = 180;
+  $('#stage').scrollTop = 120;
+  fire('document', 'click', { target: button({ action: 'zoom-fit' }) });
+  assert.ok(zoom <= 100, 'Zoom-fit must scale to 100% or fit ratio');
+  assert.equal($('#stage').scrollTop, 0, 'Stage scrollTop must be reset to 0');
+  `);
+});
+
+
 
 
