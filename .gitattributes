@@ -1,0 +1,23 @@
+# Auto detect text files and perform LF normalization
+* text=auto eol=lf
+
+# Explicit text files
+*.js text eol=lf
+*.mjs text eol=lf
+*.json text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Windows-specific scripts
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary files
+*.dll binary
+*.png binary
+*.ico binary
+*.zip binary

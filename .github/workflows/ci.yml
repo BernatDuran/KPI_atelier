@@ -1,0 +1,46 @@
+name: CI - Quality & Test Suite
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test-windows:
+    name: Test on Windows (Node ${{ matrix.node-version }})
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        node-version: [20.x, 22.x]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Run complete test suite (73 tests)
+        run: node --test tests/*.test.mjs
+
+  test-linux:
+    name: Cross-Platform Core Tests (Ubuntu - Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [20.x, 22.x]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Run cross-platform JS tests
+        run: node --test tests/core.test.mjs tests/editor.test.mjs tests/pbip.test.mjs
