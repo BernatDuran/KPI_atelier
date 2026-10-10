@@ -86,18 +86,41 @@ export function cardHTML(c,d=sampleData(c),editor=false){
    dupExtra=`line-height:1.12;letter-spacing:-1.8px;font-weight:${c.fontWeight};`;
   }
   else if(def.baseId==='delta'){
-   dupContent=d[`delta_${dupId}`]||`${d.arrow} ${d.delta}`;
+   const dupComparison=dupState.comparison||c.comparison;
+   let dVal=d[`delta_${dupId}`];
+   if(!dVal){
+    if(dupComparison==='none'){
+     dVal='—';
+    }else{
+     dVal=`${d.arrow} ${d.delta}`;
+    }
+   }
+   dupContent=dVal;
    dupExtra=`background:${bg(dupId)};padding:5px 8px;border-radius:6px;font-weight:600;line-height:1.4;width:fit-content;`;
   }
+  else if(def.baseId==='compareLabel'){
+   const dupComp=dupState.comparison||c.comparison;
+   dupContent=dupState.text!==undefined?esc(dupState.text):esc(comparisonLabel({comparison:dupComp}));
+   dupExtra='line-height:1.4;';
+  }
   else if(def.baseId==='status'){
-   dupContent=`<span style="font-weight:600;color:${color(dupId)}">${d.status}</span>`;
+   const sGood=dupState.statusGood||c.statusGood||'Favorable';
+   const sWarn=dupState.statusWarn||c.statusWarn||'En alerta';
+   const sBad=dupState.statusBad||c.statusBad||'Desfavorable';
+   const val=c.sampleValue;
+   const gTh=dupState.goodThreshold??c.goodThreshold;
+   const wTh=dupState.warnThreshold??c.warnThreshold;
+   const dir=dupState.direction||c.direction;
+   const st=dir==='down'?(val<=gTh?'good':val<=wTh?'warn':'bad'):(val>=gTh?'good':val>=wTh?'warn':'bad');
+   const stText=st==='good'?sGood:st==='warn'?sWarn:sBad;
+   dupContent=`<div style="display:flex;gap:5px">${[['Bad',c.negative],['Warn',c.warning],['Good',c.positive]].map(([key,color])=>`<span style="width:.75em;height:.75em;border-radius:50%;background:${color};opacity:${st===key.toLowerCase()?1:.2}"></span>`).join('')}</div><span style="font-weight:600;color:${color(dupId)}">${esc(stText)}</span>`;
    dupExtra=`display:flex;align-items:center;gap:10px;padding:14px;border-radius:10px;line-height:1.4;background:${bg(dupId)};`;
   }
   else {
    dupContent=(d[`val_${dupId}`]&&dupState.measure)?d[`val_${dupId}`]:esc(dupState.text!==undefined?dupState.text:(def.contentKey?c[def.contentKey]:def.label));
    dupExtra='line-height:1.4;';
   }
-  el(dupId,dupContent,dupExtra);
+  const dupV=el(dupId,dupContent,dupExtra);if(dupV)detached.push(dupV);
  }
  return `<div${editor?' data-card-surface="true"':''} style="${style}">${heading}${metric}${comparison}${status}${trend}${goal}${prior}${footer}${detached.join('')}</div>`;
 }

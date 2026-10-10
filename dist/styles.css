@@ -3513,7 +3513,8 @@ dialog #toast {
   inset:0;
   z-index:4;
   pointer-events:none;
-  color:#609983
+  color:#609983;
+  overflow:hidden
 }
 .guide-boundary {
   position:absolute;
@@ -3557,10 +3558,11 @@ dialog #toast {
   border:1px solid #d6e4cc;
   border-radius:4px;
   box-shadow:0 2px 4px #25371d0a;
-  padding:5px 8px;
+  padding:4px 8px;
   white-space:nowrap;
-  max-width:none;
-  overflow:visible;
+  max-width:calc(100% - 16px);
+  overflow:hidden;
+  text-overflow:ellipsis;
   z-index:10
 }
 .guide-readout.outside {
@@ -3631,12 +3633,18 @@ dialog #toast {
   box-shadow:0 1px 3px #15803d15
 }
 .smart-guide.exact.vertical b {
-  bottom:100%;
-  left:3px
+  top:12px;
+  left:3px;
+  max-width:180px;
+  overflow:hidden;
+  text-overflow:ellipsis
 }
 .smart-guide.exact.horizontal b {
-  left:calc(100% + 3px);
-  top:-7px
+  right:12px;
+  bottom:3px;
+  max-width:calc(100% - 24px);
+  overflow:hidden;
+  text-overflow:ellipsis
 }
 .guide-overlap-zone {
   position:absolute;

@@ -139,10 +139,35 @@ function duplicateContentFields(baseIds){
     `<div class="field"><label for="f-dup-dec-${dupId}">Decimales</label><select id="f-dup-dec-${dupId}" data-dupval="decimals" data-dupid="${dupId}">${[[0,'0'],[1,'1'],[2,'2'],[3,'3']].map(([k,l])=>`<option value="${k}" ${curDec===k?'selected':''}>${l}</option>`).join('')}</select></div></div>`+
     `<div class="field"><label for="f-dup-suf-${dupId}">Sufijo del valor</label><input id="f-dup-suf-${dupId}" data-dupval="suffix" data-dupid="${dupId}" value="${esc(curSuf)}" placeholder="ej. € o %"></div>`;
   }else if(def.baseId==='delta'){
-   const curComp=st.compareMeasure!==undefined?st.compareMeasure:(c.compareMeasure||'');
+   const curComp=st.comparison||c.comparison;
+   const curDir=st.direction||c.direction;
    const curMode=st.deltaMode||c.deltaMode;
-   fields=`<div class="field"><label for="f-dup-cmp-${dupId}">Medida de comparación</label><input id="f-dup-cmp-${dupId}" data-dupval="compareMeasure" data-dupid="${dupId}" value="${esc(curComp)}" placeholder="[Medida de referencia]" list="dl-pbip-measures"></div>`+
-    `<div class="field"><label for="f-dup-dm-${dupId}">Mostrar diferencia</label><select id="f-dup-dm-${dupId}" data-dupval="deltaMode" data-dupid="${dupId}">${[['relative','Porcentaje'],['absolute','Diferencia absoluta'],['pp','Puntos porcentuales']].map(([k,l])=>`<option value="${k}" ${curMode===k?'selected':''}>${l}</option>`).join('')}</select></div>`;
+   const curCmpMeas=st.compareMeasure!==undefined?st.compareMeasure:(c.compareMeasure||'');
+   fields=`<div class="field"><label for="f-dup-cmpmode-${dupId}">Comparar con</label><select id="f-dup-cmpmode-${dupId}" data-dupval="comparison" data-dupid="${dupId}">${comparisons.map(([k,l])=>`<option value="${k}" ${curComp===k?'selected':''}>${l}</option>`).join('')}</select></div>`+
+    `<div class="field"><label for="f-dup-dir-${dupId}">¿Qué significa mejorar?</label><select id="f-dup-dir-${dupId}" data-dupval="direction" data-dupid="${dupId}">${[['up','Cuanto más, mejor ↑'],['down','Cuanto menos, mejor ↓'],['neutral','Sin valoración favorable']].map(([k,l])=>`<option value="${k}" ${curDir===k?'selected':''}>${l}</option>`).join('')}</select></div>`+
+    `<div class="field"><label for="f-dup-dm-${dupId}">Mostrar diferencia</label><select id="f-dup-dm-${dupId}" data-dupval="deltaMode" data-dupid="${dupId}">${[['relative','Porcentaje'],['absolute','Diferencia absoluta'],['pp','Puntos porcentuales']].map(([k,l])=>`<option value="${k}" ${curMode===k?'selected':''}>${l}</option>`).join('')}</select></div>`+
+    `<div class="field"><label for="f-dup-cmp-${dupId}">Medida de comparación</label><input id="f-dup-cmp-${dupId}" data-dupval="compareMeasure" data-dupid="${dupId}" value="${esc(curCmpMeas)}" placeholder="[Medida de referencia]" list="dl-pbip-measures"></div>`;
+  }else if(def.baseId==='compareLabel'){
+   const curComp=st.comparison||c.comparison;
+   const curTxt=st.text!==undefined?st.text:'';
+   fields=`<div class="field"><label for="f-dup-clcmp-${dupId}">Comparar con</label><select id="f-dup-clcmp-${dupId}" data-dupval="comparison" data-dupid="${dupId}">${comparisons.map(([k,l])=>`<option value="${k}" ${curComp===k?'selected':''}>${l}</option>`).join('')}</select></div>`+
+    `<div class="field"><label for="f-dup-txt-${dupId}">Texto personalizado</label><input id="f-dup-txt-${dupId}" data-duptext="${dupId}" data-dupid="${dupId}" value="${esc(curTxt)}" placeholder="ej. vs. período anterior"></div>`;
+  }else if(def.baseId==='status'){
+   const curGood=st.statusGood!==undefined?st.statusGood:(c.statusGood||'Favorable');
+   const curWarn=st.statusWarn!==undefined?st.statusWarn:(c.statusWarn||'En alerta');
+   const curBad=st.statusBad!==undefined?st.statusBad:(c.statusBad||'Desfavorable');
+   const curGTh=st.goodThreshold!==undefined?st.goodThreshold:c.goodThreshold;
+   const curWTh=st.warnThreshold!==undefined?st.warnThreshold:c.warnThreshold;
+   fields=`<div class="field-row"><div class="field"><label for="f-dup-gth-${dupId}">Umbral favorable</label><input id="f-dup-gth-${dupId}" type="number" data-dupval="goodThreshold" data-dupid="${dupId}" value="${curGTh}"></div>`+
+    `<div class="field"><label for="f-dup-wth-${dupId}">Umbral alerta</label><input id="f-dup-wth-${dupId}" type="number" data-dupval="warnThreshold" data-dupid="${dupId}" value="${curWTh}"></div></div>`+
+    `<div class="field"><label for="f-dup-sg-${dupId}">Texto favorable</label><input id="f-dup-sg-${dupId}" data-dupval="statusGood" data-dupid="${dupId}" value="${esc(curGood)}"></div>`+
+    `<div class="field"><label for="f-dup-sw-${dupId}">Texto alerta</label><input id="f-dup-sw-${dupId}" data-dupval="statusWarn" data-dupid="${dupId}" value="${esc(curWarn)}"></div>`+
+    `<div class="field"><label for="f-dup-sb-${dupId}">Texto desfavorable</label><input id="f-dup-sb-${dupId}" data-dupval="statusBad" data-dupid="${dupId}" value="${esc(curBad)}"></div>`;
+  }else if(['referenceLabel','referenceValue'].includes(def.baseId)){
+   const curComp=st.comparison||c.comparison;
+   const curCmpMeas=st.compareMeasure!==undefined?st.compareMeasure:(c.compareMeasure||'');
+   fields=`<div class="field"><label for="f-dup-rcmp-${dupId}">Comparar con</label><select id="f-dup-rcmp-${dupId}" data-dupval="comparison" data-dupid="${dupId}">${comparisons.map(([k,l])=>`<option value="${k}" ${curComp===k?'selected':''}>${l}</option>`).join('')}</select></div>`+
+    `<div class="field"><label for="f-dup-rcm-${dupId}">Medida de referencia</label><input id="f-dup-rcm-${dupId}" data-dupval="compareMeasure" data-dupid="${dupId}" value="${esc(curCmpMeas)}" placeholder="[Medida de referencia]" list="dl-pbip-measures"></div>`;
   }else if(def.baseId==='icon'){
    const curIcon=st.icon||c.icon;
    fields=`<div class="field"><label for="f-dup-ico-${dupId}">Icono</label><select id="f-dup-ico-${dupId}" data-dupval="icon" data-dupid="${dupId}">${ICON_OPTIONS.map(([k,l])=>`<option value="${k}" ${curIcon===k?'selected':''}>${l}</option>`).join('')}</select></div>`;
@@ -340,7 +365,7 @@ app.addEventListener('input',e=>{
   if(id){
    const now=Date.now();if(now-lastEdit>700)record();lastEdit=now;
    const prop=t.dataset.dupval;let val=t.value;
-   if(prop==='decimals')val=Number(val);
+   if(['decimals','goodThreshold','warnThreshold'].includes(prop))val=Number(val);
    const next=updateElement(c,id,{[prop]:val});
    c=sanitizeConfig(next);persist();refreshCard();updateHistoryButtons();return;
   }
@@ -370,7 +395,7 @@ app.addEventListener('change',e=>{
   const id=t.dataset.dupid||selectedElement;
   if(id){
    const prop=t.dataset.dupval;let val=t.value;
-   if(prop==='decimals')val=Number(val);
+   if(['decimals','goodThreshold','warnThreshold'].includes(prop))val=Number(val);
    const next=updateElement(c,id,{[prop]:val});
    c=sanitizeConfig(next);persist();refreshCard();renderInspector();updateHistoryButtons();return;
   }
@@ -1257,7 +1282,9 @@ function renderGuides(){
   readoutText=`${Math.round(box.width)} × ${Math.round(box.height)} px · Guías de alineación`;
  }
 
- html+=`<span class="guide-readout ${readoutClass}" style="left:${left}px;top:${top+h+12}px">${readoutText}</span>`;
+ const roLeft=Math.max(8,Math.min(w-180,left+4));
+ const roTop=Math.max(8,Math.min(h-26,top+h-28));
+ html+=`<span class="guide-readout ${readoutClass}" style="left:${roLeft}px;top:${roTop}px">${readoutText}</span>`;
  overlay.innerHTML=html;
 }
 function elementInspector(){
@@ -1281,8 +1308,35 @@ function elementInspector(){
   }else if(def.baseId==='icon'){
    specific=iconPickerField();
   }else if(def.baseId==='delta'){
-   specific=`<div class="field"><label for="f-dup-compare">Medida de comparación</label><input id="f-dup-compare" data-dupval="compareMeasure" value="${esc(p.compareMeasure!==undefined?p.compareMeasure:c.compareMeasure)}" placeholder="[Medida de referencia]" list="dl-pbip-measures"></div>`+
-    `<div class="field"><label for="f-dup-deltamode">Mostrar diferencia</label><select id="f-dup-deltamode" data-dupval="deltaMode">${[['relative','Porcentaje'],['absolute','Diferencia absoluta'],['pp','Puntos porcentuales']].map(([k,l])=>`<option value="${k}" ${(p.deltaMode||c.deltaMode)===k?'selected':''}>${l}</option>`).join('')}</select></div>`;
+   const curComp=p.comparison||c.comparison;
+   const curDir=p.direction||c.direction;
+   const curMode=p.deltaMode||c.deltaMode;
+   const curCmpMeas=p.compareMeasure!==undefined?p.compareMeasure:c.compareMeasure;
+   specific=`<div class="field"><label for="f-dup-cmpmode">Comparar con</label><select id="f-dup-cmpmode" data-dupval="comparison">${comparisons.map(([k,l])=>`<option value="${k}" ${curComp===k?'selected':''}>${l}</option>`).join('')}</select></div>`+
+    `<div class="field"><label for="f-dup-dir">¿Qué significa mejorar?</label><select id="f-dup-dir" data-dupval="direction">${[['up','Cuanto más, mejor ↑'],['down','Cuanto menos, mejor ↓'],['neutral','Sin valoración favorable']].map(([k,l])=>`<option value="${k}" ${curDir===k?'selected':''}>${l}</option>`).join('')}</select></div>`+
+    `<div class="field"><label for="f-dup-deltamode">Mostrar diferencia</label><select id="f-dup-deltamode" data-dupval="deltaMode">${[['relative','Porcentaje'],['absolute','Diferencia absoluta'],['pp','Puntos porcentuales']].map(([k,l])=>`<option value="${k}" ${curMode===k?'selected':''}>${l}</option>`).join('')}</select></div>`+
+    `<div class="field"><label for="f-dup-compare">Medida de comparación</label><input id="f-dup-compare" data-dupval="compareMeasure" value="${esc(curCmpMeas)}" placeholder="[Medida de referencia]" list="dl-pbip-measures"></div>`;
+  }else if(def.baseId==='compareLabel'){
+   const curComp=p.comparison||c.comparison;
+   const curTxt=p.text!==undefined?p.text:'';
+   specific=`<div class="field"><label for="f-dup-clcmp">Comparar con</label><select id="f-dup-clcmp" data-dupval="comparison">${comparisons.map(([k,l])=>`<option value="${k}" ${curComp===k?'selected':''}>${l}</option>`).join('')}</select></div>`+
+    `<div class="field"><label for="f-duptext">Texto personalizado</label><input id="f-duptext" data-duptext="${id}" value="${esc(curTxt)}" placeholder="ej. vs. período anterior"></div>`;
+  }else if(def.baseId==='status'){
+   const curGood=p.statusGood!==undefined?p.statusGood:(c.statusGood||'Favorable');
+   const curWarn=p.statusWarn!==undefined?p.statusWarn:(c.statusWarn||'En alerta');
+   const curBad=p.statusBad!==undefined?p.statusBad:(c.statusBad||'Desfavorable');
+   const curGTh=p.goodThreshold!==undefined?p.goodThreshold:c.goodThreshold;
+   const curWTh=p.warnThreshold!==undefined?p.warnThreshold:c.warnThreshold;
+   specific=`<div class="field-row"><div class="field"><label for="f-dup-gth">Umbral favorable</label><input id="f-dup-gth" type="number" data-dupval="goodThreshold" value="${curGTh}"></div>`+
+    `<div class="field"><label for="f-dup-wth">Umbral alerta</label><input id="f-dup-wth" type="number" data-dupval="warnThreshold" value="${curWTh}"></div></div>`+
+    `<div class="field"><label for="f-dup-sg">Texto favorable</label><input id="f-dup-sg" data-dupval="statusGood" value="${esc(curGood)}"></div>`+
+    `<div class="field"><label for="f-dup-sw">Texto alerta</label><input id="f-dup-sw" data-dupval="statusWarn" value="${esc(curWarn)}"></div>`+
+    `<div class="field"><label for="f-dup-sb">Texto desfavorable</label><input id="f-dup-sb" data-dupval="statusBad" value="${esc(curBad)}"></div>`;
+  }else if(['referenceLabel','referenceValue'].includes(def.baseId)){
+   const curComp=p.comparison||c.comparison;
+   const curCmpMeas=p.compareMeasure!==undefined?p.compareMeasure:c.compareMeasure;
+   specific=`<div class="field"><label for="f-dup-rcmp">Comparar con</label><select id="f-dup-rcmp" data-dupval="comparison">${comparisons.map(([k,l])=>`<option value="${k}" ${curComp===k?'selected':''}>${l}</option>`).join('')}</select></div>`+
+    `<div class="field"><label for="f-dup-rcm">Medida de referencia</label><input id="f-dup-rcm" data-dupval="compareMeasure" value="${esc(curCmpMeas)}" placeholder="[Medida de referencia]" list="dl-pbip-measures"></div>`;
   }else if(['goalLabel','progressLabel','progress'].includes(def.baseId)){
    specific=`<div class="field"><label for="f-dup-target">Medida u objetivo</label><input id="f-dup-target" data-dupval="targetMeasure" value="${esc(p.targetMeasure!==undefined?p.targetMeasure:c.targetMeasure)}" placeholder="ej. [Objetivo] o 100" list="dl-pbip-measures"></div>`;
   }else{
@@ -1818,6 +1872,13 @@ document.addEventListener('input',e=>{
   }
   refreshCard();
   renderStatus();
+  const menu=document.getElementById(`dropdown-menu-${dupId}`);
+  if(menu&&pbipModel){
+   menu.innerHTML=renderBindingDropdown(dupId,val);
+   menu.classList.add('is-open');
+   const toggle=document.querySelector(`[data-action="toggle-bind-dropdown"][data-field="${dupId}"]`);
+   if(toggle)toggle.setAttribute('aria-expanded','true');
+  }
   return;
  }
  const bindKey=e.target.dataset?.bindKey;
@@ -1974,7 +2035,7 @@ document.addEventListener('focusin',e=>{
  const key=e.target.dataset?.bindKey||e.target.dataset?.bindDup;
  if(key){
   highlightBindingElements(key,true);
-  if(pbipModel&&['measure','targetMeasure','compareMeasure','dateTable','dateColumn'].includes(key)){
+  if(pbipModel&&(['measure','targetMeasure','compareMeasure','dateTable','dateColumn'].includes(key)||key.includes('_copy'))){
    const menu=document.getElementById(`dropdown-menu-${key}`);
    if(menu){
     closeAllBindingDropdowns();
@@ -2144,7 +2205,8 @@ function updateBindableElements(){
    return;
   }
   const fieldKey=ELEMENT_TO_FIELD[id];
-  const isBindable=isDuplicate||Boolean(fieldKey&&activeFields.has(fieldKey));
+  const isDupBindable=isDuplicate&&(def.baseId==='value'||(def.baseId==='delta'&&(elementState(c,id).comparison||c.comparison)==='custom')||(['goalLabel','progressLabel','progress'].includes(def.baseId)&&(needsGoal(c)||c.comparison==='target')));
+  const isBindable=isDupBindable||Boolean(fieldKey&&activeFields.has(fieldKey));
   el.classList.toggle('is-bindable',isBindable);
   if(!isBindable){
    el.classList.remove('binding-highlight');
@@ -2169,7 +2231,7 @@ function fitBindingCard(){
 
 function getBindingFieldOptions(key){
  if(!pbipModel)return [];
- if(['measure','targetMeasure','compareMeasure'].includes(key)){
+ if(['measure','targetMeasure','compareMeasure'].includes(key)||key.includes('_copy')){
   return (pbipModel.measures||[]).map(m=>({value:m.name,label:m.name,desc:m.table||'Medida'}));
  }
  if(key==='dateTable'){
@@ -2196,7 +2258,8 @@ function getBindingFieldOptions(key){
 
 function renderBindingDropdown(key,filterText=''){
  const options=getBindingFieldOptions(key);
- const currentVal=(c[key]||'').trim().toLowerCase();
+ const def=resolveElementDef(key);
+ const currentVal=(def?.isDuplicate?elementState(c,key)[def.baseId==='delta'?'compareMeasure':['goalLabel','progressLabel','progress'].includes(def.baseId)?'targetMeasure':'measure']:c[key]||'').trim().toLowerCase();
  const q=(filterText||'').trim().toLowerCase();
  const filtered=q?options.filter(o=>o.label.toLowerCase().includes(q)||o.desc.toLowerCase().includes(q)):options;
  if(!filtered.length){
@@ -2224,7 +2287,11 @@ function closeAllBindingDropdowns(){
 }
 
 function applyBindingFieldValue(key,val){
- if(key==='targetMeasure')c._targetCustomized=true;
+ if(key.includes('_copy')){
+  const def=resolveElementDef(key);
+  const prop=def?.baseId==='delta'?'compareMeasure':['goalLabel','progressLabel','progress'].includes(def?.baseId)?'targetMeasure':'measure';
+  c=updateElement(c,key,{[prop]:val});
+ }else if(key==='targetMeasure')c._targetCustomized=true;
  if(key==='dateTable')c._dateCustomized=true;
  if(key==='measureName'){
   const stripped=val.replace(/^kpi[_\s]+/i,'').replace(/_+/g,' ').trim();
@@ -2467,7 +2534,11 @@ function openDataBindingModal(focusKey=null){
  const activeDupIds=Object.keys(c.elements||{}).filter(id=>{
   const def=resolveElementDef(id);
   const st=elementState(c,id);
-  return def?.isDuplicate&&!st.deleted&&!st.hidden;
+  if(!def?.isDuplicate||st.deleted||st.hidden)return false;
+  if(def.baseId==='value')return true;
+  if(def.baseId==='delta')return (st.comparison||c.comparison)==='custom';
+  if(['goalLabel','progressLabel','progress'].includes(def.baseId))return needsGoal(c)||(st.comparison||c.comparison)==='target';
+  return false;
  });
  if(activeDupIds.length){
   fieldsHTML+=`
@@ -2513,19 +2584,25 @@ function openDataBindingModal(focusKey=null){
     iconChar='T';
    }
    const hasDropdown=Boolean(pbipModel&&['measure','compareMeasure','targetMeasure'].includes(prop));
+   const quickBadge=pbipModel&&hasDropdown?`<span class="pbip-quick-chip" title="Autocompletado activo">${pbipModel.measures.length} medidas</span>`:'';
    fieldsHTML+=`
     <div class="binding-field" data-binding-field="${dupId}">
      <label class="binding-field-label" for="f-bind-${dupId}">
       <span>${label}</span>
-      <div class="binding-badges-wrap"><span class="target-element-badge">Copia independiente</span></div>
+      <div class="binding-badges-wrap">
+       ${quickBadge}
+       <span class="target-element-badge">Copia independiente</span>
+      </div>
      </label>
      <div class="binding-dropdown-wrap ${hasDropdown?'has-dropdown':''}">
       <div class="binding-input-wrap">
        <span class="binding-input-icon">${iconChar}</span>
        <input id="f-bind-${dupId}" class="binding-input" data-bind-dup="${dupId}" data-bind-dupprop="${prop}" type="text" value="${esc(val)}" placeholder="Ejemplo: ${esc(ph)}" spellcheck="false" autocomplete="off" ${hasDropdown?'list="dl-pbip-measures"':''}>
-       <button type="button" class="binding-clear-btn ${val?'is-visible':''}" data-action="clear-bind-dup" data-dup="${dupId}" data-prop="${prop}" title="Borrar" aria-label="Borrar">${icon('eraser',13)}</button>
+       <button type="button" class="binding-clear-btn ${val?'is-visible':''}" data-action="clear-bind-dup" data-dup="${dupId}" data-prop="${prop}" title="Borrar selección" aria-label="Borrar selección">${icon('eraser',13)}</button>
+       ${hasDropdown?`<button type="button" class="binding-dropdown-toggle" data-action="toggle-bind-dropdown" data-field="${dupId}" title="Ver todas las opciones" aria-label="Ver todas las opciones" aria-expanded="false">${icon('chevronDown',12)}</button>`:''}
        <span class="binding-input-status ${val?'valid':'optional'}">${icon(val?'check':'info',val?14:13)}</span>
       </div>
+      ${hasDropdown?`<div class="binding-dropdown-menu" id="dropdown-menu-${dupId}" role="listbox" aria-label="Opciones para ${esc(label)}"></div>`:''}
      </div>
     </div>`;
   }

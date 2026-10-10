@@ -1027,3 +1027,66 @@ test('Flawless Element Dragging & Card Resizing Sync: Border and Dimensions Stay
   `);
 });
 
+test('Horizontal duplicate adaptive scaling, guide containment, typology parity and clean data binding', async () => {
+  const { adaptiveResizeCard } = await import('../dist/layout.mjs');
+  const { sanitizeElements, resolveElementDef } = await import('../dist/elements.mjs');
+  const { sanitizeConfig } = await import('../dist/model.mjs');
+  const { cardHTML } = await import('../dist/cards.mjs');
+  const fs = await import('fs');
+
+  // 1. Horizontal adaptive scaling of duplicates
+  resolveElementDef('value_copy1');
+  const cardWithDup = sanitizeConfig({
+    width: 500,
+    height: 400,
+    padding: 24,
+    borderWidth: 2,
+    elements: {
+      value_copy1: {
+        x: 30,
+        y: 20,
+        width: 320,
+        frame: { left: 100, top: 120, width: 320, height: 40 }
+      }
+    }
+  });
+
+  // Shrink card down to 250px
+  const shrunk = adaptiveResizeCard(cardWithDup, 250, 300);
+  const dupState = shrunk.elements.value_copy1;
+  const maxRight = shrunk.width - shrunk.padding - shrunk.borderWidth;
+  assert.ok(dupState.frame.left + dupState.frame.width <= maxRight, 'Duplicate must not exceed maxRight after shrink');
+  assert.ok(dupState.frame.left >= shrunk.padding, 'Duplicate must respect left padding margin');
+  assert.equal(dupState.x, 0, 'Offsets must be absorbed into frame');
+  assert.equal(dupState.y, 0, 'Offsets must be absorbed into frame');
+  assert.equal(dupState.width, dupState.frame.width, 'state.width must match new frame.width');
+
+  // 2. Guide containment and styles
+  const css = fs.readFileSync('dist/styles.css', 'utf8');
+  assert.ok(css.includes('#smart-guides {\n  position:absolute;\n  inset:0;\n  z-index:4;\n  pointer-events:none;\n  color:#609983;\n  overflow:hidden\n}'), 'smart-guides must have overflow:hidden');
+  assert.ok(css.includes('.smart-guide.exact.horizontal b {\n  right:12px;\n  bottom:3px;'), 'horizontal exact badge must stay inside guide line');
+
+  // 3. Typology parity for duplicates
+  resolveElementDef('delta_copy1');
+  resolveElementDef('compareLabel_copy1');
+  resolveElementDef('status_copy1');
+  const sanitized = sanitizeElements({
+    delta_copy1: { comparison: 'none', deltaMode: 'absolute', direction: 'down' },
+    compareLabel_copy1: { comparison: 'mom' },
+    status_copy1: { goodThreshold: 80, warnThreshold: 50, statusGood: 'Excelente', statusWarn: 'Atención', statusBad: 'Crítico' }
+  });
+  assert.equal(sanitized.delta_copy1.comparison, 'none');
+  assert.equal(sanitized.delta_copy1.deltaMode, 'absolute');
+  assert.equal(sanitized.compareLabel_copy1.comparison, 'mom');
+  assert.equal(sanitized.status_copy1.goodThreshold, 80);
+  assert.equal(sanitized.status_copy1.statusGood, 'Excelente');
+
+  const cardHtml = cardHTML({
+    ...sanitizeConfig({ type: 'status' }),
+    elements: sanitized
+  });
+  assert.ok(cardHtml.includes('—'), 'delta_copy1 with comparison none must render dash');
+  assert.ok(cardHtml.includes('vs. mes anterior'), 'compareLabel_copy1 with comparison mom must render vs. mes anterior');
+  assert.ok(cardHtml.includes('Excelente'), 'status_copy1 must render custom statusGood text');
+});
+

@@ -57,6 +57,13 @@ export function sanitizeElements(raw){
   if(typeof p.targetMeasure==='string')el.targetMeasure=p.targetMeasure.slice(0,120);
   if(typeof p.compareMeasure==='string')el.compareMeasure=p.compareMeasure.slice(0,120);
   if(typeof p.deltaMode==='string'&&['relative','absolute','pp'].includes(p.deltaMode))el.deltaMode=p.deltaMode;
+  if(typeof p.comparison==='string'&&['yoy','mom','previous','target','custom','none'].includes(p.comparison))el.comparison=p.comparison;
+  if(typeof p.direction==='string'&&['up','down','neutral'].includes(p.direction))el.direction=p.direction;
+  if(typeof p.statusGood==='string')el.statusGood=p.statusGood.slice(0,80);
+  if(typeof p.statusWarn==='string')el.statusWarn=p.statusWarn.slice(0,80);
+  if(typeof p.statusBad==='string')el.statusBad=p.statusBad.slice(0,80);
+  if(Number.isFinite(Number(p.goodThreshold)))el.goodThreshold=Number(p.goodThreshold);
+  if(Number.isFinite(Number(p.warnThreshold)))el.warnThreshold=Number(p.warnThreshold);
   const frame=sanitizeFrame(p.frame);if(frame)el.frame=frame;
   result[id]={...el,...sanitizeAppearance(p,id)};
  }return result;

@@ -95,26 +95,29 @@ export function adaptiveResizeCard(c,width=c.width,height=c.height){
   const state=elementState(c,id);
   const curF=state.frame;
   if(!curF)continue;
-  const relLeft=Math.max(0,curF.left-p);
-  const newLeft=Math.max(p,p+Math.round(relLeft*rW));
-  const relTop=Math.max(0,curF.top-p);
-  const newTop=Math.max(p,p+Math.round(relTop*rH));
-  let newWidth=Math.max(20,Math.round(curF.width*(Math.abs(curF.width-oldAvailW)<40?1:rW)));
-  let newF={...curF,left:newLeft,top:newTop,width:newWidth,height:curF.height};
+  const effLeft=curF.left+(state.x||0);
+  const effTop=curF.top+(state.y||0);
+  const effWidth=state.width||curF.width;
+  const relLeft=Math.max(0,effLeft-p);
+  let newLeft=Math.max(p,p+Math.round(relLeft*rW));
+  const relTop=Math.max(0,effTop-p);
+  let newTop=Math.max(p,p+Math.round(relTop*rH));
+  let newWidth=Math.abs(effWidth-oldAvailW)<40
+   ? Math.max(20,availW)
+   : Math.max(20,Math.round(effWidth*rW));
   const maxRight=targetW-p-c.borderWidth;
-  if(newF.left+newF.width>maxRight){
-   if(newF.width>maxRight-p){
-    newF.width=Math.max(20,maxRight-p);
-    newF.left=p;
-   }else{
-    newF.left=Math.max(p,maxRight-newF.width);
-   }
+  if(newWidth>maxRight-p){
+   newWidth=Math.max(20,maxRight-p);
+   newLeft=p;
+  }else if(newLeft+newWidth>maxRight){
+   newLeft=Math.max(p,maxRight-newWidth);
   }
   const maxBottom=targetH-c.borderWidth;
-  if(newF.top+newF.height>maxBottom){
-   newF.top=Math.max(p,maxBottom-newF.height);
+  if(newTop+curF.height>maxBottom){
+   newTop=Math.max(p,maxBottom-curF.height);
   }
-  updated[id]={...state,frame:newF};
+  let newF={...curF,left:newLeft,top:newTop,width:newWidth,height:curF.height};
+  updated[id]={...state,x:0,y:0,width:newWidth,frame:newF};
  }
  let nextTrendHeight=c.trendHeight;
  if(deltaH!==0&&c.layout==='stacked'&&oldAvailH>0){
