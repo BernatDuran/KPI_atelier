@@ -839,23 +839,42 @@ function renderGuides(){
 function elementInspector(){
  const id=selectedElement,def=resolveElementDef(id)||ELEMENTS[id],p=elementState(c,id),limits=SIZE_LIMITS[def.kind];
  const geom=(key,label,value,min,max)=>`<div class="field"><label for="el-${key}">${label}</label><input id="el-${key}" type="number" data-elprop="${key}" value="${value}" min="${min}" max="${max}" step="${moveStep}"></div>`;
- let specific=def.contentKey?field(def.contentKey,def.label):'';
- if(def.isDuplicate&&def.kind==='text'){
-  const currentVal=p.text!==undefined?p.text:(def.contentKey?c[def.contentKey]:'');
-  specific=`<div class="field"><label for="f-duptext">Texto</label><input id="f-duptext" data-duptext="${id}" value="${esc(currentVal)}" placeholder="Texto del elemento…"></div>`;
+ let specific='';
+ if(def.isDuplicate){
+  if(def.baseId==='value'){
+   specific=`<div class="field"><label for="f-dup-measure">Medida del valor</label><input id="f-dup-measure" data-dupval="measure" value="${esc(p.measure!==undefined?p.measure:c.measure)}" placeholder="[Nombre de medida]" list="dl-pbip-measures"></div>`+
+    `<div class="field"><label for="f-dup-format">Formato del valor</label><select id="f-dup-format" data-dupval="format">${formats.map(([k,l])=>`<option value="${k}" ${(p.format||c.format)===k?'selected':''}>${l}</option>`).join('')}</select></div>`+
+    `<div class="field"><label for="f-dup-decimals">Decimales</label><select id="f-dup-decimals" data-dupval="decimals">${[[0,'0'],[1,'1'],[2,'2'],[3,'3']].map(([k,l])=>`<option value="${k}" ${(p.decimals??c.decimals)===k?'selected':''}>${l}</option>`).join('')}</select></div>`+
+    `<div class="field"><label for="f-dup-suffix">Sufijo del valor</label><input id="f-dup-suffix" data-dupval="suffix" value="${esc(p.suffix!==undefined?p.suffix:c.suffix)}" placeholder="ej. € o %"></div>`;
+  }else if(def.baseId==='icon'){
+   specific=iconPickerField();
+  }else if(def.baseId==='delta'){
+   specific=`<div class="field"><label for="f-dup-compare">Medida de comparación</label><input id="f-dup-compare" data-dupval="compareMeasure" value="${esc(p.compareMeasure!==undefined?p.compareMeasure:c.compareMeasure)}" placeholder="[Medida de referencia]" list="dl-pbip-measures"></div>`+
+    `<div class="field"><label for="f-dup-deltamode">Mostrar diferencia</label><select id="f-dup-deltamode" data-dupval="deltaMode">${[['relative','Porcentaje'],['absolute','Diferencia absoluta'],['pp','Puntos porcentuales']].map(([k,l])=>`<option value="${k}" ${(p.deltaMode||c.deltaMode)===k?'selected':''}>${l}</option>`).join('')}</select></div>`;
+  }else if(['goalLabel','progressLabel','progress'].includes(def.baseId)){
+   specific=`<div class="field"><label for="f-dup-target">Medida u objetivo</label><input id="f-dup-target" data-dupval="targetMeasure" value="${esc(p.targetMeasure!==undefined?p.targetMeasure:c.targetMeasure)}" placeholder="ej. [Objetivo] o 100" list="dl-pbip-measures"></div>`;
+  }else{
+   const currentVal=p.text!==undefined?p.text:(def.contentKey?c[def.contentKey]:def.label);
+   specific=`<div class="field"><label for="f-duptext">Texto</label><input id="f-duptext" data-duptext="${id}" value="${esc(currentVal)}" placeholder="Texto del elemento…"></div>`;
+  }
+ }else{
+  specific=def.contentKey?field(def.contentKey,def.label):'';
+  if(id==='icon')specific=iconPickerField();
+  if(id==='value')specific=select('format','Formato del valor',formats)+select('decimals','Decimales',[[0,'0'],[1,'1'],[2,'2'],[3,'3']]);
+  if(['delta','compareLabel','referenceLabel','referenceValue'].includes(id))specific=select('comparison','Comparar con',comparisons)+(id==='delta'?select('deltaMode','Mostrar diferencia',[['relative','Porcentaje'],['absolute','Diferencia absoluta'],['pp','Puntos porcentuales']]):'');
+  if(id==='trend')specific=chartPanel();
+  if(['goalLabel','progress','progressLabel'].includes(id))specific=field('targetMeasure','Medida objetivo');
+  if(id==='status')specific=field('statusGood','Texto favorable')+field('statusWarn','Texto de alerta')+field('statusBad','Texto desfavorable')+`<div class="field-row">${field('goodThreshold','Umbral favorable','number')}${field('warnThreshold','Umbral alerta','number')}</div>`;
+  if(id==='period')specific='<p class="field-help">El período se calcula a partir de las fechas seleccionadas en el informe.</p>';
  }
- if(id==='icon')specific=iconPickerField();
- if(id==='value')specific=select('format','Formato del valor',formats)+select('decimals','Decimales',[[0,'0'],[1,'1'],[2,'2'],[3,'3']]);
- if(['delta','compareLabel','referenceLabel','referenceValue'].includes(id))specific=select('comparison','Comparar con',comparisons)+(id==='delta'?select('deltaMode','Mostrar diferencia',[['relative','Porcentaje'],['absolute','Diferencia absoluta'],['pp','Puntos porcentuales']]):'');
- if(id==='trend')specific=chartPanel();
- if(['goalLabel','progress','progressLabel'].includes(id))specific=field('targetMeasure','Medida objetivo');
- if(id==='status')specific=field('statusGood','Texto favorable')+field('statusWarn','Texto de alerta')+field('statusBad','Texto desfavorable')+`<div class="field-row">${field('goodThreshold','Umbral favorable','number')}${field('warnThreshold','Umbral alerta','number')}</div>`;
- if(id==='period')specific='<p class="field-help">El período se calcula a partir de las fechas seleccionadas en el informe.</p>';
  const hidden=p.hidden||!elementEnabled(c,id);
- return `<div class="selected-object-heading"><span>${icon(def.kind==='icon'?c.icon:def.kind==='chart'?'trend':def.kind==='bar'?'signal':'text',20)}</span><div><strong>${def.label}</strong><small>${p.deleted?'Elemento eliminado':hidden?'Elemento oculto':'Seleccionado en el lienzo'}</small></div>${ib('deselect','Deseleccionar','close')}</div>`+
+ const sizeRange=def.isDuplicate
+  ?`<div class="field"><label for="f-dupsize">${def.kind==='text'?'Tamaño de texto':def.kind==='icon'?'Tamaño de icono':'Altura'}</label><div class="range-wrap"><input id="f-dupsize" data-dupsize="${id}" type="range" min="${limits[0]}" max="${limits[1]}" value="${elementSize(c,id)}"><output for="f-dupsize">${elementSize(c,id)}px</output></div></div>`
+  :range(def.sizeKey,def.kind==='text'?'Tamaño de texto':def.kind==='icon'?'Tamaño de icono':'Altura',...limits);
+ return `<div class="selected-object-heading"><span>${icon(def.kind==='icon'?(p.icon||c.icon):def.kind==='chart'?'trend':def.kind==='bar'?'signal':'text',20)}</span><div><strong>${def.label}</strong><small>${p.deleted?'Elemento eliminado':hidden?'Elemento oculto':'Seleccionado en el lienzo'}</small></div>${ib('deselect','Deseleccionar','close')}</div>`+
  section('01','Apariencia',elementAppearancePanel(id))+
  section('02','Contenido del elemento',specific)+
- section('03','Posición y tamaño',`<div class="field-row">${geom('x','Desplazamiento X · px',p.x,-1000,1000)}${geom('y','Desplazamiento Y · px',p.y,-1000,1000)}</div><p class="geometry-note">Posición independiente: el tamaño no mueve otros elementos ni la tarjeta. Flechas: ${moveStep} px · Mayús: ${moveStep===1?5:1} px.</p>`+range(def.sizeKey,def.kind==='text'?'Tamaño de texto':def.kind==='icon'?'Tamaño de icono':'Altura',...limits)+geom('width','Ancho del elemento · px',p.width,0,800)+`<p class="geometry-note">Ancho 0 = ${p.frame?(def.kind==='icon'?'tamaño del icono':'ancho al desplazarlo'):'automático'}. Asa lateral: ancho; esquina: tamaño.</p>`+(p.frame?btn('release-element','Volver a posición de plantilla','restore','button quiet appearance-reset')+`<p class="geometry-note">Recupera su posición y ancho de plantilla sin cambiar los demás elementos.</p>`:''))+
+ section('03','Posición y tamaño',`<div class="field-row">${geom('x','Desplazamiento X · px',p.x,-1000,1000)}${geom('y','Desplazamiento Y · px',p.y,-1000,1000)}</div><p class="geometry-note">Posición independiente: el tamaño no mueve otros elementos ni la tarjeta. Flechas: ${moveStep} px · Mayús: ${moveStep===1?5:1} px.</p>`+sizeRange+geom('width','Ancho del elemento · px',p.width,0,800)+`<p class="geometry-note">Ancho 0 = ${p.frame?(def.kind==='icon'?'tamaño del icono':'ancho al desplazarlo'):'automático'}. Asa lateral: ancho; esquina: tamaño.</p>`+(p.frame?btn('release-element','Volver a posición de plantilla','restore','button quiet appearance-reset')+`<p class="geometry-note">Recupera su posición y ancho de plantilla sin cambiar los demás elementos.</p>`:''))+
  section('04','Visibilidad',`<div class="element-action-row">${btn(p.deleted?'restore-element':'hide-element',p.deleted?'Restaurar':hidden?'Mostrar':'Ocultar',p.deleted?'restore':hidden?'eye':'eyeOff','button secondary')}${!p.deleted?btn('delete-element','Eliminar','trash','button quiet'):''}</div><p class="field-help">Ocultar conserva el espacio. Eliminar retira el elemento. Puedes recuperarlo desde Capas o Deshacer.</p>${btn('reset-element','Restablecer este elemento','reset','button quiet')}`);
 }
 function selectElement(id,focus=true){
