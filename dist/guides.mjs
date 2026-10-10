@@ -14,8 +14,9 @@ export function alignmentGuides(box,card,peers=[],padding=0,tolerance=3){
    if(target.p>=0&&target.p<=card[size]){
     const matching=anchors.find(p=>Math.abs(p-target.p)<=tolerance);
     if(matching!==undefined){
-     const exact=Math.abs(matching-target.p)<=1;
-     const label=exact?(target.kind==='center'?'Centro exacto':`${target.label} exacto (0 px)`):target.label;
+     const diff=Math.abs(matching-target.p);
+     const exact=diff<=0.5;
+     const label=exact?(target.kind==='center'?'Centro exacto':`${target.label} exacto${diff<0.05?' (0 px)':''}`):target.label;
      add(axis,target.p,target.kind,label,exact);
     }
    }
@@ -29,18 +30,18 @@ export function alignmentGuides(box,card,peers=[],padding=0,tolerance=3){
  const yAnchors=[box.top, box.top+box.height/2, boxBottom];
 
  const edgeSnaps={
-  left:xAnchors.some(p=>Math.abs(p)<=1),
-  top:yAnchors.some(p=>Math.abs(p)<=1),
-  right:xAnchors.some(p=>Math.abs(p-card.width)<=1),
-  bottom:yAnchors.some(p=>Math.abs(p-card.height)<=1)
+  left:xAnchors.some(p=>Math.abs(p)<=0.5),
+  top:yAnchors.some(p=>Math.abs(p)<=0.5),
+  right:xAnchors.some(p=>Math.abs(p-card.width)<=0.5),
+  bottom:yAnchors.some(p=>Math.abs(p-card.height)<=0.5)
  };
  edgeSnaps.exact=Object.values(edgeSnaps).some(Boolean);
 
  const marginSnaps={
-  left:xAnchors.some(p=>Math.abs(p-padding)<=1),
-  top:yAnchors.some(p=>Math.abs(p-padding)<=1),
-  right:xAnchors.some(p=>Math.abs(p-(card.width-padding))<=1),
-  bottom:yAnchors.some(p=>Math.abs(p-(card.height-padding))<=1)
+  left:xAnchors.some(p=>Math.abs(p-padding)<=0.5),
+  top:yAnchors.some(p=>Math.abs(p-padding)<=0.5),
+  right:xAnchors.some(p=>Math.abs(p-(card.width-padding))<=0.5),
+  bottom:yAnchors.some(p=>Math.abs(p-(card.height-padding))<=0.5)
  };
  marginSnaps.exact=Object.values(marginSnaps).some(Boolean);
 

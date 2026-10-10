@@ -474,9 +474,13 @@ document.addEventListener('click',e=>{
   toast(`Nombre actualizado a '${safeName}'. Ya puedes sincronizar sin conflicto.`);
   exportModal();
  },
+ 'fix-missing-model-fields':()=>{
+  closeModal();
+  openDataBindingModal();
+ },
  undo:()=>{if(undo.length){redo.push(c);c=undo.pop();persist();render();}},redo:()=>{if(redo.length){undo.push(c);c=redo.pop();persist();render();}},
  reset:()=>{const template=TEMPLATES.find(x=>x.id===c.id)||TEMPLATES[0];openModal('¿Restaurar la plantilla?','Volverás a los ajustes originales de '+template.name+'.','<p>Podrás recuperar los cambios con Deshacer.</p>',btn('close-modal','Cancelar',null,'button secondary')+btn('confirm-reset','Restaurar','reset','button primary'));},
- 'confirm-reset':()=>{closeModal();setConfig((TEMPLATES.find(x=>x.id===c.id)||TEMPLATES[0]).config,true);toast('Plantilla restaurada.');},
+ 'confirm-reset':()=>{closeModal();loadDesign((TEMPLATES.find(x=>x.id===c.id)||TEMPLATES[0]).config);toast('Plantilla restaurada.');},
  guide,validation:validationModal,export:exportModal,'open-data-modal':()=>openDataBindingModal(),'close-modal':closeModal,'copy-dax':copyDax,
   'inject-live-measure': async () => {
    if(!pbipModel?.isLiveConnection||!pbipModel?.server){
@@ -509,27 +513,87 @@ document.addEventListener('click',e=>{
     return;
    }
 
-   // Pre-check 1: Verify referenced measures exist in model
+   // Pre-check 1: Validar estrictamente todas las medidas, tabla calendario y columna de fecha en el modelo de Power BI
    const modelMeasureNames=(pbipModel.measures||[]).map(m=>m.name.toLowerCase());
-   const missingRefs=[];
+   const missingItems=[];
+
+   // 1. Medida principal
    const cleanM=(c.measure||'').replace(/^\[|\]$/g,'').trim().toLowerCase();
-   if(cleanM&&!modelMeasureNames.includes(cleanM)){
-    missingRefs.push(`• Medida principal: [${c.measure}]`);
+   if(!cleanM){
+    missingItems.push({type:'Medida principal',detail:'No has seleccionado ninguna medida de negocio.'});
+   }else if(!modelMeasureNames.includes(cleanM)){
+    missingItems.push({type:'Medida principal',detail:`La medida [${c.measure.trim()}] no existe en tu informe de Power BI.`});
    }
-   if((needsGoal(c)||(needsCompare(c)&&c.comparison==='target'))&&c.targetMeasure){
-    const tTrim=c.targetMeasure.trim();
-    if(!/^-?\d+(\.\d+)?$/.test(tTrim)){
-     const cleanT=tTrim.replace(/^\[|\]$/g,'').toLowerCase();
+
+   // 2. Medida objetivo
+   if(needsGoal(c)||(needsCompare(c)&&c.comparison==='target')){
+    const rawTarget=(c.targetMeasure||'').trim();
+    if(!rawTarget){
+     missingItems.push({type:'Medida objetivo',detail:'Falta indicar la medida o cifra objetivo.'});
+    }else if(!/^-?\d+(\.\d+)?$/.test(rawTarget)){
+     const cleanT=rawTarget.replace(/^\[|\]$/g,'').toLowerCase();
      if(!modelMeasureNames.includes(cleanT)){
-      missingRefs.push(`• Medida objetivo: [${c.targetMeasure}]`);
+      missingItems.push({type:'Medida objetivo',detail:`La medida [${rawTarget}] no existe en tu informe de Power BI.`});
      }
     }
    }
-   if(needsCompare(c)&&c.comparison==='custom'&&c.compareMeasure){
-    const cleanC=c.compareMeasure.replace(/^\[|\]$/g,'').trim().toLowerCase();
-    if(!modelMeasureNames.includes(cleanC)){
-     missingRefs.push(`• Medida de referencia: [${c.compareMeasure}]`);
+
+   // 3. Medida de referencia
+   if(needsCompare(c)&&c.comparison==='custom'){
+    const rawComp=(c.compareMeasure||'').trim();
+    if(!rawComp){
+     missingItems.push({type:'Medida de referencia',detail:'Falta indicar la medida de comparación.'});
+    }else{
+     const cleanC=rawComp.replace(/^\[|\]$/g,'').toLowerCase();
+     if(!modelMeasureNames.includes(cleanC)){
+      missingItems.push({type:'Medida de referencia',detail:`La medida [${rawComp}] no existe en tu informe de Power BI.`});
+     }
     }
+   }
+
+   // 4. Tabla calendario y Columna de fechas
+   if(needsDate(c)){
+    const rawTable=(c.dateTable||'').trim();
+    const rawCol=(c.dateColumn||'').trim();
+    if(!rawTable){
+     missingItems.push({type:'Tabla calendario',detail:'Falta indicar la tabla calendario del modelo.'});
+    }else{
+     const foundDt=(pbipModel.dateTables||[]).find(dt=>dt.name.toLowerCase()===rawTable.toLowerCase());
+     const tableExistsInModel=foundDt||(pbipModel.tables||[]).some(t=>t.toLowerCase()===rawTable.toLowerCase());
+     if(!tableExistsInModel){
+      missingItems.push({type:'Tabla calendario',detail:`La tabla '${rawTable}' no existe en tu informe de Power BI.`});
+     }else if(!rawCol){
+      missingItems.push({type:'Columna de fecha',detail:'Falta indicar la columna de fechas continuas.'});
+     }else if(foundDt&&foundDt.dateColumns?.length){
+      const colExists=foundDt.dateColumns.some(col=>col.toLowerCase()===rawCol.toLowerCase());
+      if(!colExists){
+       missingItems.push({type:'Columna de fecha',detail:`La columna '${rawCol}' no existe en la tabla '${foundDt.name}' de tu informe.`});
+      }
+     }
+    }
+   }
+
+   if(missingItems.length>0){
+    openModal(
+     'Validación de datos con Power BI',
+     'Se han detectado campos no encontrados en tu informe abierto de Power BI Desktop:',
+     `<div class="inject-confirm-alert error">
+       <div class="inject-confirm-icon">${icon('alertTriangle',20)}</div>
+       <div>
+        <strong>Campos pendientes o no encontrados en el modelo</strong>
+        <ul class="missing-refs-list" style="margin:8px 0 0;padding-left:18px;">
+         ${missingItems.map(it=>`<li style="margin:4px 0;"><strong>${esc(it.type)}:</strong> ${esc(it.detail)}</li>`).join('')}
+        </ul>
+        <p style="margin-top:10px;">Selecciona los campos reales de tu modelo en <em>Conectar datos del modelo</em> antes de crear la medida.</p>
+       </div>
+      </div>`,
+     btn('close-modal','Cancelar',null,'button secondary')+
+     `<button type="button" class="button primary" data-action="fix-missing-model-fields">
+       ${icon('link',14)} <span>Corregir en Conectar datos</span>
+      </button>`,
+     'missing-refs-modal'
+    );
+    return;
    }
 
    // Pre-check 2: Check if measure already exists in model
@@ -578,8 +642,8 @@ document.addEventListener('click',e=>{
     }
    };
 
-   if(missingRefs.length>0||existingMeasure){
-    showInjectConfirmModal(missingRefs,existingMeasure,executeInjection);
+   if(existingMeasure){
+    showInjectConfirmModal([],existingMeasure,executeInjection);
     return;
    }
 
@@ -1313,6 +1377,7 @@ document.addEventListener('input',e=>{
  if(bindKey){
   if(bindKey==='measure'){
    const val=e.target.value;
+   c._measureBound=Boolean(val.trim());
    const cleanId=val.replace(/^\[|\]$/g,'').trim().replace(/[^\p{L}\p{N}_ ]/gu,'').trim().replace(/\s+/g,'_');
    const autoName=cleanId?(cleanId.startsWith('KPI_')?cleanId:`KPI_${cleanId}`):'';
    const autoTitle=val.replace(/^\[|\]$/g,'').trim();
@@ -1333,6 +1398,7 @@ document.addEventListener('input',e=>{
    c=sanitizeConfig({...c,...patch});
   }else{
    if(bindKey==='targetMeasure')c._targetCustomized=true;
+   if(bindKey==='dateTable')c._dateCustomized=true;
    c=sanitizeConfig({...c,[bindKey]:e.target.value});
   }
   persist();
@@ -1705,6 +1771,7 @@ function closeAllBindingDropdowns(){
 
 function applyBindingFieldValue(key,val){
  if(key==='targetMeasure')c._targetCustomized=true;
+ if(key==='dateTable')c._dateCustomized=true;
  if(key==='measureName'){
   const stripped=val.replace(/^kpi[_\s]+/i,'').replace(/_+/g,' ').trim();
   const autoTitle=stripped||val.trim();
@@ -1712,6 +1779,7 @@ function applyBindingFieldValue(key,val){
   if(autoTitle&&autoTitle.toLowerCase()!=='kpi')patch.title=autoTitle;
   c=sanitizeConfig({...c,...patch});
  }else if(key==='measure'){
+  c._measureBound=Boolean(val.trim());
   const cleanId=val.replace(/^\[|\]$/g,'').trim().replace(/[^\p{L}\p{N}_ ]/gu,'').trim().replace(/\s+/g,'_');
   const autoName=cleanId?(cleanId.startsWith('KPI_')?cleanId:`KPI_${cleanId}`):'';
   const autoTitle=val.replace(/^\[|\]$/g,'').trim();
@@ -1723,13 +1791,16 @@ function applyBindingFieldValue(key,val){
   }
   if(autoTitle)patch.title=autoTitle;
   c=sanitizeConfig({...c,...patch});
- }else if(key==='dateTable'&&pbipModel){
+ }else if(key==='dateTable'){
+  c._dateCustomized=true;
   const patch={dateTable:val};
-  const curDt=(pbipModel.dateTables||[]).find(dt=>dt.name.toLowerCase()===val.trim().toLowerCase());
-  if(curDt&&(curDt.primaryDateColumn||curDt.dateColumns[0])){
-   patch.dateColumn=curDt.primaryDateColumn||curDt.dateColumns[0];
-   const colInput=document.getElementById('f-bind-dateColumn');
-   if(colInput)colInput.value=patch.dateColumn;
+  if(pbipModel){
+   const curDt=(pbipModel.dateTables||[]).find(dt=>dt.name.toLowerCase()===val.trim().toLowerCase());
+   if(curDt&&(curDt.primaryDateColumn||curDt.dateColumns[0])){
+    patch.dateColumn=curDt.primaryDateColumn||curDt.dateColumns[0];
+    const colInput=document.getElementById('f-bind-dateColumn');
+    if(colInput)colInput.value=patch.dateColumn;
+   }
   }
   c=sanitizeConfig({...c,...patch});
  }else{
@@ -1759,11 +1830,28 @@ function openDataBindingModal(focusKey=null){
   c.targetMeasure='';
   persist();
  }
- if((!c.measureName||!c.measureName.trim())&&c.measure&&c.measure.trim()){
-  const cleanId=c.measure.replace(/^\[|\]$/g,'').trim().replace(/[^\p{L}\p{N}_ ]/gu,'').trim().replace(/\s+/g,'_');
-  if(cleanId){
-   c.measureName=cleanId.startsWith('KPI_')?cleanId:`KPI_${cleanId}`;
-   persist();
+ if(!c._measureBound){
+  c.measure='';
+  persist();
+ }
+ if(!c.measureName||!c.measureName.trim()){
+  const baseTitle=(c.title||'Medida').replace(/[^\p{L}\p{N}_]/gu,'_').replace(/^_+|_+$/g,'')||'Medida';
+  c.measureName=baseTitle.startsWith('KPI_')?baseTitle:`KPI_${baseTitle}`;
+  persist();
+ }
+ if(pbipModel){
+  const modelDateTables=pbipModel.dateTables||[];
+  const modelTableNames=(pbipModel.tables||[]).map(t=>t.toLowerCase());
+  const curTable=(c.dateTable||'').trim().toLowerCase();
+  const tableExists=modelDateTables.some(dt=>dt.name.toLowerCase()===curTable)||modelTableNames.includes(curTable);
+  if(!tableExists&&modelDateTables.length){
+   const bestDt=modelDateTables.find(dt=>dt.isMarkedDateTable)||modelDateTables.find(dt=>dt.isLikelyCalendar)||modelDateTables[0];
+   if(bestDt){
+    c.dateTable=bestDt.name;
+    c.dateColumn=bestDt.primaryDateColumn||bestDt.dateColumns?.[0]||c.dateColumn;
+    c._dateCustomized=true;
+    persist();
+   }
   }
  }
  const markedDateTables=(pbipModel?.dateTables||[]).filter(dt=>dt.isMarkedDateTable);
@@ -2057,7 +2145,48 @@ function reportOverflow(){
  const outside=[...root.querySelectorAll('[data-element]')].filter(el=>{if(!elementVisible(c,el.dataset.element))return false;const b=el.getBoundingClientRect();return b.left<box.left-1||b.top<box.top-1||b.right>box.right+1||b.bottom>box.bottom+1;});
  node.innerHTML=`${icon('square',13)} ${c.width} × ${c.height} px${outside.length?` <button class="overflow-hint" data-action="layers" title="${outside.map(el=>ELEMENTS[el.dataset.element].label).join(', ')}">${outside.length} fuera del lienzo · Capas</button>`:''}`;
 }
-function loadDesign(config,savedId=null){c=sanitizeConfig(config);baseline=structuredClone(c);editingSavedId=savedId;undo=[];redo=[];lastEdit=0;view='designer';context=false;zoom=100;selectedElement=null;cardSelected=false;if(['element','card'].includes(tab))tab='content';persist();render();}
+function loadDesign(config,savedId=null){
+ const prevDateTable=c?.dateTable;
+ const prevDateColumn=c?.dateColumn;
+ const prevDateCustomized=c?._dateCustomized;
+ c=sanitizeConfig(config);
+ if(!savedId){
+  c._measureBound=false;
+  c.measure='';
+  if(!c.measureName||!c.measureName.trim()){
+   const cleanTitle=(c.title||'Medida').replace(/[^\p{L}\p{N}_]/gu,'_').replace(/^_+|_+$/g,'')||'Medida';
+   c.measureName=cleanTitle.startsWith('KPI_')?cleanTitle:`KPI_${cleanTitle}`;
+  }
+ }
+ if(pbipModel){
+  const modelDateTables=pbipModel.dateTables||[];
+  const modelTableNames=(pbipModel.tables||[]).map(t=>t.toLowerCase());
+  const prevFound=modelDateTables.find(dt=>dt.name.toLowerCase()===(prevDateTable||'').trim().toLowerCase())
+   || modelTableNames.includes((prevDateTable||'').trim().toLowerCase());
+  if(prevDateTable&&prevFound){
+   c.dateTable=prevDateTable;
+   c.dateColumn=prevDateColumn||c.dateColumn;
+   c._dateCustomized=true;
+  }else if(modelDateTables.length){
+   const bestDt=modelDateTables.find(dt=>dt.isMarkedDateTable)||modelDateTables.find(dt=>dt.isLikelyCalendar)||modelDateTables[0];
+   if(bestDt){
+    c.dateTable=bestDt.name;
+    c.dateColumn=bestDt.primaryDateColumn||bestDt.dateColumns?.[0]||c.dateColumn;
+    c._dateCustomized=true;
+   }
+  }
+ }else if(prevDateCustomized&&prevDateTable){
+  c.dateTable=prevDateTable;
+  c.dateColumn=prevDateColumn||c.dateColumn;
+  c._dateCustomized=true;
+ }
+ baseline=structuredClone(c);
+ editingSavedId=savedId;
+ undo=[];redo=[];lastEdit=0;view='designer';context=false;zoom=100;selectedElement=null;cardSelected=false;
+ if(['element','card'].includes(tab))tab='content';
+ persist();
+ render();
+}
 function saveCurrent(name){
  name=name.trim();if(!name){toast('Añade un nombre para el diseño.');return false;}
  const id=saved.some(s=>s.id===editingSavedId)?editingSavedId:crypto.randomUUID();

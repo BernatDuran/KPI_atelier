@@ -98,6 +98,9 @@ export function sanitizeConfig(raw={}){
  }
  for(const k of ['decimals','width','height','maxPoints'])c[k]=Math.round(c[k]);
  if(!('progressHeight' in raw)&&c.type==='target')c.progressHeight=8;
+ if('_measureBound' in raw)c._measureBound=raw._measureBound===true;
+ if('_targetCustomized' in raw)c._targetCustomized=raw._targetCustomized===true;
+ if('_dateCustomized' in raw)c._dateCustomized=raw._dateCustomized===true;
  return c;
 }
 export function familyName(type){return FAMILIES.find(f=>f.id===type)?.name??type;}

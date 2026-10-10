@@ -395,6 +395,8 @@ test('Advanced Controls: Element copy-paste duplication, context ribbon mode, co
  closeModal();
 
  // 4. Export modal modern banner
+ c.measure='Total Ventas';
+ c._measureBound=true;
  c.targetMeasure='1000';
  exportModal();
  const expHTML = $('#modal').innerHTML;
@@ -450,6 +452,8 @@ test('Independent duplicate configuration across inspector, data binding and DAX
  closeModal();
 
  // 5. DAX generation emits dedicated variables for duplicates
+ c.measure = 'Total Ventas';
+ c._measureBound = true;
  c.targetMeasure = '1000';
  const dax = generateDAX(c);
  assert.ok(dax.includes('VAR __val_value_copy1 ='));
@@ -583,5 +587,84 @@ test('Circular dependency pre-check prevents injection and flags self-referencin
  fire('document', 'click', { target: button({ action: 'fix-circular-name' }) });
  assert.equal(c.measureName, 'KPI_Horas_Absentismo');
  assert.equal(getCircularConflict(c), null);
+ `);
+});
+
+test('Pixel-perfect alignment guides (diff <= 0.5), live model pre-validation, and template calendar preservation', async () => {
+ const run = await editor();
+ run(`
+ // 1. Pixel-perfect alignment guides: diff <= 0.5 is exact, diff === 1 is NOT exact
+ const card = { width: 440, height: 320 };
+ const padding = 28;
+
+ // diff === 0 -> exact
+ const snap0 = alignmentGuides({ left: 28, top: 40, width: 100, height: 50 }, card, [], padding);
+ assert.equal(snap0.marginSnaps.left, true);
+ assert.equal(snap0.marginSnaps.exact, true);
+ const snap0Line = snap0.lines.find(l => l.kind === 'margin' && l.position === 28);
+ assert.ok(snap0Line);
+ assert.equal(snap0Line.exact, true);
+ assert.ok(snap0Line.label.includes('(0 px)'));
+
+ // diff === 1 -> NOT exact (no false positive across 2 integer pixels)
+ const snap1 = alignmentGuides({ left: 29, top: 40, width: 100, height: 50 }, card, [], padding);
+ assert.equal(snap1.marginSnaps.left, false);
+ assert.equal(snap1.marginSnaps.exact, false);
+ const snap1Line = snap1.lines.find(l => l.kind === 'margin');
+ assert.ok(snap1Line);
+ assert.equal(snap1Line.exact, false);
+ assert.ok(!snap1Line.label.includes('(0 px)'));
+
+ // 2. Template switch: clears c.measure to '', proposes safe measureName, preserves model calendar
+ setPbipModel({
+  isLiveConnection: true,
+  server: 'localhost:50000',
+  database: 'test-db',
+  reportName: 'Finanzas.pbix',
+  measures: [
+   { name: 'Ventas Reales', table: 'FactVentas' },
+   { name: 'Objetivo 2026', table: 'Metas' }
+  ],
+  dateTables: [
+   { name: 'DimCalendar', isMarkedDateTable: true, primaryDateColumn: 'Date', dateColumns: ['Date', 'Year'] }
+  ],
+  tables: ['FactVentas', 'Metas', 'DimCalendar']
+ });
+
+ // Load fresh template
+ const tpl = TEMPLATES.find(t => t.id === 'target-mint') || TEMPLATES[0];
+ loadDesign(tpl.config);
+
+ // c.measure must be empty by default on new template
+ assert.equal(c.measure, '');
+ assert.equal(c._measureBound, false);
+ // c.measureName is safely proposed
+ assert.ok(c.measureName.length > 0);
+ // dateTable and dateColumn are preserved from pbipModel (not dummy 'Calendario')
+ assert.equal(c.dateTable, 'DimCalendar');
+ assert.equal(c.dateColumn, 'Date');
+
+ // 3. Pre-check before live injection: missing or empty measures block injection
+ fire('document', 'click', { target: button({ action: 'inject-live-measure' }) });
+ assert.ok($('#modal').innerHTML.includes('Validación de datos con Power BI'));
+ assert.ok($('#modal').innerHTML.includes('Medida principal'));
+
+ // Click fix action opens data binding modal
+ fire('document', 'click', { target: button({ action: 'fix-missing-model-fields' }) });
+ assert.ok($('#modal').innerHTML.includes('Conectar datos del modelo'));
+
+ // Bind valid model measure
+ applyBindingFieldValue('measure', 'Ventas Reales');
+ assert.equal(c.measure, 'Ventas Reales');
+ assert.equal(c._measureBound, true);
+
+ // Missing target measure blocks injection when required
+ applyBindingFieldValue('targetMeasure', 'MedidaInexistente');
+ fire('document', 'click', { target: button({ action: 'inject-live-measure' }) });
+ assert.ok($('#modal').innerHTML.includes('Validación de datos con Power BI'));
+ assert.ok($('#modal').innerHTML.includes('MedidaInexistente'));
+
+ // Correct target measure
+ applyBindingFieldValue('targetMeasure', 'Objetivo 2026');
  `);
 });
