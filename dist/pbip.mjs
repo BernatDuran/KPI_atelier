@@ -400,7 +400,7 @@ export async function fetchLivePbiStatus(server = '') {
  * Connects to live Power BI Desktop and builds a full model catalog.
  * @param {string} server
  * @param {string} [database]
- * @returns {Promise<{modelName: string, isLiveConnection: boolean, server: string, database: string, tables: string[], measures: Array<{name: string, table: string, expression?: string, configAnnotation?: any}>, dateTables: Array<{name: string, dateColumns: string[], isMarkedDateTable: boolean, primaryDateColumn: string|null, isLikelyCalendar: boolean}>}>}
+ * @returns {Promise<{modelName: string, reportName?: string, isLiveConnection: boolean, server: string, database: string, tables: string[], measures: Array<{name: string, table: string, expression?: string, configAnnotation?: any}>, dateTables: Array<{name: string, dateColumns: string[], isMarkedDateTable: boolean, primaryDateColumn: string|null, isLikelyCalendar: boolean}>}>}
  */
 export async function fetchLivePbiModel(server, database = '') {
   const url = `/api/pbi/model?server=${encodeURIComponent(server)}${database ? `&database=${encodeURIComponent(database)}` : ''}`;
@@ -450,7 +450,7 @@ export async function fetchLivePbiModel(server, database = '') {
 
 /**
  * Injects or updates a DAX measure directly in Power BI Desktop via the bridge.
- * @param {object} payload
+ * @param {any} payload
  * @returns {Promise<{success: boolean, measureName: string, tableName: string, isNew: boolean}>}
  */
 export async function injectMeasureToLivePbi({ server, database, tableName = '_Measures', measureName, daxExpression, formatString = '', configAnnotation = null }) {

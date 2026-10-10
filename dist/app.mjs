@@ -114,17 +114,59 @@ const percentRange=(k,l)=>field(k,l,'range',{min:0,max:100,unit:'%',scale:100});
 const section=(n,label,body,open=true)=>{const key=tab+':'+label;return `<details class="field-section" data-section="${esc(key)}" ${(inspectorSections.get(key)??open)?'open':''}><summary><span><b>${n}</b>${label}</span>${icon('chevron',14)}</summary><div class="section-body">${body}</div></details>`;};
 const formats=[['currency','Moneda'],['number','Número'],['percent','Porcentaje']];
 const comparisons=[['yoy','Año anterior · YoY'],['mom','Mes anterior · MoM'],['previous','Período anterior'],['target','Objetivo'],['custom','Medida de referencia'],['none','Sin comparación']];
+function duplicateContentFields(baseIds){
+ if(!c.elements)return '';
+ const matchingDups=Object.entries(c.elements).filter(([id,st])=>{
+  if(st?.deleted)return false;
+  const def=resolveElementDef(id);
+  return def?.isDuplicate&&baseIds.includes(def.baseId);
+ });
+ if(!matchingDups.length)return '';
+ return matchingDups.map(([dupId,st])=>{
+  const def=resolveElementDef(dupId);
+  let fields='';
+  if(def.baseId==='value'){
+   const curFmt=st.format||c.format;
+   const curCurr=st.currency||c.currency;
+   const curUnit=st.unit||c.unit;
+   const curDec=st.decimals??c.decimals;
+   const curMeas=st.measure!==undefined?st.measure:'';
+   const curSuf=st.suffix!==undefined?st.suffix:(c.suffix||'');
+   fields=`<div class="field"><label for="f-dup-m-${dupId}">Medida del valor</label><input id="f-dup-m-${dupId}" data-dupval="measure" data-dupid="${dupId}" value="${esc(curMeas)}" placeholder="[Nombre de medida]" list="dl-pbip-measures"></div>`+
+    `<div class="field"><label for="f-dup-fmt-${dupId}">Formato del valor</label><select id="f-dup-fmt-${dupId}" data-dupval="format" data-dupid="${dupId}">${formats.map(([k,l])=>`<option value="${k}" ${curFmt===k?'selected':''}>${l}</option>`).join('')}</select></div>`+
+    (curFmt==='currency'?`<div class="field"><label for="f-dup-cur-${dupId}">Moneda</label><select id="f-dup-cur-${dupId}" data-dupval="currency" data-dupid="${dupId}">${[['EUR','Euro · €'],['USD','Dólar · $'],['GBP','Libra · £']].map(([k,l])=>`<option value="${k}" ${curCurr===k?'selected':''}>${l}</option>`).join('')}</select></div>`:'')+
+    `<div class="field-row"><div class="field"><label for="f-dup-u-${dupId}">Escala</label><select id="f-dup-u-${dupId}" data-dupval="unit" data-dupid="${dupId}">${[['auto','Automática'],['none','Sin escalar'],['k','Miles'],['m','Millones']].map(([k,l])=>`<option value="${k}" ${curUnit===k?'selected':''}>${l}</option>`).join('')}</select></div>`+
+    `<div class="field"><label for="f-dup-dec-${dupId}">Decimales</label><select id="f-dup-dec-${dupId}" data-dupval="decimals" data-dupid="${dupId}">${[[0,'0'],[1,'1'],[2,'2'],[3,'3']].map(([k,l])=>`<option value="${k}" ${curDec===k?'selected':''}>${l}</option>`).join('')}</select></div></div>`+
+    `<div class="field"><label for="f-dup-suf-${dupId}">Sufijo del valor</label><input id="f-dup-suf-${dupId}" data-dupval="suffix" data-dupid="${dupId}" value="${esc(curSuf)}" placeholder="ej. € o %"></div>`;
+  }else if(def.baseId==='delta'){
+   const curComp=st.compareMeasure!==undefined?st.compareMeasure:(c.compareMeasure||'');
+   const curMode=st.deltaMode||c.deltaMode;
+   fields=`<div class="field"><label for="f-dup-cmp-${dupId}">Medida de comparación</label><input id="f-dup-cmp-${dupId}" data-dupval="compareMeasure" data-dupid="${dupId}" value="${esc(curComp)}" placeholder="[Medida de referencia]" list="dl-pbip-measures"></div>`+
+    `<div class="field"><label for="f-dup-dm-${dupId}">Mostrar diferencia</label><select id="f-dup-dm-${dupId}" data-dupval="deltaMode" data-dupid="${dupId}">${[['relative','Porcentaje'],['absolute','Diferencia absoluta'],['pp','Puntos porcentuales']].map(([k,l])=>`<option value="${k}" ${curMode===k?'selected':''}>${l}</option>`).join('')}</select></div>`;
+  }else if(def.baseId==='icon'){
+   const curIcon=st.icon||c.icon;
+   fields=`<div class="field"><label for="f-dup-ico-${dupId}">Icono</label><select id="f-dup-ico-${dupId}" data-dupval="icon" data-dupid="${dupId}">${ICON_OPTIONS.map(([k,l])=>`<option value="${k}" ${curIcon===k?'selected':''}>${l}</option>`).join('')}</select></div>`;
+  }else if(['goalLabel','progressLabel','progress'].includes(def.baseId)){
+   const curTarget=st.targetMeasure!==undefined?st.targetMeasure:(c.targetMeasure||'');
+   fields=`<div class="field"><label for="f-dup-tgt-${dupId}">Medida u objetivo</label><input id="f-dup-tgt-${dupId}" data-dupval="targetMeasure" data-dupid="${dupId}" value="${esc(curTarget)}" placeholder="ej. [Objetivo] o 100" list="dl-pbip-measures"></div>`;
+  }else{
+   const currentVal=st.text!==undefined?st.text:(def.contentKey?c[def.contentKey]:def.label);
+   fields=`<div class="field"><label for="f-dup-txt-${dupId}">Texto</label><input id="f-dup-txt-${dupId}" data-duptext="${dupId}" data-dupid="${dupId}" value="${esc(currentVal)}" placeholder="Texto del elemento…"></div>`;
+  }
+  return `<div class="dup-content-card"><header><span>${icon('copy',12)} ${esc(def.label)}</span><small>Elemento duplicado</small></header>${fields}</div>`;
+ }).join('');
+}
 function renderInspector(){
  const remembered=rememberInspector();
  const adv=mode==='advanced',pro=adv;let h='';
  if(tab==='card'&&cardSelected){h=cardInspector();}
  else if(tab==='element'&&selectedElement){h=elementInspector();}
  else if(tab==='content'){
- h+=section('01','Identidad',field('title','Título del KPI')+field('subtitle','Subtítulo')+(pro?field('eyebrow','Etiqueta superior'):'')+select('type','Tipo de tarjeta',FAMILIES.filter(f=>f.id!=='all').map(f=>[f.id,f.name])));
- h+=section('02','Valor principal',select('format','Formato',formats)+(c.format==='currency'?select('currency','Moneda',[['EUR','Euro · €'],['USD','Dólar · $'],['GBP','Libra · £']]):'')+(pro?`<div class="field-row">${select('unit','Escala',[['auto','Automática'],['none','Sin escalar'],['k','Miles'],['m','Millones']])}${select('decimals','Decimales',[[0,'0'],[1,'1'],[2,'2'],[3,'3']])}</div>`:'')+(adv?field('suffix','Sufijo personalizado'):''));
- h+=section('03','Contexto y comparación',select('comparison','Comparar con',comparisons)+select('direction','¿Qué significa mejorar?',[['up','Cuanto más, mejor ↑'],['down','Cuanto menos, mejor ↓'],['neutral','Sin valoración favorable']])+(pro?select('deltaMode','Mostrar diferencia',[['relative','Variación relativa · %'],['absolute','Diferencia absoluta'],['pp','Puntos porcentuales · pp']]):''));
- if(c.type==='status')h+=section('04','Reglas del semáforo',`<p class="field-help">${c.direction==='down'?'Verde ≤ favorable; ámbar ≤ alerta; rojo por encima.':'Verde ≥ favorable; ámbar ≥ alerta; rojo por debajo.'}${c.format==='percent'?' Usa 0,95 para indicar 95 %.':''}</p><div class="field-row">${field('goodThreshold','Umbral favorable','number')}${field('warnThreshold','Umbral de alerta','number')}</div>`+(pro?field('statusGood','Texto favorable')+field('statusWarn','Texto en alerta')+field('statusBad','Texto desfavorable'):''));
- if(pro)h+=section('05','Composición',check('showIcon','Mostrar icono')+(c.showIcon?iconPickerField():'')+check('showSubtitle','Mostrar subtítulo')+check('showComparison','Mostrar comparativa')+(['spark','executive','target'].includes(c.type)?check('showTrend','Mostrar gráfico'):'')+(c.type==='executive'?check('showGoal','Mostrar objetivo'):'')+check('showFooter','Mostrar pie')+(adv?field('footer','Texto del pie'):''),false);
+ h+=section('01','Identidad',field('title','Título del KPI')+field('subtitle','Subtítulo')+(pro?field('eyebrow','Etiqueta superior'):'')+select('type','Tipo de tarjeta',FAMILIES.filter(f=>f.id!=='all').map(f=>[f.id,f.name]))+duplicateContentFields(['title','subtitle','eyebrow']));
+ h+=section('02','Valor principal',select('format','Formato',formats)+(c.format==='currency'?select('currency','Moneda',[['EUR','Euro · €'],['USD','Dólar · $'],['GBP','Libra · £']]):'')+(pro?`<div class="field-row">${select('unit','Escala',[['auto','Automática'],['none','Sin escalar'],['k','Miles'],['m','Millones']])}${select('decimals','Decimales',[[0,'0'],[1,'1'],[2,'2'],[3,'3']])}</div>`:'')+(adv?field('suffix','Sufijo personalizado'):'')+duplicateContentFields(['value']));
+ h+=section('03','Contexto y comparación',select('comparison','Comparar con',comparisons)+select('direction','¿Qué significa mejorar?',[['up','Cuanto más, mejor ↑'],['down','Cuanto menos, mejor ↓'],['neutral','Sin valoración favorable']])+(pro?select('deltaMode','Mostrar diferencia',[['relative','Variación relativa · %'],['absolute','Diferencia absoluta'],['pp','Puntos porcentuales · pp']]):'')+duplicateContentFields(['delta','referenceValue','compareLabel','referenceLabel']));
+ if(c.type==='status')h+=section('04','Reglas del semáforo',`<p class="field-help">${c.direction==='down'?'Verde ≤ favorable; ámbar ≤ alerta; rojo por encima.':'Verde ≥ favorable; ámbar ≥ alerta; rojo por debajo.'}${c.format==='percent'?' Usa 0,95 para indicar 95 %.':''}</p><div class="field-row">${field('goodThreshold','Umbral favorable','number')}${field('warnThreshold','Umbral de alerta','number')}</div>`+(pro?field('statusGood','Texto favorable')+field('statusWarn','Texto en alerta')+field('statusBad','Texto desfavorable'):'')+duplicateContentFields(['status']));
+ if(pro)h+=section('05','Composición',check('showIcon','Mostrar icono')+(c.showIcon?iconPickerField():'')+check('showSubtitle','Mostrar subtítulo')+check('showComparison','Mostrar comparativa')+(['spark','executive','target'].includes(c.type)?check('showTrend','Mostrar gráfico'):'')+(c.type==='executive'?check('showGoal','Mostrar objetivo'):'')+check('showFooter','Mostrar pie')+(adv?field('footer','Texto del pie'):'')+duplicateContentFields(['icon','footer','goalLabel','progressLabel','progress']),false);
  }else if(tab==='style'){
  h+=section('01','Paleta',`<button class="palette-launch" data-action="themes">${icon('palette',17)}<span>Estudio de color<small>Crea, ajusta y guarda tus temas</small></span>${icon('arrow',15)}</button><div class="theme-grid">${Object.entries(THEMES).map(([k,t])=>`<button data-theme="${k}" class="theme-option ${c.theme===k?'active':''}"><span style="background:${t.background};border-color:${t.borderColor}"><i style="background:${t.accent}"></i></span>${t.name}</button>`).join('')}</div>`+field('accent','Color de acento','color')+(pro?`<div class="field-row">${field('background','Fondo','color')}${field('text','Texto','color')}</div>`:'')+(adv?field('muted','Texto secundario','color'):'')+(pro?`<div class="field-row">${field('positive','Favorable','color')}${field('negative','Desfavorable','color')}</div>`:'')+(adv?field('warning','Alerta','color'):''));
  h+=section('02','Forma y tamaño',cardDimensionsPanel()+layoutPanel()+range('radius','Radio de esquinas',0,40)+(pro?range('padding','Espacio interior',12,48)+(['solid','aurora'].includes(c.surfaceEffect)?select('shadow','Sombra',[['none','Sin sombra'],['soft','Suave'],['strong','Profunda']]):''):'')+(adv?range('borderWidth','Grosor del borde',0,4)+field('borderColor','Color del borde','color'):''));
@@ -267,7 +309,7 @@ function exportModal(){
  const injectBtn=isLive?`<button class="button primary btn-inject" data-action="inject-live-measure">${icon('sparkles',14)}<span>Crear en Power BI</span></button>`:'';
  openModal('Tu diseño. Tu medida DAX.','Copia, pega y deja que tus datos hagan el resto.',`<div class="export-banner ${isLive?'is-live':''}">${icon(isLive?'sparkles':'code',15)}<span>${isLive?`Conectado en vivo a '${esc(getFriendlyReportName(pbipModel))}' · Inyección directa disponible`:'Medida DAX lista · Compatible con HTML Content Secure en Power BI'}</span></div><div class="code-bar"><span>${icon('code',15)} ${esc(c.measureName)}.dax</span><span>${dax.split('\n').length} líneas · DAX estándar</span></div><pre class="dax-code" tabindex="0"><code>${esc(dax)}</code></pre><div class="export-notice">${icon('info',16)}<p>${isLive?'La medida se inyectará de forma automática en tu modelo de Power BI Desktop respetando tablas y relaciones existentes. También puedes copiar el código manualmente si lo prefieres.':'Copia el código DAX o descárgalo para usarlo en tu modelo. En Power BI Desktop, añade el visual HTML Content Secure y arrastra esta medida al campo de valores.'}</p></div>`,`<div class="export-other">${btn('download-json','Configuración JSON','download','button quiet')}${btn('download-html','Vista HTML','download','button quiet')}</div><div class="export-main">${injectBtn}${btn('download-dax','Descargar .dax','download','button secondary')}${btn('copy-dax','Copiar DAX','copy',isLive?'button secondary':'button primary')}</div>`,'export-modal');
 }
-function validationModal(){openModal('Revisión de tu tarjeta','Un último vistazo antes de llevarla a Power BI.',`<div class="check-list">${checks(c).map(x=>`<div class="check-item ${x.level}">${icon(x.level==='error'?'close':x.level==='warning'?'info':'check',17)}<span>${esc(x.text)}</span>${x.level==='error'&&x.field?`<button type="button" class="check-fix-btn" data-action="fix-check-issue" data-field="${esc(x.field)}" title="Ir a corregir este campo"><span>Corregir</span>${icon('arrow',11)}</button>`:''}</div>`).join('')}</div><div class="export-notice"><p>Esta revisión comprueba la configuración, no ejecuta consultas contra tu modelo.</p></div>`,btn('close-modal','Seguir editando',null,'button primary'));}
+function validationModal(){openModal('Revisión de tu tarjeta','Un último vistazo antes de llevarla a Power BI.',`<div class="check-list">${checks(c).map(x=>`<div class="check-item ${x.level}">${icon(x.level==='error'?'close':x.level==='warning'?'info':'check',17)}<span>${esc(x.text)}</span>${(x.level==='error'||x.level==='warning')&&x.field?`<button type="button" class="check-fix-btn" data-action="fix-check-issue" data-field="${esc(x.field)}" title="Ir a corregir este campo"><span>Corregir</span>${icon('arrow',11)}</button>`:''}</div>`).join('')}</div><div class="export-notice"><p>Esta revisión comprueba la configuración, no ejecuta consultas contra tu modelo.</p></div>`,btn('close-modal','Seguir editando',null,'button primary'));}
 function guide(){openModal('Del diseño a Power BI','Tu primera tarjeta, en cuatro pasos.',`<div class="guide-grid"><article><b>01</b><h3>Encuentra tu tarjeta y afina la estructura</h3><p>Explora las ${TEMPLATES.length} plantillas curadas organizadas en familias temáticas. El modo <strong>Esencial</strong> se enfoca en métricas y estilo directo; el modo <strong>Avanzado</strong> desbloquea control tipográfico, pesos y bordes al píxel. Puedes redimensionar la tarjeta o sus elementos con los puntos de arrastre de esquina (con ajuste adaptativo inteligente), o duplicar elementos con <kbd>Ctrl+C</kbd> y <kbd>Ctrl+V</kbd>.</p></article><article><b>02</b><h3>Conecta datos de tu modelo Power BI</h3><p>Vincula tus medidas reales desde <strong>Conectar datos</strong>. La app se conecta en tiempo real a tu sesión abierta de <strong>Power BI Desktop</strong> (localhost) o mediante carpetas PBIP/Fabric. Detecta automáticamente tablas calendario oficiales marcadas con <em>isKey</em> o <em>dataCategory: Time</em>, facilitando comparativas de tiempo YoY y MoM sin escribir fórmulas complejas.</p></article><article><b>03</b><h3>Genera e inyecta la medida DAX</h3><p>Pulsa <strong>Crear en Power BI</strong> para escribir la medida directamente en la memoria de tu informe abierto con un solo clic. Si lo prefieres, copia el código DAX optimizado o descárgalo en archivo <code>.dax</code>. El DAX generado calcula dinámicamente el HTML, los SVG vectoriales incrustados y los formatos numéricos y condicionales de tu tarjeta.</p></article><article><b>04</b><h3>Renderiza con HTML Content Secure</h3><p>En Power BI Desktop, agrega el visual certificado <strong>HTML Content Secure</strong> (disponible en AppSource). Arrastra tu nueva medida al campo <em>Values</em> del visual, ajusta el ancho y alto del contenedor al tamaño diseñado (ej. ${c.width} × ${c.height} px) y desactiva el relleno predeterminado del objeto visual para un acabado impecable.</p></article></div><details class="guide-details" open><summary>Manipulación directa del lienzo y atajos de teclado</summary><p>• <strong>Selección y arrastre:</strong> Haz clic en cualquier elemento para seleccionarlo y arrástralo libremente por la tarjeta o usa las flechas del teclado (paso configurable de 1 o 5 px).</p><p>• <strong>Puntos de arrastre de esquina:</strong> El asa superior izquierda (<em>handle-nw</em>) y la inferior derecha (<em>handle-se</em>) redimensionan el ancho y alto de los elementos manteniendo los límites de forma independiente.</p><p>• <strong>Copiar y pegar (<kbd>Ctrl+C</kbd> / <kbd>Ctrl+V</kbd>):</strong> Duplica al instante elementos de texto, iconos o etiquetas para crear composiciones ricas con límites seguros por tarjeta.</p><p>• <strong>Guías de alineación (regla):</strong> Muestran en tiempo real la distancia respecto a márgenes de seguridad, centros y elementos adyacentes.</p><p>• <strong>Capas:</strong> Reordena la superposición visual de los elementos (traer al frente o enviar al fondo), ocúltalos o elimínalos con total reversibilidad.</p></details><details class="guide-details"><summary>Superficies, efectos visuales y modo "En contexto"</summary><p>• <strong>Efectos de superficie:</strong> Dale personalidad a tu tarjeta con estilos como <em>Cristal translúcido (Glassmorphism)</em>, <em>Aurora</em>, <em>Relieve suave</em> o fondos sólidos neutros.</p><p>• <strong>Vista "En contexto":</strong> Previsualiza tu tarjeta integrada dentro de un panel ejecutivo completo a resolución <strong>1280 × 720 px</strong> o <strong>1920 × 1080 px</strong>, con zoom real 1:1 y desplazamiento panorámico para validar proporciones y jerarquía visual.</p></details><details class="guide-details"><summary>Semáforos, objetivos y comparativas temporales</summary><p>• <strong>Lógica condicional:</strong> Configura si un valor favorable implica incremento (↑) o decremento (↓), definiendo umbrales de advertencia y colores semafóricos dinámicos.</p><p>• <strong>Comparativas YoY y MoM:</strong> Utilizan la función <code>EDATE</code> para contrastar con precisión períodos equivalentes sobre tu dimensión calendario.</p></details>`,btn('close-modal','Empezar a diseñar','arrow','button primary'),'guide-modal');}
 function download(name,text,type){const url=URL.createObjectURL(new Blob([text],{type}));const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('Archivo preparado para descargar.');}
 const filename=()=>c.measureName.trim().replace(/[^\p{L}\p{N}_-]/gu,'_')||'kpi-atelier';
@@ -277,25 +319,31 @@ app.addEventListener('input',e=>{
  const t=e.target;
  if(t.type==='number')return;
  if(t.id==='template-search'||t.id==='gallery-search'){query=t.value;$(t.id==='template-search'?'#rail-cards':'#gallery-grid').innerHTML=t.id==='template-search'?railCards():galleryCards();fitThumbs();return;}
- if(t.dataset.duptext&&selectedElement){
+ if(t.dataset.duptext){
   const now=Date.now();if(now-lastEdit>700)record();lastEdit=now;
-  const id=t.dataset.duptext;
+  const id=t.dataset.dupid||t.dataset.duptext;
   const next=updateElement(c,id,{text:t.value});
   c=sanitizeConfig(next);persist();refreshCard();updateHistoryButtons();return;
  }
- if(t.dataset.dupsize&&selectedElement){
-  const now=Date.now();if(now-lastEdit>700)record();lastEdit=now;
-  const id=t.dataset.dupsize,val=Number(t.value);
-  if(t.nextElementSibling&&t.nextElementSibling.tagName==='OUTPUT')t.nextElementSibling.textContent=val+'px';
-  const next=updateElement(c,id,{size:val});
-  c=sanitizeConfig(next);persist();refreshCard();updateHistoryButtons();return;
+ if(t.dataset.dupsize){
+  const id=t.dataset.dupid||t.dataset.dupsize||selectedElement;
+  if(id){
+   const now=Date.now();if(now-lastEdit>700)record();lastEdit=now;
+   const val=Number(t.value);
+   if(t.nextElementSibling&&t.nextElementSibling.tagName==='OUTPUT')t.nextElementSibling.textContent=val+'px';
+   const next=updateElement(c,id,{size:val});
+   c=sanitizeConfig(next);persist();refreshCard();updateHistoryButtons();return;
+  }
  }
- if(t.dataset.dupval&&selectedElement){
-  const now=Date.now();if(now-lastEdit>700)record();lastEdit=now;
-  const prop=t.dataset.dupval;let val=t.value;
-  if(prop==='decimals')val=Number(val);
-  const next=updateElement(c,selectedElement,{[prop]:val});
-  c=sanitizeConfig(next);persist();refreshCard();updateHistoryButtons();return;
+ if(t.dataset.dupval){
+  const id=t.dataset.dupid||selectedElement;
+  if(id){
+   const now=Date.now();if(now-lastEdit>700)record();lastEdit=now;
+   const prop=t.dataset.dupval;let val=t.value;
+   if(prop==='decimals')val=Number(val);
+   const next=updateElement(c,id,{[prop]:val});
+   c=sanitizeConfig(next);persist();refreshCard();updateHistoryButtons();return;
+  }
  }
  if(t.dataset.elprop&&selectedElement){
   const now=Date.now();if(now-lastEdit>700)record();lastEdit=now;
@@ -318,11 +366,14 @@ app.addEventListener('change',e=>{
  const t=e.target;
  if(t.type==='number'&&(t.dataset.key||t.dataset.elprop)){commitNumber(t);return;}
  if(t.id==='family-filter'){filter=t.value;$('#rail-cards').innerHTML=railCards();fitThumbs();return;}
- if(t.dataset.dupval&&selectedElement){
-  const prop=t.dataset.dupval;let val=t.value;
-  if(prop==='decimals')val=Number(val);
-  const next=updateElement(c,selectedElement,{[prop]:val});
-  c=sanitizeConfig(next);persist();refreshCard();renderInspector();updateHistoryButtons();return;
+ if(t.dataset.dupval){
+  const id=t.dataset.dupid||selectedElement;
+  if(id){
+   const prop=t.dataset.dupval;let val=t.value;
+   if(prop==='decimals')val=Number(val);
+   const next=updateElement(c,id,{[prop]:val});
+   c=sanitizeConfig(next);persist();refreshCard();renderInspector();updateHistoryButtons();return;
+  }
  }
  if(t.dataset.appearance&&selectedElement){if(t.tagName==='SELECT')renderInspector();else if(t.dataset.hex!==undefined&&t.getAttribute('aria-invalid')==='true')toast('Escribe un color HEX de 6 caracteres, por ejemplo #477568.');return;}
  if(t.dataset.elprop&&selectedElement){t.value=elementState(c,selectedElement)[t.dataset.elprop];renderInspector();}
@@ -451,6 +502,21 @@ document.addEventListener('click',e=>{
   closeModal();
   if(['measure','measureName','dateTable','dateColumn','targetMeasure','compareMeasure'].includes(field)){
    openDataBindingModal(field);
+  }else if(field.startsWith('dup_')){
+   const matchedDupId=Object.keys(c.elements||{}).find(id=>field.startsWith(`dup_${id}_`));
+   if(matchedDupId){
+    selectElement(matchedDupId,true);
+    const subProp=field.replace(`dup_${matchedDupId}_`,'');
+    tab='element';
+    render();
+    const targetNode=$(`[data-dupval="${subProp}"]`)||$(`[data-duptext="${matchedDupId}"]`);
+    if(targetNode){
+     targetNode.focus();
+     targetNode.select?.();
+    }
+    toast('Corrige el campo del elemento duplicado para continuar.');
+    return;
+   }
   }else{
    tab=(field==='title'||field==='goodThreshold'?'content':'style');
    render();
@@ -568,6 +634,33 @@ document.addEventListener('click',e=>{
       const colExists=foundDt.dateColumns.some(col=>col.toLowerCase()===rawCol.toLowerCase());
       if(!colExists){
        missingItems.push({type:'Columna de fecha',detail:`La columna '${rawCol}' no existe en la tabla '${foundDt.name}' de tu informe.`});
+      }
+     }
+    }
+   }
+
+   // 5. Medidas en elementos duplicados
+   for(const [dupId, dupState] of Object.entries(c.elements||{})){
+    if(dupState?.deleted) continue;
+    const def = resolveElementDef(dupId);
+    if(dupState?.measure){
+     const cleanDupM=dupState.measure.replace(/^[\[\]]/g,'').trim().toLowerCase();
+     if(cleanDupM && !modelMeasureNames.includes(cleanDupM)){
+      missingItems.push({type:`Elemento duplicado '${def?.label||dupId}'`,detail:`La medida [${dupState.measure.trim()}] no existe en tu informe de Power BI.`});
+     }
+    }
+    if(dupState?.compareMeasure){
+     const cleanDupC=dupState.compareMeasure.replace(/^[\[\]]/g,'').trim().toLowerCase();
+     if(cleanDupC && !modelMeasureNames.includes(cleanDupC)){
+      missingItems.push({type:`Elemento duplicado '${def?.label||dupId}'`,detail:`La medida de comparación [${dupState.compareMeasure.trim()}] no existe en tu informe de Power BI.`});
+     }
+    }
+    if(dupState?.targetMeasure){
+     const rawTarget=(dupState.targetMeasure||'').trim();
+     if(rawTarget && !/^-?\d+(\.\d+)?$/.test(rawTarget)){
+      const cleanDupT=rawTarget.replace(/^[\[\]]/g,'').toLowerCase();
+      if(!modelMeasureNames.includes(cleanDupT)){
+       missingItems.push({type:`Elemento duplicado '${def?.label||dupId}'`,detail:`La medida objetivo [${rawTarget}] no existe en tu informe de Power BI.`});
       }
      }
     }
@@ -835,12 +928,26 @@ function copySelectedElements(){
  clipboardElements=targets.map(id=>{
   const p=elementState(c,id);
   const def=resolveElementDef(id)||ELEMENTS[id];
+  const isVal=def?.baseId==='value'||id==='value';
+  const isDel=def?.baseId==='delta'||id==='delta';
   return {
    id,
    baseId:def?.baseId||id,
    state:structuredClone(p),
    text:p.text!==undefined?p.text:(def?.contentKey?c[def.contentKey]:''),
    icon:p.icon||c.icon,
+   valProps:isVal?{
+    format:p.format||c.format,
+    currency:p.currency||c.currency,
+    unit:p.unit||c.unit,
+    decimals:p.decimals??c.decimals,
+    suffix:p.suffix!==undefined?p.suffix:(c.suffix||''),
+    measure:p.measure!==undefined?p.measure:(c.measure||'')
+   }:{},
+   deltaProps:isDel?{
+    deltaMode:p.deltaMode||c.deltaMode,
+    compareMeasure:p.compareMeasure!==undefined?p.compareMeasure:(c.compareMeasure||'')
+   }:{},
    label:def?.label||id
   };
  });
@@ -887,6 +994,8 @@ function pasteElements(){
   };
   const newElState={
    ...item.state,
+   ...item.valProps,
+   ...item.deltaProps,
    x:0,
    y:0,
    hidden:false,
@@ -1204,7 +1313,7 @@ function elementInspector(){
  section('01','Apariencia',elementAppearancePanel(id))+
  section('02','Contenido del elemento',specific)+
  section('03','Posición y tamaño',`<div class="field-row">${geom('x','Desplazamiento X · px',p.x,-1000,1000)}${geom('y','Desplazamiento Y · px',p.y,-1000,1000)}</div><p class="geometry-note">Posición independiente: el tamaño no mueve otros elementos ni la tarjeta. Flechas: ${moveStep} px · Mayús: ${moveStep===1?5:1} px.</p>`+sizeRange+geom('width','Ancho del elemento · px',p.width,0,800)+`<p class="geometry-note">Ancho 0 = ${p.frame?(def.kind==='icon'?'tamaño del icono':'ancho al desplazarlo'):'automático'}. Asa lateral: ancho; esquina: tamaño.</p>`+(p.frame?btn('release-element','Volver a posición de plantilla','restore','button quiet appearance-reset')+`<p class="geometry-note">Recupera su posición y ancho de plantilla sin cambiar los demás elementos.</p>`:''))+
- section('04','Visibilidad',`<div class="element-action-row">${btn(p.deleted?'restore-element':'hide-element',p.deleted?'Restaurar':hidden?'Mostrar':'Ocultar',p.deleted?'restore':hidden?'eye':'eyeOff','button secondary')}${!p.deleted?btn('delete-element','Eliminar','trash','button quiet'):''}</div><p class="field-help">Ocultar conserva el espacio. Eliminar retira el elemento. Puedes recuperarlo desde Capas o Deshacer.</p>${btn('reset-element','Restablecer este elemento','reset','button quiet')}`);
+ section('04','Visibilidad',`<div class="element-action-row">${btn(p.deleted?'restore-element':'hide-element',p.deleted?'Restaurar':hidden?'Mostrar':'Ocultar',p.deleted?'restore':hidden?'eye':'eyeOff','button secondary')}${!p.deleted?btn('delete-element','Eliminar','trash','button quiet'):''}</div><p class="field-help">Ocultar conserva el espacio. Eliminar retira el elemento. Puedes recuperarlo con Deshacer.</p>${btn('reset-element','Restablecer este elemento','reset','button quiet')}`);
 }
 function selectElement(id,focus=true,toggle=false){
  if(!ELEMENTS[id])return;
@@ -1240,20 +1349,21 @@ function renderCanvasBar(){
  }
  const layerScroll=bar.querySelector('.layers-popover')?.scrollTop||0;
  const isMulti=selectedElements.size>1;
- const labelText=isMulti?`Selección múltiple (${selectedElements.size})`:selectedElement?ELEMENTS[selectedElement].label:cardSelected?'Tarjeta seleccionada':'Selecciona un elemento';
- const formatPainterBtn=selectedElement&&!isMulti?`<button class="format-painter-btn ${formatPainterSource?'active':''}" data-action="format-painter" title="${formatPainterSource?'Copiar formato activo (clic en otro elemento para aplicar)':`Copiar formato de ${ELEMENTS[selectedElement].label}`}">${icon('brush',14)}<span>${formatPainterSource?'Copiando…':'Copiar formato'}</span></button>`:'';
+ const def=selectedElement?(resolveElementDef(selectedElement)||ELEMENTS[selectedElement]):null;
+ const labelText=isMulti?`Selección múltiple (${selectedElements.size})`:def?def.label:cardSelected?'Tarjeta seleccionada':'Selecciona un elemento';
+ const formatPainterBtn=selectedElement&&!isMulti?`<button class="icon-btn format-painter-btn ${formatPainterSource?'active':''}" data-action="format-painter" title="${formatPainterSource?'Copiar formato activo · Haz clic en otro elemento para aplicar (Esc para cancelar)':`Copiar formato de ${def?.label||selectedElement}`}" aria-pressed="${Boolean(formatPainterSource)}">${icon('brush',13)}</button>`:'';
  const elementActions=selectedElement?`${ib('smaller-element','Reducir tamaño','minus')}${ib('bigger-element','Aumentar tamaño','plus')}${ib('hide-element',elementState(c,selectedElement).hidden?'Mostrar elemento':'Ocultar elemento','eyeOff')}${ib('delete-element','Eliminar elemento','trash')}${formatPainterBtn}`:'';
  bar.innerHTML=`<div class="canvas-object-label">${icon(selectedElement?'cursor':'move',13)}<span>${labelText}</span></div><div class="canvas-object-actions"><button class="card-select-btn ${cardSelected?'active':''}" data-action="select-card" aria-pressed="${cardSelected}" title="Seleccionar tarjeta y ajustar bordes / tamaño">${icon('card',14)}<span>Tarjeta</span></button>${elementActions}<div class="pixel-step" aria-label="Paso de movimiento"><button data-move-step="1" class="${moveStep===1?'active':''}" aria-pressed="${moveStep===1}" title="Mover de 1 en 1 píxel con las flechas">1 px</button><button data-move-step="5" class="${moveStep===5?'active':''}" aria-pressed="${moveStep===5}" title="Mover de 5 en 5 píxeles con las flechas">5 px</button></div>${ib('guides',guidesEnabled?'Ocultar guías de alineación (regla)':'Mostrar guías de alineación (regla)','ruler',`aria-pressed="${guidesEnabled}" title="${guidesEnabled?'Ocultar guías de alineación (regla)':'Mostrar guías de alineación (regla)'}"`)}<button class="layers-button ${layersOpen?'active':''}" data-action="layers" aria-expanded="${layersOpen}" title="Ver y reordenar capas">${icon('layers',14)}<span>Capas</span></button></div>${layersOpen?layersPanel():''}`;
  const popup=bar.querySelector('.layers-popover');if(popup)popup.scrollTop=layerScroll;
 }
 function layersPanel(){
- const ids=layerOrder(c).filter(id=>elementAvailable(c,id));
+ const ids=layerOrder(c).filter(id=>elementAvailable(c,id)&&!elementState(c,id).deleted);
  return `<div class="layers-popover" role="region" aria-label="Capas de la tarjeta"><div class="layers-heading"><strong>Elementos de la tarjeta</strong>${ib('layers','Cerrar capas','close')}</div><p class="layers-hint">Arriba = delante <span>Arrastra o usa ↑ ↓</span></p>${ids.map((id,index)=>{
-  const state=elementState(c,id),visible=elementVisible(c,id),label=ELEMENTS[id].label;
+  const state=elementState(c,id),visible=elementVisible(c,id),def=resolveElementDef(id)||ELEMENTS[id],label=def?.label||id;
   const isConfirming=deleteConfirmLayer===id;
   const isSelected=selectedElements.has(id);
-  const deleteBtn=!state.deleted?`<button class="layer-delete ${isConfirming?'confirming':''}" data-layer-delete="${id}" title="${isConfirming?'Clic para confirmar eliminación':'Eliminar capa'}" aria-label="Eliminar ${label}">${isConfirming?'¿Borrar?':icon('trash',13)}</button>`:'';
-  return `<div class="layer-row ${isSelected?'active':''} ${state.deleted?'deleted':''}" data-layer-row="${id}"><button class="layer-drag" draggable="true" data-layer-drag="${id}" aria-label="Arrastrar capa ${label}" title="Arrastrar · Alt + ↑/↓ para ordenar">${icon('grip',13)}</button><button class="layer-select" data-select-element="${id}" aria-pressed="${isSelected}">${icon(ELEMENTS[id].kind==='text'?'text':id==='icon'?c.icon:id==='trend'?'trend':'signal',14)}<span>${label}<small>${state.deleted?'Eliminado':visible?'Visible':'Oculto'}${state.frame?' · Posición libre':''}</small></span></button><div class="layer-controls"><button class="layer-order-button" data-layer-id="${id}" data-layer-move="-1" ${index===0?'disabled':''} title="Subir: traer delante" aria-label="Subir capa ${label}">${icon('arrowUp',13)}</button><button class="layer-order-button" data-layer-id="${id}" data-layer-move="1" ${index===ids.length-1?'disabled':''} title="Bajar: enviar detrás" aria-label="Bajar capa ${label}">${icon('arrowDown',13)}</button><button class="layer-visibility" data-layer-visibility="${id}" title="${state.deleted?'Restaurar':visible?'Ocultar':'Mostrar'}" aria-label="${state.deleted?'Restaurar':visible?'Ocultar':'Mostrar'} ${label}">${icon(state.deleted?'restore':visible?'eye':'eyeOff',15)}</button>${deleteBtn}</div></div>`;
+  const deleteBtn=`<button class="layer-delete ${isConfirming?'confirming':''}" data-layer-delete="${id}" title="${isConfirming?'Clic para confirmar eliminación':'Eliminar capa'}" aria-label="Eliminar ${label}">${isConfirming?'¿Borrar?':icon('trash',13)}</button>`;
+  return `<div class="layer-row ${isSelected?'active':''}" data-layer-row="${id}"><button class="layer-drag" draggable="true" data-layer-drag="${id}" aria-label="Arrastrar capa ${label}" title="Arrastrar · Alt + ↑/↓ para ordenar">${icon('grip',13)}</button><button class="layer-select" data-select-element="${id}" aria-pressed="${isSelected}">${icon(def?.kind==='text'?'text':id==='icon'||def?.kind==='icon'?(state.icon||c.icon):id==='trend'||def?.kind==='chart'?'trend':'signal',14)}<span>${label}<small>${visible?'Visible':'Oculto'}${state.frame?' · Posición libre':''}</small></span></button><div class="layer-controls"><button class="layer-order-button" data-layer-id="${id}" data-layer-move="-1" ${index===0?'disabled':''} title="Subir: traer delante" aria-label="Subir capa ${label}">${icon('arrowUp',13)}</button><button class="layer-order-button" data-layer-id="${id}" data-layer-move="1" ${index===ids.length-1?'disabled':''} title="Bajar: enviar detrás" aria-label="Bajar capa ${label}">${icon('arrowDown',13)}</button><button class="layer-visibility" data-layer-visibility="${id}" title="${visible?'Ocultar':'Mostrar'}" aria-label="${visible?'Ocultar':'Mostrar'} ${label}">${icon(visible?'eye':'eyeOff',15)}</button>${deleteBtn}</div></div>`;
  }).join('')}<p class="layers-footnote">El orden cambia la superposición, conserva las posiciones.</p></div>`;
 }
 function commitLayerOrder(next,id,direction=null){
@@ -1344,13 +1454,13 @@ function elementAction(action){
    for(const selId of selectedElements){
     next=updateElement(next,selId,{deleted:true,hidden:false});
    }
-   toast(`${count} elementos eliminados. Recupéralos desde Capas o Deshacer.`);
+   toast(`${count} elementos eliminados. Recupéralos con Deshacer (Ctrl+Z).`);
    selectedElements.clear();
    selectedElement=null;
    directChange(next);
    return;
   }
-  next=updateElement(c,id,{deleted:true,hidden:false});toast('Elemento eliminado. Recupéralo desde Capas o Deshacer.');
+  next=updateElement(c,id,{deleted:true,hidden:false});toast('Elemento eliminado. Recupéralo con Deshacer (Ctrl+Z).');
  }
  if(action==='restore-element')next=restoreElement(c,id);
  if(action==='release-element')next=releaseElement(c,id);

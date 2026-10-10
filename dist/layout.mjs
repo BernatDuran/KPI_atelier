@@ -21,7 +21,12 @@ export function presetFrames(c){
  return f;
 }
 export function elementFrame(c,id){return elementState(c,id).frame||presetFrames(c)[id];}
-export function freezeLayout(c){const frames=presetFrames(c);return {...c,elements:Object.fromEntries(ELEMENT_IDS.map(id=>[id,{...elementState(c,id),frame:elementState(c,id).frame||frames[id]}]))};}
+export function freezeLayout(c){
+ const frames=presetFrames(c);
+ const baseEntries=ELEMENT_IDS.map(id=>[id,{...elementState(c,id),frame:elementState(c,id).frame||frames[id]}]);
+ const dupEntries=Object.keys(c.elements||{}).filter(id=>id.includes('_copy')).map(id=>[id,{...elementState(c,id)}]);
+ return {...c,elements:Object.fromEntries([...baseEntries,...dupEntries])};
+}
 export function adaptiveResizeCard(c,width=c.width,height=c.height){
  const targetW=clamp(Math.round(width),...CARD_LIMITS.width);
  const targetH=clamp(Math.round(height),...CARD_LIMITS.height);
@@ -82,6 +87,32 @@ export function adaptiveResizeCard(c,width=c.width,height=c.height){
    if(newF.top<p)newF.top=p;
    const maxBottom=targetH-c.borderWidth;
    if(newF.top+newF.height>maxBottom){newF.top=Math.max(p,maxBottom-newF.height);}
+  }
+  updated[id]={...state,frame:newF};
+ }
+ const dupIds=Object.keys(c.elements||{}).filter(id=>id.includes('_copy'));
+ for(const id of dupIds){
+  const state=elementState(c,id);
+  const curF=state.frame;
+  if(!curF)continue;
+  const relLeft=Math.max(0,curF.left-p);
+  const newLeft=Math.max(p,p+Math.round(relLeft*rW));
+  const relTop=Math.max(0,curF.top-p);
+  const newTop=Math.max(p,p+Math.round(relTop*rH));
+  let newWidth=Math.max(20,Math.round(curF.width*(Math.abs(curF.width-oldAvailW)<40?1:rW)));
+  let newF={...curF,left:newLeft,top:newTop,width:newWidth,height:curF.height};
+  const maxRight=targetW-p-c.borderWidth;
+  if(newF.left+newF.width>maxRight){
+   if(newF.width>maxRight-p){
+    newF.width=Math.max(20,maxRight-p);
+    newF.left=p;
+   }else{
+    newF.left=Math.max(p,maxRight-newF.width);
+   }
+  }
+  const maxBottom=targetH-c.borderWidth;
+  if(newF.top+newF.height>maxBottom){
+   newF.top=Math.max(p,maxBottom-newF.height);
   }
   updated[id]={...state,frame:newF};
  }

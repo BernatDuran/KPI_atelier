@@ -1,4 +1,4 @@
-import {sanitizeElements,ELEMENTS,SIZE_LIMITS,elementEnabled,elementState,DEFAULT_LAYER_ORDER,sanitizeLayerOrder} from './elements.mjs';
+import {sanitizeElements,ELEMENTS,SIZE_LIMITS,elementEnabled,elementState,DEFAULT_LAYER_ORDER,sanitizeLayerOrder,resolveElementDef} from './elements.mjs';
 import {ICON_OPTIONS} from './icons.mjs';
 export const FAMILIES = [
  {id:'all',name:'Todas las tarjetas',icon:'grid'}, {id:'basic',name:'KPI esenciales',icon:'square'},
@@ -16,7 +16,8 @@ export const BASE = {
  goodThreshold:.95,warnThreshold:.8,statusGood:'En objetivo',statusWarn:'En seguimiento',statusBad:'Requiere atención',
  sampleValue:1245800,samplePrevious:1087500,sampleTarget:1400000,sampleSeries:'66,72,65,83,80,93,87,108,102,120,115,138',sampleScenario:'normal',
  surfaceEffect:'solid',effectIntensity:35,glassOpacity:70,glassBlur:16,effectColorMode:'theme',effectColor:'#8771bb',
- elements:{},layerOrder:DEFAULT_LAYER_ORDER,eyebrowSize:9,iconSize:20,subtitleSize:11,deltaSize:12,compareLabelSize:11,goalSize:11,progressSize:11,progressHeight:4,statusSize:12,referenceSize:11,referenceValueSize:11,footerSize:9,periodSize:9,customThemeName:''
+ elements:{},layerOrder:DEFAULT_LAYER_ORDER,eyebrowSize:9,iconSize:20,subtitleSize:11,deltaSize:12,compareLabelSize:11,goalSize:11,progressSize:11,progressHeight:4,statusSize:12,referenceSize:11,referenceValueSize:11,footerSize:9,periodSize:9,customThemeName:'',
+ _measureBound:false,_targetCustomized:false,_dateCustomized:false
 };
 export const THEMES = {
  night:{name:'Midnight',background:'#17272b',text:'#ffffff',muted:'#a4b5b5',accent:'#c3ec83',borderColor:'#304247',positive:'#96daa7',negative:'#ff9a98',warning:'#e8c373'},
@@ -136,6 +137,16 @@ export function getCircularConflict(c){
  if(needsDate(c)&&c.dateColumn&&target===norm(c.dateColumn)){
   return {type:'columna de fechas',name:c.dateColumn.trim(),field:'dateColumn'};
  }
+ const dupKeys=Object.keys(c.elements||{}).filter(k=>k.includes('_copy')&&!c.elements[k]?.deleted);
+ for(const dupId of dupKeys){
+  const st=c.elements[dupId];
+  if(st.measure&&target===norm(st.measure)){
+   return {type:`medida del elemento duplicado (${resolveElementDef(dupId)?.label||dupId})`,name:st.measure.trim(),field:`dup_${dupId}_measure`};
+  }
+  if(st.compareMeasure&&target===norm(st.compareMeasure)){
+   return {type:`medida de referencia del duplicado (${resolveElementDef(dupId)?.label||dupId})`,name:st.compareMeasure.trim(),field:`dup_${dupId}_compare`};
+  }
+ }
  return null;
 }
 export function checks(c){
@@ -151,6 +162,17 @@ export function checks(c){
  if(rendered(c,'status')&&((c.direction==='down'&&c.goodThreshold>c.warnThreshold)||(c.direction!=='down'&&c.goodThreshold<c.warnThreshold)))issues.push({level:'error',text:'Revisa los umbrales: favorable y alerta deben seguir la dirección elegida.',field:'goodThreshold'});
  if(rendered(c,'status')&&c.direction==='neutral')issues.push({level:'error',text:'Un semáforo necesita dirección favorable: subir o bajar.',field:'direction'});
  if(c.deltaMode==='pp'&&c.format!=='percent')issues.push({level:'error',text:'Los puntos porcentuales requieren formato porcentaje.',field:'format'});
+ const dupKeys=Object.keys(c.elements||{}).filter(k=>k.includes('_copy')&&!c.elements[k]?.deleted);
+ for(const dupId of dupKeys){
+  const def=resolveElementDef(dupId);
+  const st=c.elements[dupId];
+  if(def?.baseId==='value'&&!st.measure?.trim()){
+   issues.push({level:'warning',text:`Elemento '${def.label}': no tiene medida propia asignada (se calculará con la medida principal '${c.measure.trim()||'Medida'}').`,field:`dup_${dupId}_measure`,elementId:dupId});
+  }
+  if(def?.baseId==='delta'&&c.comparison==='custom'&&!st.compareMeasure?.trim()){
+   issues.push({level:'error',text:`Elemento '${def.label}': indica la medida de referencia para la comparativa.`,field:`dup_${dupId}_compare`,elementId:dupId});
+  }
+ }
  if(c.height<240&&['executive','target','status','spark'].includes(c.type))issues.push({level:'warning',text:'Esta composición puede necesitar más altura. Revisa el resultado a tamaño real.'});
  if(c.valueSize>52&&c.width<360)issues.push({level:'warning',text:'El valor podría ocupar varias líneas. Reduce la tipografía o amplía el ancho.'});
  if(needsDate(c))issues.push({level:'info',text:'Usa una tabla calendario relacionada y filtra el período desde esa tabla.'});

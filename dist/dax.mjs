@@ -81,7 +81,14 @@ export function generateDAX(c) {
   `// - Medida de negocio principal: ${m}\n` +
   `${dateNeeded ? `// - Tabla calendario: ${table}\n// - Columna de fechas: ${date}\n` : ''}` +
   `${target ? `// - Medida u objetivo: ${targetRef(c.targetMeasure)}\n` : ''}` +
-  `${needsCompare(c) && c.comparison === 'custom' ? `// - Medida de referencia: ${measureRef(c.compareMeasure)}\n` : ''}\n`;
+  `${needsCompare(c) && c.comparison === 'custom' ? `// - Medida de referencia: ${measureRef(c.compareMeasure)}\n` : ''}` +
+  Object.keys(c.elements || {}).filter(k => k.includes('_copy') && !c.elements[k].deleted).map(dupId => {
+   const def = resolveElementDef(dupId);
+   const st = elementState(c, dupId);
+   if (def?.baseId === 'value' || st.measure?.trim()) return `// - Medida en ${def?.label || dupId}: ${st.measure && st.measure.trim() ? measureRef(st.measure) : m}\n`;
+   if (def?.baseId === 'delta' && st.compareMeasure?.trim()) return `// - Medida de referencia en ${def?.label || dupId}: ${measureRef(st.compareMeasure)}\n`;
+   return '';
+  }).join('') + `\n`;
 
  if (dateNeeded) {
   code += `// ============================================================================\n` +
@@ -209,6 +216,11 @@ export function generateDAX(c) {
    code += `VAR __Diff_${dupId} = IF ( NOT ISBLANK ( __Current ) && NOT ISBLANK ( ${dupCompare} ), __Current - ${dupCompare} )\n` +
     `VAR __Rel_${dupId} = DIVIDE ( __Diff_${dupId}, ABS ( ${dupCompare} ) )\n` +
     `VAR __delta_${dupId} = ${dupMode === 'absolute' ? `IF ( ISBLANK ( __Diff_${dupId} ), "—", IF ( __Diff_${dupId} > 0, "+", "" ) & ${formatted(`__Diff_${dupId}`, c)} )` : dupMode === 'pp' ? `IF ( ISBLANK ( __Diff_${dupId} ), "—", FORMAT ( __Diff_${dupId} * 100, "+0.0;-0.0;0.0", __Cfg_Locale ) & " pp" )` : `IF ( ISBLANK ( __Rel_${dupId} ), "—", FORMAT ( __Rel_${dupId}, "+0.0%;-0.0%;0.0%", __Cfg_Locale ) )`}\n`;
+  } else if (def.baseId === 'referenceValue') {
+   const dupRef = dupState.measure && dupState.measure.trim() ? measureRef(dupState.measure) : (dupState.compareMeasure && dupState.compareMeasure.trim() ? measureRef(dupState.compareMeasure) : '__Reference');
+   code += `VAR __val_${dupId} = ${formatted(dupRef, c)}\n`;
+  } else if (dupState.measure && dupState.measure.trim()) {
+   code += `VAR __val_${dupId} = ${formatted(measureRef(dupState.measure), c)}\n`;
   }
  }
 

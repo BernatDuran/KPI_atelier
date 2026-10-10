@@ -35,6 +35,11 @@ export function sampleData(c){
   trend:renderTrend(c,c.sampleScenario==='empty'?[]:seriesValues(c)),period:'Período seleccionado',footer:esc(c.footer||'Rendimiento del período'),trendLabel:'Evolución · datos de muestra'};
 }
 export function renderTrend(c,values){return renderSeries(c,values,v=>esc(formatNumber(v,c)));}
+/**
+ * @param {any} c
+ * @param {any} [d]
+ * @param {boolean} [editor]
+ */
 export function cardHTML(c,d=sampleData(c),editor=false){
  const style=`box-sizing:border-box;width:${c.geometryVersion===2?c.width+'px':'100%'};${c.geometryVersion===2?'height:'+c.height+'px;overflow:hidden;':'min-height:'+c.height+'px;'}padding:${c.padding}px;border-radius:${c.radius}px;color:${c.text};border:${c.borderWidth}px solid ${c.borderColor};font-family:${c.font},sans-serif;text-align:${c.align};${surfaceStyles(c)}display:flex;flex-direction:column;gap:16px;overflow-wrap:anywhere;position:relative;isolation:isolate;`;
  const color=id=>elementColor(c,id,d),bg=id=>elementBackground(c,id,d);
@@ -89,7 +94,7 @@ export function cardHTML(c,d=sampleData(c),editor=false){
    dupExtra=`display:flex;align-items:center;gap:10px;padding:14px;border-radius:10px;line-height:1.4;background:${bg(dupId)};`;
   }
   else {
-   dupContent=esc(dupState.text!==undefined?dupState.text:(def.contentKey?c[def.contentKey]:def.label));
+   dupContent=(d[`val_${dupId}`]&&dupState.measure)?d[`val_${dupId}`]:esc(dupState.text!==undefined?dupState.text:(def.contentKey?c[def.contentKey]:def.label));
    dupExtra='line-height:1.4;';
   }
   el(dupId,dupContent,dupExtra);

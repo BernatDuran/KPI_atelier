@@ -824,3 +824,114 @@ test('Advanced Canvas & Multi-Selection: Roundtrip measure, duplicate delta bg, 
  `);
 });
 
+
+test('Advanced Duplicates, Hierarchical Content Inspector, Stacking & Dynamic Resizing', async () => {
+  const { BASE, checks, getCircularConflict } = await import('../dist/model.mjs');
+  const { generateDAX } = await import('../dist/dax.mjs');
+  const { adaptiveResizeCard } = await import('../dist/layout.mjs');
+  const fsMod = await import('fs');
+
+  // 1. Z-Index Stacking: Verify styles.css assigns higher z-index to layers-popover and canvas-edit-bar
+  const css = fsMod.readFileSync('dist/styles.css', 'utf8');
+  assert.ok(/\.canvas-edit-bar\{[^}]*z-index:\s*50/.test(css), 'canvas-edit-bar must have z-index: 50');
+  assert.ok(/\.layers-popover\{[^}]*z-index:\s*100/.test(css), 'layers-popover must have z-index: 100');
+  assert.ok(/#selection-overlay\{[^}]*z-index:\s*5/.test(css), 'selection-overlay has z-index: 5');
+
+  // 2. Adaptive card resizing dynamically scales and clamps duplicates
+  let conf = {
+    ...BASE,
+    width: 320,
+    height: 160,
+    padding: 16,
+    borderWidth: 1,
+    elements: {
+      value: { frame: { left: 20, top: 40, width: 100, height: 30 } },
+      value_copy1: { frame: { left: 150, top: 40, width: 100, height: 30 } },
+      title_copy1: { frame: { left: 20, top: 10, width: 120, height: 20 } }
+    }
+  };
+
+  // Grow card to 480x240
+  let resized = adaptiveResizeCard(conf, 480, 240);
+  assert.equal(resized.width, 480);
+  assert.equal(resized.height, 240);
+  const dupVal = resized.elements.value_copy1.frame;
+  assert.ok(dupVal.left > 150, 'Duplicate value left should adaptively scale up');
+  assert.ok(dupVal.top >= 16, 'Duplicate value top should remain within padding');
+  assert.ok(dupVal.left + dupVal.width <= 480 - 16, 'Duplicate value should remain strictly within card width');
+
+  // Shrink card to 220x120 - duplicate must be clamped
+  let shrunk = adaptiveResizeCard(conf, 220, 120);
+  const shrunkDup = shrunk.elements.value_copy1.frame;
+  assert.ok(shrunkDup.left + shrunkDup.width <= 220 - 16, 'Shrunk duplicate must not overflow card right boundary');
+  assert.ok(shrunkDup.top + shrunkDup.height <= 120 - 16, 'Shrunk duplicate must not overflow card bottom boundary');
+
+  // 3. DAX generation for duplicate dynamic measures
+  conf.elements.value_copy1 = {
+    ...conf.elements.value_copy1,
+    measure: '[Total Ventas Copy]',
+    format: 'currency',
+    currency: 'USD',
+    decimals: 0
+  };
+  const daxCode = generateDAX(conf);
+  assert.ok(daxCode.includes('__val_value_copy1'), 'DAX must evaluate dynamic variable for value_copy1');
+  assert.ok(daxCode.includes('[Total Ventas Copy]'), 'DAX must reference assigned measure for value_copy1');
+
+  // 4. Model checks & circular dependency on duplicates
+  const warnChecks = checks({
+    ...conf,
+    elements: {
+      ...conf.elements,
+      value_copy2: { deleted: false }
+    }
+  });
+  const dupWarn = warnChecks.find(c => c.field === 'dup_value_copy2_measure');
+  assert.ok(dupWarn, 'checks(c) must issue warning for duplicate value without measure');
+  assert.equal(dupWarn.level, 'warning');
+
+  const circConf = {
+    ...conf,
+    measureName: 'Ventas_Copy',
+    elements: {
+      ...conf.elements,
+      value_copy1: { measure: '[Ventas_Copy]' }
+    }
+  };
+  const circConflict = getCircularConflict(circConf);
+  assert.ok(circConflict, 'Circular conflict must be detected when card measure matches duplicate measure');
+  assert.equal(circConflict.name, '[Ventas_Copy]');
+
+  // 5. In-browser editor tests for layers panel and content inspector
+  await editor(`
+  c = structuredClone(BASE);
+  c.elements = {
+    title_copy1: { text: 'Subtítulo Secundario', deleted: false },
+    value_copy1: { measure: '[Margen Real]', format: 'percent', decimals: 1, deleted: false },
+    deleted_copy: { text: 'Borrado', deleted: true }
+  };
+  tab = 'content';
+  renderInspector();
+  const inspHtml = $('#inspector-fields').innerHTML;
+
+  // Hierarchical Content tab: title_copy1 appears in Section 01, value_copy1 in Section 02
+  assert.ok(inspHtml.includes('data-dupid="title_copy1"'), 'title_copy1 should render with data-dupid in Content tab');
+  assert.ok(inspHtml.includes('data-dupid="value_copy1"'), 'value_copy1 should render with data-dupid in Content tab');
+  assert.ok(!inspHtml.includes('data-dupid="deleted_copy"'), 'Deleted duplicate should NOT render in Content tab');
+
+  // Layers panel: deleted element immediately filtered out without restore option
+  layersOpen = true;
+  renderCanvasBar();
+  const layersHtml = $('#canvas-edit-bar').innerHTML;
+  assert.ok(layersHtml.includes('data-layer-row="title_copy1"'), 'title_copy1 should appear in layers');
+  assert.ok(!layersHtml.includes('data-layer-row="deleted_copy"'), 'deleted element must NOT appear in layers');
+  assert.ok(!layersHtml.includes('Restaurar'), 'Layers panel must NOT show Restaurar button');
+
+  // Format painter button in canvas ribbon
+  selectElement('title');
+  renderCanvasBar();
+  const barHtml = $('#canvas-edit-bar').innerHTML;
+  assert.ok(barHtml.includes('format-painter-btn'), 'Canvas bar must contain subtle format-painter-btn');
+  assert.ok(barHtml.includes('icon-btn format-painter-btn'), 'Format painter must use subtle icon-btn style');
+  `);
+});

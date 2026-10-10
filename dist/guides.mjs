@@ -17,7 +17,7 @@ export function alignmentGuides(box,card,peers=[],padding=0,tolerance=3){
      const diff=Math.abs(matching-target.p);
      const exact=diff<=0.5;
      const label=exact?(target.kind==='center'?'Centro exacto':`${target.label} exacto${diff<0.05?' (0 px)':''}`):target.label;
-     add(axis,target.p,target.kind,label,exact,target.peer||null);
+     add(axis,target.p,target.kind,label,exact,/** @type {any} */ (target).peer||null);
     }
    }
   }
