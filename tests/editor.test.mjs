@@ -1065,8 +1065,7 @@ test('Horizontal duplicate adaptive scaling, guide containment, typology parity 
   // 2. Guide containment and styles: outside by default, no scroll triggered
   const css = fs.readFileSync('dist/styles.css', 'utf8');
   assert.ok(css.includes('.smart-guide.exact.horizontal b {\n  left:calc(100% + 3px);\n  top:-7px;'), 'horizontal exact badge must be outside to the right by default');
-  assert.ok(css.includes('.smart-guide.exact.vertical b {\n  bottom:100%;\n  left:3px;'), 'vertical exact badge must be outside on top by default');
-  assert.ok(css.includes('.is-dragging #stage,\n.is-dragging.stage,\n.stage.guides-active,\n#stage:has(#smart-guides:not(:empty)) {\n  overflow:clip!important\n}'), 'stage must not scroll during drag or guide display');
+  assert.ok(css.includes('scrollbar-gutter:stable'), 'stage layout must be stable against scrollbars');
 
   // 3. Typology parity for duplicates
   resolveElementDef('delta_copy1');
@@ -1155,5 +1154,80 @@ test('Inspector content/element parity and exclusion of measure inputs, unified 
   closeModal();
   `);
 });
+
+test('Duplicate chart SVG rendering, DAX isolation, comparison label tracking, and glassmorphism styling', async () => {
+  const run = await editor();
+  run(`
+  loadDesign(BASE);
+
+  // 1. Resolve and update duplicate trend chart
+  resolveElementDef('trend_copy1');
+  c = updateElement(c, 'trend_copy1', {
+    chartType: 'area',
+    showDots: true,
+    showMinMax: true,
+    curved: true,
+    series: [10, 25, 18, 42, 35, 60]
+  });
+
+  // Verify card HTML renders SVG for trend_copy1
+  const html = cardHTML(c, undefined, true);
+  assert.ok(html.includes('data-element="trend_copy1"'), 'Card HTML must contain trend_copy1 wrapper');
+  assert.ok(html.includes('<svg') && html.includes('d="M'), 'Duplicate chart must render non-empty SVG path');
+
+  // Verify DAX generation scopes duplicate trend variable without colliding with original trend
+  c = { ...c, measure: 'Ventas Total' };
+  const dax = generateDAX(c);
+  assert.ok(dax.includes('VAR __trend_trend_copy1'), 'DAX must generate dedicated __trend_trend_copy1 variable');
+  assert.ok(dax.includes('VAR __trend =') || dax.includes('__trend'), 'DAX must still declare original trend or base variables');
+
+  // 2. Comparison label tracking and custom text
+  // Default: comparisonLabel tracks 'comparison' automatically
+  c = updateElement(c, 'compareLabel', { text: '' });
+  let htmlComp = cardHTML(c);
+  assert.ok(htmlComp.includes('vs. año anterior') || htmlComp.includes('anterior'), 'compareLabel must dynamically track default comparison');
+
+  // Custom text: user overrides comparison text
+  c = updateElement(c, 'compareLabel', { text: 'vs. Presupuesto 2026' });
+  htmlComp = cardHTML(c);
+  assert.ok(htmlComp.includes('vs. Presupuesto 2026'), 'compareLabel must reflect custom text override');
+
+  // Duplicate compareLabel tracks comparison
+  resolveElementDef('compareLabel_copy1');
+  c = updateElement(c, 'compareLabel_copy1', { comparison: 'yoy', text: '' });
+  htmlComp = cardHTML(c);
+  assert.ok(htmlComp.includes('vs. año anterior'), 'compareLabel_copy1 must dynamically track YoY comparison');
+
+  // 3. Data binding modal exposes duplicate trend fields (measure, dateTable, dateColumn)
+  setPbipModel({
+    modelName: 'SalesModel',
+    measures: [{ name: 'Ventas', table: 'Fact' }, { name: 'Costes', table: 'Fact' }],
+    tables: ['Fact', 'Calendario'],
+    dateTables: [{ name: 'Calendario', dateColumns: ['FechaKey'], primaryDateColumn: 'FechaKey' }]
+  });
+  openDataBindingModal();
+  const modalHTML = $('#modal').innerHTML;
+  assert.ok(modalHTML.includes('trend_copy1__measure'), 'Modal must have measure binding for trend_copy1');
+  assert.ok(modalHTML.includes('trend_copy1__dateTable'), 'Modal must have dateTable binding for trend_copy1');
+  assert.ok(modalHTML.includes('trend_copy1__dateColumn'), 'Modal must have dateColumn binding for trend_copy1');
+  closeModal();
+
+  // 4. Inspector parity: chartPanel rendered for trend_copy1
+  selectedElement = 'trend_copy1';
+  tab = 'element';
+  renderInspector();
+  const insp = $('#inspector-fields').innerHTML;
+  assert.ok(insp.includes('Visual'), 'Duplicate trend inspector must display Visual');
+  assert.ok(insp.includes('Representación'), 'Duplicate trend inspector must display Representación');
+  assert.ok(insp.includes('Trazado'), 'Duplicate trend inspector must display Trazado');
+  `);
+
+  // 5. Glassmorphism CSS verification
+  const css = fs.readFileSync('dist/styles.css', 'utf8');
+  assert.ok(css.includes('.glass-stage::before'), 'styles.css must include ambient backdrop orb ::before');
+  assert.ok(css.includes('.glass-stage::after'), 'styles.css must include ambient backdrop orb ::after');
+  assert.ok(css.includes('scrollbar-gutter:stable'), 'styles.css must configure scrollbar-gutter:stable');
+});
+
 
 

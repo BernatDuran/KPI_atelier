@@ -1,7 +1,7 @@
 import {chartGeometry,trendSVG,markerSVG,emptyTrend,hash} from './charts.mjs';
 import {elementColor,trendFill,appearance} from './appearance.mjs';
 import {needsDate,needsTrend,needsGoal,needsCompare,checks} from './model.mjs';
-import {elementEnabled,elementState,resolveElementDef} from './elements.mjs';
+import {elementEnabled,elementState,elementSize,resolveElementDef} from './elements.mjs';
 import {cardHTML,tokenData,esc} from './cards.mjs';
 
 export const quote = s => '"' + String(s).replaceAll('"', '""') + '"';
@@ -87,6 +87,7 @@ export function generateDAX(c) {
    const st = elementState(c, dupId);
    if (def?.baseId === 'value' || st.measure?.trim()) return `// - Medida en ${def?.label || dupId}: ${st.measure && st.measure.trim() ? measureRef(st.measure) : m}\n`;
    if (def?.baseId === 'delta' && st.compareMeasure?.trim()) return `// - Medida de referencia en ${def?.label || dupId}: ${measureRef(st.compareMeasure)}\n`;
+   if (def?.baseId === 'trend') return `// - Gráfico en ${def?.label || dupId}: medida ${st.measure && st.measure.trim() ? measureRef(st.measure) : m}, calendario ${tableRef(st.dateTable || c.dateTable)}[${st.dateColumn || c.dateColumn}]\n`;
    return '';
   }).join('') + `\n`;
 
@@ -221,6 +222,13 @@ export function generateDAX(c) {
    code += `VAR __val_${dupId} = ${formatted(dupRef, c)}\n`;
   } else if (dupState.measure && dupState.measure.trim()) {
    code += `VAR __val_${dupId} = ${formatted(measureRef(dupState.measure), c)}\n`;
+  } else if (def.baseId === 'trend') {
+   const dupKind = dupState.chartKind || c.chartKind;
+   if (dupKind !== 'donut' && needsDate(c)) {
+    code += trendDAX(c, dupId);
+   } else {
+    code += `VAR __trend_${dupId} = ""\n`;
+   }
   }
  }
 
@@ -228,68 +236,73 @@ export function generateDAX(c) {
  return code;
 }
 
-function trendDAX(c) {
- const g = chartGeometry(c);
+function trendDAX(c, elementId = 'trend') {
+ const isOrig = elementId === 'trend';
+ const st = isOrig ? c : elementState(c, elementId);
+ const dupHeight = isOrig ? c.trendHeight : elementSize(c, elementId);
+ const effC = { ...c, ...st, trendHeight: dupHeight };
+ const g = chartGeometry(effC, elementId);
  const fmt = v => `FORMAT ( ${v}, "0.000", "en-US" )`;
- const customTrendColor = appearance(c, 'trend').colorMode === 'custom';
- const color = customTrendColor ? elementColor(c, 'trend') : '__Cfg_ColorAccent';
- const table = tableRef(c.dateTable);
- const date = `${table}${colRef(c.dateColumn)}`;
- const m = measureRef(c.measure);
- const bucket = d => `SWITCH ( __Granularity, 1, ${d}, 2, ${d} - WEEKDAY ( ${d}, 2 ) + 1, DATE ( YEAR ( ${d} ), MONTH ( ${d} ), 1 ) )`;
- const maxPts = c.maxPoints || 24;
+ const customTrendColor = appearance(effC, elementId).colorMode === 'custom';
+ const color = customTrendColor ? elementColor(effC, elementId) : '__Cfg_ColorAccent';
+ const table = tableRef(st.dateTable || c.dateTable);
+ const date = `${table}${colRef(st.dateColumn || c.dateColumn)}`;
+ const m = measureRef(st.measure && st.measure.trim() ? st.measure : c.measure);
+ const pfx = isOrig ? '' : `_${elementId}`;
+ const bucket = d => `SWITCH ( __Granularity${pfx}, 1, ${d}, 2, ${d} - WEEKDAY ( ${d}, 2 ) + 1, DATE ( YEAR ( ${d} ), MONTH ( ${d} ), 1 ) )`;
+ const maxPts = effC.maxPoints || 24;
 
  let code = `// ============================================================================\n` +
-  `// 4. SERIE TEMPORAL Y COORDENADAS SVG (FASE B)\n` +
+  `// ${isOrig ? '4. SERIE TEMPORAL Y COORDENADAS SVG (FASE B)' : `SERIE TEMPORAL: ${elementId.toUpperCase()}`}\n` +
   `// ============================================================================\n` +
   `// Granularidad: diaria (<=24 días), semanal (<=161 días), mensual (>161 días).\n` +
   `// Ventana acotada a un máximo de ${maxPts} períodos antes de evaluar la medida.\n` +
-  `VAR __Granularity = ${c.granularity === 'auto' ? 'SWITCH ( TRUE (), __Span <= 24, 1, __Span <= 161, 2, 3 )' : c.granularity === 'day' ? '1' : c.granularity === 'week' ? '2' : '3'}\n` +
-  `VAR __LastBucket = IF ( __HasDates, SWITCH ( __Granularity, 1, __End, 2, __End - WEEKDAY ( __End, 2 ) + 1, DATE ( YEAR ( __End ), MONTH ( __End ), 1 ) ) )\n` +
-  `VAR __WindowStart = IF ( __HasDates, SWITCH ( __Granularity, 1, __LastBucket - ${maxPts - 1}, 2, __LastBucket - ${maxPts - 1} * 7, EDATE ( __LastBucket, -${maxPts - 1} ) ) )\n` +
-  `VAR __TrendClipped = __HasDates && __Start < __WindowStart\n` +
-  `VAR __DateGroups = SELECTCOLUMNS (\n` +
-  `    FILTER ( __Dates, __HasDates && ${date} >= __WindowStart ),\n` +
+  `VAR __Granularity${pfx} = ${effC.granularity === 'auto' ? `SWITCH ( TRUE (), __Span <= 24, 1, __Span <= 161, 2, 3 )` : effC.granularity === 'day' ? '1' : effC.granularity === 'week' ? '2' : '3'}\n` +
+  `VAR __LastBucket${pfx} = IF ( __HasDates, SWITCH ( __Granularity${pfx}, 1, __End, 2, __End - WEEKDAY ( __End, 2 ) + 1, DATE ( YEAR ( __End ), MONTH ( __End ), 1 ) ) )\n` +
+  `VAR __WindowStart${pfx} = IF ( __HasDates, SWITCH ( __Granularity${pfx}, 1, __LastBucket${pfx} - ${maxPts - 1}, 2, __LastBucket${pfx} - ${maxPts - 1} * 7, EDATE ( __LastBucket${pfx}, -${maxPts - 1} ) ) )\n` +
+  `VAR __TrendClipped${pfx} = __HasDates && __Start < __WindowStart${pfx}\n` +
+  `VAR __DateGroups${pfx} = SELECTCOLUMNS (\n` +
+  `    FILTER ( __Dates, __HasDates && ${date} >= __WindowStart${pfx} ),\n` +
   `    "__Date", ${date},\n` +
   `    "__Bucket", ${bucket(date)}\n` +
   `)\n` +
-  `VAR __RecentBuckets = DISTINCT ( SELECTCOLUMNS ( __DateGroups, "__Bucket", [__Bucket] ) )\n` +
-  `VAR __BucketCount = COUNTROWS ( __RecentBuckets )\n` +
-  `VAR __RawSeries = ADDCOLUMNS (\n` +
-  `    __RecentBuckets,\n` +
+  `VAR __RecentBuckets${pfx} = DISTINCT ( SELECTCOLUMNS ( __DateGroups${pfx}, "__Bucket", [__Bucket] ) )\n` +
+  `VAR __BucketCount${pfx} = COUNTROWS ( __RecentBuckets${pfx} )\n` +
+  `VAR __RawSeries${pfx} = ADDCOLUMNS (\n` +
+  `    __RecentBuckets${pfx},\n` +
   `    "__YValue",\n` +
   `        VAR __SelectedBucket = [__Bucket]\n` +
-  `        VAR __GroupDates = SELECTCOLUMNS ( FILTER ( __DateGroups, [__Bucket] = __SelectedBucket ), "__Date", [__Date] )\n` +
+  `        VAR __GroupDates = SELECTCOLUMNS ( FILTER ( __DateGroups${pfx}, [__Bucket] = __SelectedBucket ), "__Date", [__Date] )\n` +
   `        RETURN CALCULATE ( ${m}, REMOVEFILTERS ( ${table} ), TREATAS ( __GroupDates, ${date} ) )\n` +
   `)\n` +
-  `VAR __SeriesIndexed = ADDCOLUMNS (\n` +
-  `    __RawSeries,\n` +
+  `VAR __SeriesIndexed${pfx} = ADDCOLUMNS (\n` +
+  `    __RawSeries${pfx},\n` +
   `    "__Idx",\n` +
   `        VAR __B = [__Bucket]\n` +
-  `        RETURN RANKX ( __RecentBuckets, [__Bucket], __B, ASC, DENSE )\n` +
+  `        RETURN RANKX ( __RecentBuckets${pfx}, [__Bucket], __B, ASC, DENSE )\n` +
   `)\n` +
-  `VAR __ValidSeries = FILTER ( __SeriesIndexed, NOT ISBLANK ( [__YValue] ) )\n` +
-  `VAR __Series = __ValidSeries\n` +
-  `VAR __N = COUNTROWS ( __ValidSeries )\n` +
-  `VAR __Min = ${c.zeroBase ? 'MIN ( 0, MINX ( __ValidSeries, [__YValue] ) )' : 'MINX ( __ValidSeries, [__YValue] )'}\n` +
-  `VAR __Max = ${c.zeroBase ? 'MAX ( 0, MAXX ( __ValidSeries, [__YValue] ) )' : 'MAXX ( __ValidSeries, [__YValue] )'}\n` +
-  `VAR __Range = __Max - __Min\n` +
-  `VAR __Coordinates = ADDCOLUMNS (\n` +
-  `    __ValidSeries,\n` +
-  `    "__X", IF ( __BucketCount = 1, ${g.width / 2}, ${g.left} + DIVIDE ( [__Idx] - 1, __BucketCount - 1, 0 ) * ${g.spanX} ),\n` +
-  `    "__Y", IF ( __Range = 0, ${(g.top + g.bottom) / 2}, ${g.bottom} - DIVIDE ( [__YValue] - __Min, __Range, 0 ) * ${g.spanY} )\n` +
+  `VAR __ValidSeries${pfx} = FILTER ( __SeriesIndexed${pfx}, NOT ISBLANK ( [__YValue] ) )\n` +
+  `VAR __Series${pfx} = __ValidSeries${pfx}\n` +
+  `VAR __N${pfx} = COUNTROWS ( __ValidSeries${pfx} )\n` +
+  `VAR __Min${pfx} = ${effC.zeroBase ? `MIN ( 0, MINX ( __ValidSeries${pfx}, [__YValue] ) )` : `MINX ( __ValidSeries${pfx}, [__YValue] )`}\n` +
+  `VAR __Max${pfx} = ${effC.zeroBase ? `MAX ( 0, MAXX ( __ValidSeries${pfx}, [__YValue] ) )` : `MAXX ( __ValidSeries${pfx}, [__YValue] )`}\n` +
+  `VAR __Range${pfx} = __Max${pfx} - __Min${pfx}\n` +
+  `VAR __Coordinates${pfx} = ADDCOLUMNS (\n` +
+  `    __ValidSeries${pfx},\n` +
+  `    "__X", IF ( __BucketCount${pfx} = 1, ${g.width / 2}, ${g.left} + DIVIDE ( [__Idx] - 1, __BucketCount${pfx} - 1, 0 ) * ${g.spanX} ),\n` +
+  `    "__Y", IF ( __Range${pfx} = 0, ${(g.top + g.bottom) / 2}, ${g.bottom} - DIVIDE ( [__YValue] - __Min${pfx}, __Range${pfx}, 0 ) * ${g.spanY} )\n` +
   `)\n` +
   `// Coordenadas SVG: tres decimales explícitos y punto decimal.\n` +
-  `VAR __chartFirst = ${fmt('MINX ( __Coordinates, [__X] )')}\n` +
-  `VAR __chartLast = ${fmt('MAXX ( __Coordinates, [__X] )')}\n` +
-  `VAR __ChartSegments = ADDCOLUMNS (\n` +
-  `    __Coordinates,\n` +
+  `VAR __chartFirst${pfx} = ${fmt(`MINX ( __Coordinates${pfx}, [__X] )`)}\n` +
+  `VAR __chartLast${pfx} = ${fmt(`MAXX ( __Coordinates${pfx}, [__X] )`)}\n` +
+  `VAR __ChartSegments${pfx} = ADDCOLUMNS (\n` +
+  `    __Coordinates${pfx},\n` +
   `    "__Segment",\n` +
   `        VAR __Idx = [__Idx]\n` +
   `        VAR __B = [__Bucket]\n` +
-  `        VAR __Prev = FILTER ( __Coordinates, [__Idx] = __Idx - 1 )\n` +
+  `        VAR __Prev = FILTER ( __Coordinates${pfx}, [__Idx] = __Idx - 1 )\n` +
   `        VAR __PrevBucket = MAXX ( __Prev, [__Bucket] )\n` +
-  `        VAR __Adjacent = NOT ISEMPTY ( __Prev ) && SWITCH ( __Granularity, 1, __B = __PrevBucket + 1, 2, __B = __PrevBucket + 7, __B = EDATE ( __PrevBucket, 1 ) )\n` +
+  `        VAR __Adjacent = NOT ISEMPTY ( __Prev ) && SWITCH ( __Granularity${pfx}, 1, __B = __PrevBucket + 1, 2, __B = __PrevBucket + 7, __B = EDATE ( __PrevBucket, 1 ) )\n` +
   `        VAR __px = [__X]\n` +
   `        VAR __py = [__Y]\n` +
   `        VAR __prevX = MAXX ( __Prev, [__X] )\n` +
@@ -298,55 +311,66 @@ function trendDAX(c) {
   `        RETURN IF (\n` +
   `            NOT __Adjacent,\n` +
   `            "M" & FORMAT ( __px, "0.000", "en-US" ) & "," & FORMAT ( __py, "0.000", "en-US" ),\n` +
-  `            ${c.trendCurve === 'smooth'
+  `            ${effC.trendCurve === 'smooth'
     ? `"C" & FORMAT ( __midX, "0.000", "en-US" ) & "," & FORMAT ( __prevY, "0.000", "en-US" ) & " " & FORMAT ( __midX, "0.000", "en-US" ) & "," & FORMAT ( __py, "0.000", "en-US" ) & " " & FORMAT ( __px, "0.000", "en-US" ) & "," & FORMAT ( __py, "0.000", "en-US" )`
-    : c.trendCurve === 'step'
+    : effC.trendCurve === 'step'
     ? `"H" & FORMAT ( __midX, "0.000", "en-US" ) & "V" & FORMAT ( __py, "0.000", "en-US" ) & "H" & FORMAT ( __px, "0.000", "en-US" )`
     : `"L" & FORMAT ( __px, "0.000", "en-US" ) & "," & FORMAT ( __py, "0.000", "en-US" )`}\n` +
   `        )\n` +
   `)\n` +
-  `VAR __chartPath = CONCATENATEX ( __ChartSegments, [__Segment], " ", [__Bucket], ASC )\n` +
-  `VAR __HasGaps = __N <> __BucketCount || CONTAINSSTRING ( __chartPath, " M" )\n` +
-  `VAR __Baseline = ${c.zeroBase ? `IF ( __Range = 0, ${g.bottom}, MAX ( ${g.top}, MIN ( ${g.bottom}, ${g.bottom} - DIVIDE ( 0 - __Min, __Range, 0 ) * ${g.spanY} ) ) )` : g.bottom}\n` +
-  `VAR __BarWidth = MAX ( 1, MIN ( 8, DIVIDE ( ${g.spanX * 0.65}, __BucketCount, 1 ) ) )\n` +
-  `VAR __chartBars = CONCATENATEX ( __Coordinates,\n` +
-  `    VAR __barX = [__X] - __BarWidth / 2\n` +
-  `    VAR __barY = MIN ( [__Y], __Baseline )\n` +
-  `    VAR __barH = MAX ( 1, ABS ( [__Y] - __Baseline ) )\n` +
-  `    RETURN "<rect x='" & FORMAT ( __barX, "0.000", "en-US" ) & "' y='" & FORMAT ( __barY, "0.000", "en-US" ) & "' width='" & FORMAT ( __BarWidth, "0.000", "en-US" ) & "' height='" & FORMAT ( __barH, "0.000", "en-US" ) & "' rx='1.5' fill='" & ${customTrendColor ? quote(color) : color} & "'/>",\n` +
+  `VAR __chartPath${pfx} = CONCATENATEX ( __ChartSegments${pfx}, [__Segment], " ", [__Bucket], ASC )\n` +
+  `VAR __HasGaps${pfx} = __N${pfx} <> __BucketCount${pfx} || CONTAINSSTRING ( __chartPath${pfx}, " M" )\n` +
+  `VAR __Baseline${pfx} = ${effC.zeroBase ? `IF ( __Range${pfx} = 0, ${g.bottom}, MAX ( ${g.top}, MIN ( ${g.bottom}, ${g.bottom} - DIVIDE ( 0 - __Min${pfx}, __Range${pfx}, 0 ) * ${g.spanY} ) ) )` : g.bottom}\n` +
+  `VAR __BarWidth${pfx} = MAX ( 1, MIN ( 8, DIVIDE ( ${g.spanX * 0.65}, __BucketCount${pfx}, 1 ) ) )\n` +
+  `VAR __chartBars${pfx} = CONCATENATEX ( __Coordinates${pfx},\n` +
+  `    VAR __barX = [__X] - __BarWidth${pfx} / 2\n` +
+  `    VAR __barY = MIN ( [__Y], __Baseline${pfx} )\n` +
+  `    VAR __barH = MAX ( 1, ABS ( [__Y] - __Baseline${pfx} ) )\n` +
+  `    RETURN "<rect x='" & FORMAT ( __barX, "0.000", "en-US" ) & "' y='" & FORMAT ( __barY, "0.000", "en-US" ) & "' width='" & FORMAT ( __BarWidth${pfx}, "0.000", "en-US" ) & "' height='" & FORMAT ( __barH, "0.000", "en-US" ) & "' rx='1.5' fill='" & ${customTrendColor ? quote(color) : color} & "'/>",\n` +
   `    "", [__Bucket], ASC )\n` +
-  `VAR __MaxPoint = TOPN ( 1, __Coordinates, [__YValue], DESC, [__Bucket], ASC )\n` +
-  `VAR __MinPoint = TOPN ( 1, __Coordinates, [__YValue], ASC, [__Bucket], ASC )\n` +
-  `VAR __LastPoint = TOPN ( 1, __Coordinates, [__Bucket], DESC )\n`;
+  `VAR __MaxPoint${pfx} = TOPN ( 1, __Coordinates${pfx}, [__YValue], DESC, [__Bucket], ASC )\n` +
+  `VAR __MinPoint${pfx} = TOPN ( 1, __Coordinates${pfx}, [__YValue], ASC, [__Bucket], ASC )\n` +
+  `VAR __LastPoint${pfx} = TOPN ( 1, __Coordinates${pfx}, [__Bucket], DESC )\n`;
 
- const annotation = (kind, table) => {
-  const svg = markerSVG(c, kind, {x: '@@markX@@', y: '@@markY@@', label: kind === 'last' ? '' : '@@markLabel@@', anchor: '@@markAnchor@@', labelY: kind === 'max' ? 12 : g.height - 4});
-  return `CONCATENATEX ( ${table}, VAR __markX = ${fmt('[__X]')} VAR __markY = ${fmt('[__Y]')} VAR __markLabel = ${quote(kind === 'max' ? 'Máx. ' : 'Mín. ')} & ${formatted('[__YValue]', c)} VAR __markAnchor = IF ( [__X] < ${g.width * 0.3}, "start", IF ( [__X] > ${g.width * 0.7}, "end", "middle" ) ) RETURN ${compileHTML(svg)}, "" )`;
+ const annotation = (kind, tbl) => {
+  const svg = markerSVG(effC, kind, {x: '@@markX@@', y: '@@markY@@', label: kind === 'last' ? '' : '@@markLabel@@', anchor: '@@markAnchor@@', labelY: kind === 'max' ? 12 : g.height - 4}, elementId);
+  return `CONCATENATEX ( ${tbl}, VAR __markX = ${fmt('[__X]')} VAR __markY = ${fmt('[__Y]')} VAR __markLabel = ${quote(kind === 'max' ? 'Máx. ' : 'Mín. ')} & ${formatted('[__YValue]', effC)} VAR __markAnchor = IF ( [__X] < ${g.width * 0.3}, "start", IF ( [__X] > ${g.width * 0.7}, "end", "middle" ) ) RETURN ${compileHTML(svg)}, "" )`;
  };
 
- const max = c.showMax ? annotation('max', '__MaxPoint') : '""';
- const min = c.showMin ? `IF ( MINX ( __Coordinates, [__YValue] ) <> MAXX ( __Coordinates, [__YValue] ), ${annotation('min', `FILTER ( __MinPoint, [__Bucket] <> MAXX ( __MaxPoint, [__Bucket] ) )`)}, "" )` : '""';
- const dotConditions = ['__N > 0'];
- if (c.showMax) dotConditions.push('MAXX ( __LastPoint, [__X] ) <> MAXX ( __MaxPoint, [__X] )');
- if (c.showMin) dotConditions.push('MAXX ( __LastPoint, [__X] ) <> MAXX ( __MinPoint, [__X] )');
- if (!c.showDot) dotConditions.push('__N = 1');
- code += `VAR __chartAnnotations = ${max} & ${min} & IF ( ${dotConditions.join(' && ')}, ${annotation('last', '__LastPoint')}, "" )\n`;
+ const max = effC.showMax ? annotation('max', `__MaxPoint${pfx}`) : '""';
+ const min = effC.showMin ? `IF ( MINX ( __Coordinates${pfx}, [__YValue] ) <> MAXX ( __Coordinates${pfx}, [__YValue] ), ${annotation('min', `FILTER ( __MinPoint${pfx}, [__Bucket] <> MAXX ( __MaxPoint${pfx}, [__Bucket] ) )`)}, "" )` : '""';
+ const dotConditions = [`__N${pfx} > 0`];
+ if (effC.showMax) dotConditions.push(`MAXX ( __LastPoint${pfx}, [__X] ) <> MAXX ( __MaxPoint${pfx}, [__X] )`);
+ if (effC.showMin) dotConditions.push(`MAXX ( __LastPoint${pfx}, [__X] ) <> MAXX ( __MinPoint${pfx}, [__X] )`);
+ if (!effC.showDot) dotConditions.push(`__N${pfx} = 1`);
+ code += `VAR __chartAnnotations${pfx} = ${max} & ${min} & IF ( ${dotConditions.join(' && ')}, ${annotation('last', `__LastPoint${pfx}`)}, "" )\n`;
 
- const areaId = 'kpi-area-' + hash(JSON.stringify([trendFill(c), c.fillOpacity, g]));
- const areaFillSvg = c.areaFill === 'gradient' ? `url(#${areaId})` : trendFill(c);
- code += `VAR __chartArea = ${c.trendStyle === 'area' ? `IF ( __N > 1 && NOT ( __HasGaps ) && __Min >= 0, "<path d=""" & __chartPath & " L" & __chartLast & ",${g.bottom} L" & __chartFirst & ",${g.bottom} Z"" fill=""${areaFillSvg}"" opacity=""${c.fillOpacity}""/>", "" )` : '""'}\n`;
+ const areaId = 'kpi-area-' + hash(JSON.stringify([trendFill(effC, elementId), effC.fillOpacity, g, elementId]));
+ const areaFillSvg = effC.areaFill === 'gradient' ? `url(#${areaId})` : trendFill(effC, elementId);
+ code += `VAR __chartArea${pfx} = ${effC.trendStyle === 'area' ? `IF ( __N${pfx} > 1 && NOT ( __HasGaps${pfx} ) && __Min${pfx} >= 0, "<path d=""" & __chartPath${pfx} & " L" & __chartLast${pfx} & ",${g.bottom} L" & __chartFirst${pfx} & ",${g.bottom} Z"" fill=""${areaFillSvg}"" opacity=""${effC.fillOpacity}""/>", "" )` : '""'}\n`;
 
- const svg = trendSVG(c, {path: '@@chartPath@@', first: '@@chartFirst@@', last: '@@chartLast@@', bars: '@@chartBars@@', annotations: '@@chartAnnotations@@', area: '@@chartArea@@'});
- code += `VAR __trend = IF ( __N = 0, ${quote(emptyTrend(c))}, ${compileHTML(svg)} )\n`;
+ const svg = trendSVG(effC, {path: `@@chartPath${pfx}@@`, first: `@@chartFirst${pfx}@@`, last: `@@chartLast${pfx}@@`, bars: `@@chartBars${pfx}@@`, annotations: `@@chartAnnotations${pfx}@@`, area: `@@chartArea${pfx}@@`}, elementId);
+ const compiledSvg = compileHTML(svg)
+  .replaceAll(`@@chartPath${pfx}@@`, `" & __chartPath${pfx} & "`)
+  .replaceAll(`@@chartFirst${pfx}@@`, `" & __chartFirst${pfx} & "`)
+  .replaceAll(`@@chartLast${pfx}@@`, `" & __chartLast${pfx} & "`)
+  .replaceAll(`@@chartBars${pfx}@@`, `" & __chartBars${pfx} & "`)
+  .replaceAll(`@@chartAnnotations${pfx}@@`, `" & __chartAnnotations${pfx} & "`)
+  .replaceAll(`@@chartArea${pfx}@@`, `" & __chartArea${pfx} & "`);
 
- code += `VAR __footer = SWITCH (\n` +
-  `    TRUE (),\n` +
-  `    __TrendClipped && __Granularity = 1, "Últimos " & ${maxPts} & " días",\n` +
-  `    __TrendClipped && __Granularity = 2, "Últimas " & ${maxPts} & " sem.",\n` +
-  `    __TrendClipped, "Últimos " & ${maxPts} & " meses",\n` +
-  `    __IsDiscontinuous, "Fechas discontinuas",\n` +
-  `    ${quote(esc(c.footer || 'Rendimiento del período'))}\n` +
-  `)\n`;
+ if (isOrig) {
+  code += `VAR __trend = IF ( __N = 0, ${quote(emptyTrend(c, 'trend'))}, ${compiledSvg} )\n`;
+  code += `VAR __footer = SWITCH (\n` +
+   `    TRUE (),\n` +
+   `    __TrendClipped && __Granularity = 1, "Últimos " & ${maxPts} & " días",\n` +
+   `    __TrendClipped && __Granularity = 2, "Últimas " & ${maxPts} & " sem.",\n` +
+   `    __TrendClipped, "Últimos " & ${maxPts} & " meses",\n` +
+   `    __IsDiscontinuous, "Fechas discontinuas",\n` +
+   `    ${quote(esc(c.footer || 'Rendimiento del período'))}\n` +
+   `)\n`;
+ } else {
+  code += `VAR __trend_${elementId} = IF ( __N${pfx} = 0, ${quote(emptyTrend(effC, elementId))}, ${compiledSvg} )\n`;
+ }
 
  return code;
 }

@@ -45,7 +45,7 @@ export function elementBackground(c,id,data={}){
  const color=p.backgroundMode==='custom'?p.backgroundColor:id==='progress'?c.muted:elementColor(c,id,data);
  return alphaColor(color,p.backgroundOpacity);
 }
-export function trendFill(c){const p=appearance(c,'trend');return p.fillMode==='custom'?p.fillColor:elementColor(c,'trend');}
+export function trendFill(c,elementId='trend'){const p=appearance(c,elementId);return p.fillMode==='custom'?p.fillColor:elementColor(c,elementId);}
 export const SURFACE_EFFECTS=[['solid','Clásico'],['glass','Cristal'],['aurora','Aurora'],['glow','Halo'],['raised','Relieve suave']];
 export function surfaceStyles(c){
  const effect=c.surfaceEffect||'solid',intensity=c.effectIntensity??35;

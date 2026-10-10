@@ -2,7 +2,7 @@ import {resizeCard,applyLayout} from './layout.mjs';
 import {COLOR_SPEC,colorModes,appearance,elementColor,elementBackground,trendFill,SURFACE_EFFECTS} from './appearance.mjs';
 import {alignmentGuides} from './guides.mjs';
 import {BASE,TEMPLATES,THEMES,FAMILIES,sanitizeConfig,checks,getCircularConflict,familyName,needsTrend,needsDate,needsGoal,needsCompare,isValidMeasureName} from './model.mjs';
-import {icon,esc,cardHTML,sampleData} from './cards.mjs';
+import {icon,esc,cardHTML,sampleData,comparisonLabel} from './cards.mjs';
 import {generateDAX} from './dax.mjs';
 import {ELEMENTS,ELEMENT_IDS,SIZE_LIMITS,elementState,elementSize,elementAvailable,elementEnabled,elementVisible,updateElement,moveElement,resizeElement,restoreElement,clamp,frameFromBounds,detachElement,releaseElement,layerOrder,moveLayer,reorderLayer,resolveElementDef} from './elements.mjs';
 import {COLOR_ROLES,hexToHSV,hsvToHex,contrastRatio,paletteFrom,sanitizePalette} from './colors.mjs';
@@ -146,8 +146,9 @@ function duplicateContentFields(baseIds){
   }else if(def.baseId==='compareLabel'){
    const curComp=st.comparison||c.comparison;
    const curTxt=st.text!==undefined?st.text:'';
+   const autoLbl=comparisonLabel({comparison:curComp});
    fields=`<div class="field"><label for="f-dup-clcmp-${dupId}">Comparar con</label><select id="f-dup-clcmp-${dupId}" data-dupval="comparison" data-dupid="${dupId}">${comparisons.map(([k,l])=>`<option value="${k}" ${curComp===k?'selected':''}>${l}</option>`).join('')}</select></div>`+
-    `<div class="field"><label for="f-dup-txt-${dupId}">Texto personalizado</label><input id="f-dup-txt-${dupId}" data-duptext="${dupId}" data-dupid="${dupId}" value="${esc(curTxt)}" placeholder="ej. vs. período anterior"></div>`;
+    `<div class="field"><label for="f-dup-txt-${dupId}">Texto de comparación</label><input id="f-dup-txt-${dupId}" data-duptext="${dupId}" data-dupid="${dupId}" value="${esc(curTxt)}" placeholder="${esc(autoLbl)} (automático)"></div>`;
   }else if(def.baseId==='status'){
    const curGood=st.statusGood!==undefined?st.statusGood:(c.statusGood||'Favorable');
    const curWarn=st.statusWarn!==undefined?st.statusWarn:(c.statusWarn||'En alerta');
@@ -167,6 +168,8 @@ function duplicateContentFields(baseIds){
    fields=`<div class="field"><label for="f-dup-ico-${dupId}">Icono</label><select id="f-dup-ico-${dupId}" data-dupval="icon" data-dupid="${dupId}">${ICON_OPTIONS.map(([k,l])=>`<option value="${k}" ${curIcon===k?'selected':''}>${l}</option>`).join('')}</select></div>`;
   }else if(['goalLabel','progressLabel','progress'].includes(def.baseId)){
    fields='<p class="field-help">La medida objetivo se configura en Conectar datos del modelo.</p>';
+  }else if(def.baseId==='trend'){
+   fields=chartPanel(dupId);
   }else{
    const currentVal=st.text!==undefined?st.text:(def.contentKey?c[def.contentKey]:def.label);
    fields=`<div class="field"><label for="f-dup-txt-${dupId}">Texto</label><input id="f-dup-txt-${dupId}" data-duptext="${dupId}" data-dupid="${dupId}" value="${esc(currentVal)}" placeholder="Texto del elemento…"></div>`;
@@ -182,15 +185,18 @@ function renderInspector(){
  else if(tab==='content'){
  h+=section('01','Identidad',field('title','Título del KPI')+field('subtitle','Subtítulo')+(pro?field('eyebrow','Etiqueta superior'):'')+select('type','Tipo de tarjeta',FAMILIES.filter(f=>f.id!=='all').map(f=>[f.id,f.name]))+duplicateContentFields(['title','subtitle','eyebrow']));
  h+=section('02','Valor principal',select('format','Formato',formats)+(c.format==='currency'?select('currency','Moneda',[['EUR','Euro · €'],['USD','Dólar · $'],['GBP','Libra · £']]):'')+(pro?`<div class="field-row">${select('unit','Escala',[['auto','Automática'],['none','Sin escalar'],['k','Miles'],['m','Millones']])}${select('decimals','Decimales',[[0,'0'],[1,'1'],[2,'2'],[3,'3']])}</div>`:'')+(adv?field('suffix','Sufijo personalizado'):'')+duplicateContentFields(['value']));
- h+=section('03','Contexto y comparación',select('comparison','Comparar con',comparisons)+select('direction','¿Qué significa mejorar?',[['up','Cuanto más, mejor ↑'],['down','Cuanto menos, mejor ↓'],['neutral','Sin valoración favorable']])+(pro?select('deltaMode','Mostrar diferencia',[['relative','Variación relativa · %'],['absolute','Diferencia absoluta'],['pp','Puntos porcentuales · pp']]):'')+duplicateContentFields(['delta','referenceValue','compareLabel','referenceLabel']));
+ const origCompText=elementState(c,'compareLabel').text||'';
+ const autoOrigCompLbl=comparisonLabel(c);
+ const origCompField=`<div class="field"><label for="f-complabel-content-text">Texto de comparación</label><input id="f-complabel-content-text" data-duptext="compareLabel" value="${esc(origCompText)}" placeholder="${esc(autoOrigCompLbl)} (automático)"></div>`;
+ h+=section('03','Contexto y comparación',select('comparison','Comparar con',comparisons)+origCompField+select('direction','¿Qué significa mejorar?',[['up','Cuanto más, mejor ↑'],['down','Cuanto menos, mejor ↓'],['neutral','Sin valoración favorable']])+(pro?select('deltaMode','Mostrar diferencia',[['relative','Variación relativa · %'],['absolute','Diferencia absoluta'],['pp','Puntos porcentuales · pp']]):'')+duplicateContentFields(['delta','referenceValue','compareLabel','referenceLabel']));
  if(c.type==='status')h+=section('04','Reglas del semáforo',`<p class="field-help">${c.direction==='down'?'Verde ≤ favorable; ámbar ≤ alerta; rojo por encima.':'Verde ≥ favorable; ámbar ≥ alerta; rojo por debajo.'}${c.format==='percent'?' Usa 0,95 para indicar 95 %.':''}</p><div class="field-row">${field('goodThreshold','Umbral favorable','number')}${field('warnThreshold','Umbral de alerta','number')}</div>`+(pro?field('statusGood','Texto favorable')+field('statusWarn','Texto en alerta')+field('statusBad','Texto desfavorable'):'')+duplicateContentFields(['status']));
- if(pro)h+=section('05','Composición',check('showIcon','Mostrar icono')+(c.showIcon?iconPickerField():'')+check('showSubtitle','Mostrar subtítulo')+check('showComparison','Mostrar comparativa')+(['spark','executive','target'].includes(c.type)?check('showTrend','Mostrar gráfico'):'')+(c.type==='executive'?check('showGoal','Mostrar objetivo'):'')+check('showFooter','Mostrar pie')+(adv?field('footer','Texto del pie'):'')+duplicateContentFields(['icon','footer','goalLabel','progressLabel','progress']),false);
+ if(pro)h+=section('05','Composición',check('showIcon','Mostrar icono')+(c.showIcon?iconPickerField():'')+check('showSubtitle','Mostrar subtítulo')+check('showComparison','Mostrar comparativa')+(['spark','executive','target'].includes(c.type)?check('showTrend','Mostrar gráfico'):'')+(c.type==='executive'?check('showGoal','Mostrar objetivo'):'')+check('showFooter','Mostrar pie')+(adv?field('footer','Texto del pie'):'')+duplicateContentFields(['icon','footer','goalLabel','progressLabel','progress','trend']),false);
  }else if(tab==='style'){
  h+=section('01','Paleta',`<button class="palette-launch" data-action="themes">${icon('palette',17)}<span>Estudio de color<small>Crea, ajusta y guarda tus temas</small></span>${icon('arrow',15)}</button><div class="theme-grid">${Object.entries(THEMES).map(([k,t])=>`<button data-theme="${k}" class="theme-option ${c.theme===k?'active':''}"><span style="background:${t.background};border-color:${t.borderColor}"><i style="background:${t.accent}"></i></span>${t.name}</button>`).join('')}</div>`+field('accent','Color de acento','color')+(pro?`<div class="field-row">${field('background','Fondo','color')}${field('text','Texto','color')}</div>`:'')+(adv?field('muted','Texto secundario','color'):'')+(pro?`<div class="field-row">${field('positive','Favorable','color')}${field('negative','Desfavorable','color')}</div>`:'')+(adv?field('warning','Alerta','color'):''));
  h+=section('02','Forma y tamaño',cardDimensionsPanel()+layoutPanel()+range('radius','Radio de esquinas',0,40)+(pro?range('padding','Espacio interior',12,48)+(['solid','aurora'].includes(c.surfaceEffect)?select('shadow','Sombra',[['none','Sin sombra'],['soft','Suave'],['strong','Profunda']]):''):'')+(adv?range('borderWidth','Grosor del borde',0,4)+field('borderColor','Color del borde','color'):''));
  h+=section('03','Superficie y efectos',surfaceInspector());
  if(pro)h+=section('04','Tipografía',select('font','Familia tipográfica',[['Segoe UI','Segoe UI · Power BI'],['Arial','Arial · Universal'],['Georgia','Georgia · Editorial']])+range('valueSize','Tamaño del valor',6,140)+(adv?range('titleSize','Tamaño del título',6,140)+select('fontWeight','Peso del valor',[[400,'Regular'],[500,'Medio'],[600,'Semibold'],[700,'Negrita'],[800,'Extra bold']]):'')+select('align','Alineación',[['left','Izquierda'],['center','Centrada']]),false);
- if(elementAvailable(c,'trend'))h+=section('05','Gráfico',check('showTrend','Mostrar gráfico')+(c.showTrend?chartPanel():''),false);
+ if(elementAvailable(c,'trend'))h+=section('05','Gráfico',check('showTrend','Mostrar gráfico')+(c.showTrend?chartPanel():'')+duplicateContentFields(['trend']),false);
  }else{
  h+='<div class="data-notice">'+icon('info',17)+'<p><strong>Vinculación con Power BI.</strong>Mapea las medidas y el calendario de tu modelo con los elementos visuales.</p></div>';
  h+=section('01','Datos del modelo',dataSummaryCard()+btn('open-data-modal','Gestionar vinculación de datos','sliders','button primary full-width'));
@@ -358,7 +364,10 @@ app.addEventListener('input',e=>{
   if(id){
    const now=Date.now();if(now-lastEdit>700)record();lastEdit=now;
    const prop=t.dataset.dupval;let val=t.value;
-   if(['decimals','goodThreshold','warnThreshold'].includes(prop))val=Number(val);
+   if(t.type==='checkbox')val=t.checked;
+   else if(['decimals','goodThreshold','warnThreshold','donutThickness','lineWidth'].includes(prop)||(t.type==='range'&&prop!=='fillOpacity'))val=Number(val);
+   else if(prop==='fillOpacity')val=Number(val)/100;
+   if(t.type==='range'){const suffix=t.nextElementSibling?.textContent?.match(/(?:px|%)$/)?.[0]||'';if(t.nextElementSibling)t.nextElementSibling.textContent=(prop==='fillOpacity'?Math.round(val*100):val)+suffix;}
    const next=updateElement(c,id,{[prop]:val});
    c=sanitizeConfig(next);persist();refreshCard();updateHistoryButtons();return;
   }
@@ -378,7 +387,7 @@ app.addEventListener('input',e=>{
  if(k==='format'&&c.format==='percent')c.unit='none';
  if(t.type==='range'){const suffix=t.nextElementSibling.textContent.match(/(?:px|%)$/)?.[0]||'';t.nextElementSibling.textContent=(t.dataset.scale?Math.round(c[k]*Number(t.dataset.scale)):c[k])+suffix;}
  if(t.type==='color'){t.nextElementSibling.textContent=c[k].toUpperCase();t.nextElementSibling.nextElementSibling.style.background=c[k];}
- persist();renderStage();updateHistoryButtons();
+ persist();renderStage();refreshCard();updateHistoryButtons();
 });
 app.addEventListener('change',e=>{
  const t=e.target;
@@ -388,7 +397,9 @@ app.addEventListener('change',e=>{
   const id=t.dataset.dupid||selectedElement;
   if(id){
    const prop=t.dataset.dupval;let val=t.value;
-   if(['decimals','goodThreshold','warnThreshold'].includes(prop))val=Number(val);
+   if(t.type==='checkbox')val=t.checked;
+   else if(['decimals','goodThreshold','warnThreshold','donutThickness','lineWidth'].includes(prop)||(t.type==='range'&&prop!=='fillOpacity'))val=Number(val);
+   else if(prop==='fillOpacity')val=Number(val)/100;
    const next=updateElement(c,id,{[prop]:val});
    c=sanitizeConfig(next);persist();refreshCard();renderInspector();updateHistoryButtons();return;
   }
@@ -948,11 +959,12 @@ function copySelectedElements(){
   const def=resolveElementDef(id)||ELEMENTS[id];
   const isVal=def?.baseId==='value'||id==='value';
   const isDel=def?.baseId==='delta'||id==='delta';
+  const isTrend=def?.baseId==='trend'||id==='trend';
   return {
    id,
    baseId:def?.baseId||id,
    state:structuredClone(p),
-   text:p.text!==undefined?p.text:(def?.contentKey?c[def.contentKey]:''),
+   text:(p.text&&p.text.trim())?p.text:(def?.contentKey&&c[def.contentKey]?c[def.contentKey]:undefined),
    icon:p.icon||c.icon,
    valProps:isVal?{
     format:p.format||c.format,
@@ -964,7 +976,28 @@ function copySelectedElements(){
    }:{},
    deltaProps:isDel?{
     deltaMode:p.deltaMode||c.deltaMode,
-    compareMeasure:p.compareMeasure!==undefined?p.compareMeasure:(c.compareMeasure||'')
+    compareMeasure:p.compareMeasure!==undefined?p.compareMeasure:(c.compareMeasure||''),
+    comparison:p.comparison||c.comparison||'prev_year',
+    direction:p.direction||c.direction||'higher'
+   }:{},
+   trendProps:isTrend?{
+    chartKind:p.chartKind||c.chartKind,
+    trendStyle:p.trendStyle||c.trendStyle,
+    trendCurve:p.trendCurve||c.trendCurve,
+    areaFill:p.areaFill||c.areaFill,
+    fillOpacity:p.fillOpacity??c.fillOpacity,
+    lineWidth:p.lineWidth??c.lineWidth,
+    showMax:p.showMax!==undefined?p.showMax:c.showMax,
+    showMin:p.showMin!==undefined?p.showMin:c.showMin,
+    showDot:p.showDot!==undefined?p.showDot:c.showDot,
+    showMarkerGuides:p.showMarkerGuides!==undefined?p.showMarkerGuides:c.showMarkerGuides,
+    zeroBase:p.zeroBase!==undefined?p.zeroBase:c.zeroBase,
+    trendGrid:p.trendGrid||c.trendGrid,
+    donutThickness:p.donutThickness??c.donutThickness,
+    donutLabel:p.donutLabel!==undefined?p.donutLabel:c.donutLabel,
+    measure:p.measure!==undefined?p.measure:(c.measure||''),
+    dateTable:p.dateTable||c.dateTable||'Calendario',
+    dateColumn:p.dateColumn||c.dateColumn||'Fecha'
    }:{},
    label:def?.label||id
   };
@@ -1014,6 +1047,7 @@ function pasteElements(){
    ...item.state,
    ...item.valProps,
    ...item.deltaProps,
+   ...item.trendProps,
    x:0,
    y:0,
    hidden:false,
@@ -1333,8 +1367,9 @@ function elementInspector(){
   }else if(def.baseId==='compareLabel'){
    const curComp=p.comparison||c.comparison;
    const curTxt=p.text!==undefined?p.text:'';
+   const autoLbl=comparisonLabel({comparison:curComp});
    specific=`<div class="field"><label for="f-dup-clcmp">Comparar con</label><select id="f-dup-clcmp" data-dupval="comparison">${comparisons.map(([k,l])=>`<option value="${k}" ${curComp===k?'selected':''}>${l}</option>`).join('')}</select></div>`+
-    `<div class="field"><label for="f-duptext">Texto personalizado</label><input id="f-duptext" data-duptext="${id}" value="${esc(curTxt)}" placeholder="ej. vs. período anterior"></div>`;
+    `<div class="field"><label for="f-duptext">Texto de comparación</label><input id="f-duptext" data-duptext="${id}" value="${esc(curTxt)}" placeholder="${esc(autoLbl)} (automático)"></div>`;
   }else if(def.baseId==='status'){
    const curGood=p.statusGood!==undefined?p.statusGood:(c.statusGood||'Favorable');
    const curWarn=p.statusWarn!==undefined?p.statusWarn:(c.statusWarn||'En alerta');
@@ -1351,6 +1386,8 @@ function elementInspector(){
    specific=`<div class="field"><label for="f-dup-rcmp">Comparar con</label><select id="f-dup-rcmp" data-dupval="comparison">${comparisons.map(([k,l])=>`<option value="${k}" ${curComp===k?'selected':''}>${l}</option>`).join('')}</select></div>`;
   }else if(['goalLabel','progressLabel','progress'].includes(def.baseId)){
    specific='<p class="field-help">La medida objetivo se configura en Conectar datos del modelo.</p>';
+  }else if(def.baseId==='trend'){
+   specific=chartPanel(id);
   }else{
    const currentVal=p.text!==undefined?p.text:(def.contentKey?c[def.contentKey]:def.label);
    specific=`<div class="field"><label for="f-duptext">Texto</label><input id="f-duptext" data-duptext="${id}" value="${esc(currentVal)}" placeholder="Texto del elemento…"></div>`;
@@ -1364,7 +1401,12 @@ function elementInspector(){
     `<div class="field-row">${select('unit','Escala',[['auto','Automática'],['none','Sin escalar'],['k','Miles'],['m','Millones']])}${select('decimals','Decimales',[[0,'0'],[1,'1'],[2,'2'],[3,'3']])}</div>`+
     field('suffix','Sufijo del valor');
   }
-  if(['delta','compareLabel','referenceLabel','referenceValue'].includes(id))specific=select('comparison','Comparar con',comparisons)+(id==='delta'?select('direction','¿Qué significa mejorar?',[['up','Cuanto más, mejor ↑'],['down','Cuanto menos, mejor ↓'],['neutral','Sin valoración favorable']])+select('deltaMode','Mostrar diferencia',[['relative','Porcentaje'],['absolute','Diferencia absoluta'],['pp','Puntos porcentuales']]):'');
+  if(['delta','referenceLabel','referenceValue'].includes(id))specific=select('comparison','Comparar con',comparisons)+(id==='delta'?select('direction','¿Qué significa mejorar?',[['up','Cuanto más, mejor ↑'],['down','Cuanto menos, mejor ↓'],['neutral','Sin valoración favorable']])+select('deltaMode','Mostrar diferencia',[['relative','Porcentaje'],['absolute','Diferencia absoluta'],['pp','Puntos porcentuales']]):'');
+  if(id==='compareLabel'){
+   const curTxt=elementState(c,'compareLabel').text||'';
+   const autoLbl=comparisonLabel(c);
+   specific=select('comparison','Comparar con',comparisons)+`<div class="field"><label for="f-complabel-text">Texto de comparación</label><input id="f-complabel-text" data-duptext="compareLabel" value="${esc(curTxt)}" placeholder="${esc(autoLbl)} (automático)"></div>`;
+  }
   if(id==='trend')specific=chartPanel();
   if(['goalLabel','progress','progressLabel'].includes(id))specific='<p class="field-help">La medida objetivo se configura en Conectar datos del modelo.</p>';
   if(id==='status')specific=field('statusGood','Texto favorable')+field('statusWarn','Texto de alerta')+field('statusBad','Texto desfavorable')+`<div class="field-row">${field('goodThreshold','Umbral favorable','number')}${field('warnThreshold','Umbral alerta','number')}</div>`;
@@ -1869,10 +1911,11 @@ document.addEventListener('input',e=>{
  const dupId=e.target.dataset?.bindDup;
  if(dupId){
   const prop=e.target.dataset?.bindDupprop||'measure';
+  const fieldKey=e.target.dataset?.bindFieldKey||dupId;
   const val=e.target.value;
   c=updateElement(c,dupId,{[prop]:val});
   persist();
-  const clearBtn=document.querySelector(`[data-action="clear-bind-dup"][data-dup="${dupId}"]`);
+  const clearBtn=document.querySelector(`[data-action="clear-bind-dup"][data-field="${fieldKey}"]`)||document.querySelector(`[data-action="clear-bind-dup"][data-dup="${dupId}"]`);
   if(clearBtn)clearBtn.classList.toggle('is-visible',Boolean(val));
   const inner=document.getElementById('binding-card-inner');
   if(inner){
@@ -1883,11 +1926,11 @@ document.addEventListener('input',e=>{
   }
   refreshCard();
   renderStatus();
-  const menu=document.getElementById(`dropdown-menu-${dupId}`);
+  const menu=document.getElementById(`dropdown-menu-${fieldKey}`)||document.getElementById(`dropdown-menu-${dupId}`);
   if(menu&&pbipModel){
-   menu.innerHTML=renderBindingDropdown(dupId,val);
+   menu.innerHTML=renderBindingDropdown(fieldKey,val);
    menu.classList.add('is-open');
-   const toggle=document.querySelector(`[data-action="toggle-bind-dropdown"][data-field="${dupId}"]`);
+   const toggle=document.querySelector(`[data-action="toggle-bind-dropdown"][data-field="${fieldKey}"]`)||document.querySelector(`[data-action="toggle-bind-dropdown"][data-field="${dupId}"]`);
    if(toggle)toggle.setAttribute('aria-expanded','true');
   }
   return;
@@ -1960,9 +2003,10 @@ document.addEventListener('click',e=>{
  if(clearDupBtn){
   const dupId=clearDupBtn.dataset.dup;
   const prop=clearDupBtn.dataset.prop||'measure';
+  const fieldKey=clearDupBtn.dataset.field||dupId;
   c=updateElement(c,dupId,{[prop]:''});
   persist();
-  const input=document.getElementById(`f-bind-${dupId}`);
+  const input=document.getElementById(`f-bind-${fieldKey}`)||document.getElementById(`f-bind-${dupId}`);
   if(input){input.value='';input.focus();}
   clearDupBtn.classList.remove('is-visible');
   const inner=document.getElementById('binding-card-inner');
@@ -2043,10 +2087,10 @@ document.addEventListener('click',e=>{
  if(!b)return;closeModal();const def=selectedElement?resolveElementDef(selectedElement):null;if(def?.isDuplicate&&def.baseId==='icon'){directChange(updateElement(c,selectedElement,{icon:b.dataset.pickIcon}));}else{directChange({...restoreElement(c,'icon'),icon:b.dataset.pickIcon});}toast('Icono actualizado.');
 });
 document.addEventListener('focusin',e=>{
- const key=e.target.dataset?.bindKey||e.target.dataset?.bindDup;
+ const key=e.target.dataset?.bindKey||e.target.dataset?.bindFieldKey||e.target.dataset?.bindDup;
  if(key){
   highlightBindingElements(key,true);
-  if(pbipModel&&(['measure','targetMeasure','compareMeasure','dateTable','dateColumn'].includes(key)||key.includes('_copy'))){
+  if(pbipModel&&(['measure','targetMeasure','compareMeasure','dateTable','dateColumn'].includes(key)||key.includes('_copy')||key.includes('__'))){
    const menu=document.getElementById(`dropdown-menu-${key}`);
    if(menu){
     closeAllBindingDropdowns();
@@ -2061,7 +2105,7 @@ document.addEventListener('focusin',e=>{
  }
 });
 document.addEventListener('focusout',e=>{
- const key=e.target.dataset?.bindKey||e.target.dataset?.bindDup;
+ const key=e.target.dataset?.bindKey||e.target.dataset?.bindFieldKey||e.target.dataset?.bindDup;
  if(key)highlightBindingElements(key,false);
 });
 document.addEventListener('mouseover',e=>{
@@ -2138,7 +2182,8 @@ function dataSummaryCard(){
 }
 
 function highlightBindingElements(key,active){
- const targets=FIELD_TO_ELEMENTS[key]||(resolveElementDef(key)?.isDuplicate?[key]:[]);
+ const baseKey=key.includes('__')?key.split('__')[0]:key;
+ const targets=FIELD_TO_ELEMENTS[key]||FIELD_TO_ELEMENTS[baseKey]||(resolveElementDef(baseKey)?.isDuplicate?[baseKey]:[]);
  const card=document.getElementById('binding-card-inner');
  if(!card)return;
  targets.forEach(id=>{
@@ -2216,7 +2261,7 @@ function updateBindableElements(){
    return;
   }
   const fieldKey=ELEMENT_TO_FIELD[id];
-  const isDupBindable=isDuplicate&&(def.baseId==='value'||(def.baseId==='delta'&&(elementState(c,id).comparison||c.comparison)==='custom')||(['goalLabel','progressLabel','progress'].includes(def.baseId)&&(needsGoal(c)||c.comparison==='target')));
+  const isDupBindable=isDuplicate&&(def.baseId==='value'||(def.baseId==='delta'&&(elementState(c,id).comparison||c.comparison)==='custom')||(['goalLabel','progressLabel','progress'].includes(def.baseId)&&(needsGoal(c)||c.comparison==='target'))||def.baseId==='trend');
   const isBindable=isDupBindable||Boolean(fieldKey&&activeFields.has(fieldKey));
   el.classList.toggle('is-bindable',isBindable);
   if(!isBindable){
@@ -2242,18 +2287,17 @@ function fitBindingCard(){
 
 function getBindingFieldOptions(key){
  if(!pbipModel)return [];
- if(['measure','targetMeasure','compareMeasure'].includes(key)||key.includes('_copy')){
-  return (pbipModel.measures||[]).map(m=>({value:m.name,label:m.name,desc:m.table||'Medida'}));
- }
- if(key==='dateTable'){
+ if(key.endsWith('__dateTable')||key==='dateTable'){
   return (pbipModel.dateTables||[]).map(dt=>({
    value:dt.name,
    label:dt.name,
    desc:dt.isMarkedDateTable?'⭐ Fecha oficial (dataCategory: Time)':dt.isLikelyCalendar?'Calendario sugerido':`${dt.dateColumns.length} cols fecha`
   }));
  }
- if(key==='dateColumn'){
-  const curDt=(pbipModel.dateTables||[]).find(dt=>dt.name.toLowerCase()===(c.dateTable||'').trim().toLowerCase());
+ if(key.endsWith('__dateColumn')||key==='dateColumn'){
+  const targetDupId=key.includes('__')?key.split('__')[0]:null;
+  const targetDateTable=targetDupId?(elementState(c,targetDupId).dateTable||c.dateTable):c.dateTable;
+  const curDt=(pbipModel.dateTables||[]).find(dt=>dt.name.toLowerCase()===(targetDateTable||'').trim().toLowerCase());
   const candidateDateCols=curDt?curDt.dateColumns:Array.from(new Set((pbipModel.dateTables||[]).flatMap(dt=>dt.dateColumns)));
   return candidateDateCols.map(col=>{
    const isKey=curDt&&curDt.primaryDateColumn===col;
@@ -2264,13 +2308,24 @@ function getBindingFieldOptions(key){
    };
   });
  }
+ if(['measure','targetMeasure','compareMeasure'].includes(key)||key.includes('_copy')||key.endsWith('__measure')){
+  return (pbipModel.measures||[]).map(m=>({value:m.name,label:m.name,desc:m.table||'Medida'}));
+ }
  return [];
 }
 
 function renderBindingDropdown(key,filterText=''){
  const options=getBindingFieldOptions(key);
- const def=resolveElementDef(key);
- const currentVal=(def?.isDuplicate?elementState(c,key)[def.baseId==='delta'?'compareMeasure':['goalLabel','progressLabel','progress'].includes(def.baseId)?'targetMeasure':'measure']:c[key]||'').trim().toLowerCase();
+ const [dupId,subProp]=key.includes('__')?key.split('__'):[key,null];
+ const def=resolveElementDef(dupId);
+ let currentVal='';
+ if(subProp){
+  currentVal=(elementState(c,dupId)[subProp]||(subProp==='dateTable'?c.dateTable:subProp==='dateColumn'?c.dateColumn:'')||'').trim().toLowerCase();
+ }else if(def?.isDuplicate){
+  currentVal=(elementState(c,dupId)[def.baseId==='delta'?'compareMeasure':['goalLabel','progressLabel','progress'].includes(def.baseId)?'targetMeasure':'measure']||'').trim().toLowerCase();
+ }else{
+  currentVal=(c[key]||'').trim().toLowerCase();
+ }
  const q=(filterText||'').trim().toLowerCase();
  const filtered=q?options.filter(o=>o.label.toLowerCase().includes(q)||o.desc.toLowerCase().includes(q)):options;
  if(!filtered.length){
@@ -2298,7 +2353,24 @@ function closeAllBindingDropdowns(){
 }
 
 function applyBindingFieldValue(key,val){
- if(key.includes('_copy')){
+ if(key.includes('__')){
+  const [dupId,prop]=key.split('__');
+  let patch={};
+  if(prop==='dateTable'){
+   patch.dateTable=val;
+   if(pbipModel){
+    const curDt=(pbipModel.dateTables||[]).find(dt=>dt.name.toLowerCase()===val.trim().toLowerCase());
+    if(curDt&&(curDt.primaryDateColumn||curDt.dateColumns[0])){
+     patch.dateColumn=curDt.primaryDateColumn||curDt.dateColumns[0];
+     const colInput=document.getElementById(`f-bind-${dupId}__dateColumn`);
+     if(colInput)colInput.value=patch.dateColumn;
+    }
+   }
+  }else{
+   patch[prop]=val;
+  }
+  c=updateElement(c,dupId,patch);
+ }else if(key.includes('_copy')){
   const def=resolveElementDef(key);
   const prop=def?.baseId==='delta'?'compareMeasure':['goalLabel','progressLabel','progress'].includes(def?.baseId)?'targetMeasure':'measure';
   c=updateElement(c,key,{[prop]:val});
@@ -2551,6 +2623,7 @@ function openDataBindingModal(focusKey=null){
   if(def.baseId==='value')return true;
   if(def.baseId==='delta')return (st.comparison||c.comparison)==='custom';
   if(['goalLabel','progressLabel','progress'].includes(def.baseId))return needsGoal(c)||(st.comparison||c.comparison)==='target';
+  if(def.baseId==='trend')return true;
   return false;
  });
  if(activeDupIds.length){
@@ -2560,64 +2633,44 @@ function openDataBindingModal(focusKey=null){
   for(const dupId of activeDupIds){
    const def=resolveElementDef(dupId);
    const st=elementState(c,dupId);
-   let label=def.label;
-   let prop='measure';
-   let ph='Medida o valor';
-   let val='';
-   let iconChar='fx';
-   if(def.baseId==='value'){
-    prop='measure';
-    label=`Medida de ${def.label}`;
-    ph=pbipModel?.measures?.[0]?.name||'Medida numérica';
-    val=st.measure||'';
-    iconChar='fx';
-   }else if(def.baseId==='delta'){
-    prop='compareMeasure';
-    label=`Comparación de ${def.label}`;
-    ph=pbipModel?.measures?.[0]?.name||'Medida de comparación';
-    val=st.compareMeasure||'';
-    iconChar='fx';
-   }else if(['goalLabel','progressLabel','progress'].includes(def.baseId)){
-    prop='targetMeasure';
-    label=`Objetivo de ${def.label}`;
-    ph='[Objetivo] o número';
-    val=st.targetMeasure||'';
-    iconChar='🎯';
-   }else if(def.baseId==='icon'){
-    prop='icon';
-    label=`Icono de ${def.label}`;
-    ph=st.icon||c.icon||'icono';
-    val=st.icon||'';
-    iconChar='★';
-   }else{
-    prop='text';
-    label=`Texto de ${def.label}`;
-    ph=def.label;
-    val=st.text!==undefined?st.text:'';
-    iconChar='T';
+   const dupEntries=def.baseId==='trend'?[
+    {prop:'measure',label:`Medida de ${def.label}`,ph:pbipModel?.measures?.[0]?.name||'Medida numérica',val:st.measure||'',iconChar:'fx',fieldKey:`${dupId}__measure`},
+    {prop:'dateTable',label:`Tabla de fechas (${def.label})`,ph:'Calendario',val:st.dateTable||c.dateTable||'Calendario',iconChar:'田',fieldKey:`${dupId}__dateTable`},
+    {prop:'dateColumn',label:`Columna de fecha (${def.label})`,ph:'Fecha',val:st.dateColumn||c.dateColumn||'Fecha',iconChar:'▦',fieldKey:`${dupId}__dateColumn`}
+   ]:[
+    {
+     prop:def.baseId==='value'?'measure':def.baseId==='delta'?'compareMeasure':['goalLabel','progressLabel','progress'].includes(def.baseId)?'targetMeasure':def.baseId==='icon'?'icon':'text',
+     label:def.baseId==='value'?`Medida de ${def.label}`:def.baseId==='delta'?`Comparación de ${def.label}`:['goalLabel','progressLabel','progress'].includes(def.baseId)?`Objetivo de ${def.label}`:def.baseId==='icon'?`Icono de ${def.label}`:`Texto de ${def.label}`,
+     ph:def.baseId==='value'?(pbipModel?.measures?.[0]?.name||'Medida numérica'):def.baseId==='delta'?(pbipModel?.measures?.[0]?.name||'Medida de comparación'):['goalLabel','progressLabel','progress'].includes(def.baseId)?'[Objetivo] o número':def.baseId==='icon'?(st.icon||c.icon||'icono'):def.label,
+     val:def.baseId==='value'?(st.measure||''):def.baseId==='delta'?(st.compareMeasure||''):['goalLabel','progressLabel','progress'].includes(def.baseId)?(st.targetMeasure||''):def.baseId==='icon'?(st.icon||''):(st.text!==undefined?st.text:''),
+     iconChar:['value','delta'].includes(def.baseId)?'fx':['goalLabel','progressLabel','progress'].includes(def.baseId)?'🎯':def.baseId==='icon'?'★':'T',
+     fieldKey:dupId
+    }
+   ];
+   for(const entry of dupEntries){
+    const hasDropdown=Boolean(pbipModel&&['measure','compareMeasure','targetMeasure','dateTable','dateColumn'].includes(entry.prop));
+    const quickBadge=pbipModel&&hasDropdown?`<span class="pbip-quick-chip" title="Autocompletado activo">${['dateTable','dateColumn'].includes(entry.prop)?(entry.prop==='dateTable'?'Calendario':'Fecha'):`${pbipModel.measures.length} medidas`}</span>`:'';
+    fieldsHTML+=`
+     <div class="binding-field" data-binding-field="${entry.fieldKey}">
+      <label class="binding-field-label" for="f-bind-${entry.fieldKey}">
+       <span>${entry.label}</span>
+       <div class="binding-badges-wrap">
+        ${quickBadge}
+        <span class="target-element-badge">Copia independiente</span>
+       </div>
+      </label>
+      <div class="binding-dropdown-wrap ${hasDropdown?'has-dropdown':''}">
+       <div class="binding-input-wrap">
+        <span class="binding-input-icon">${entry.iconChar}</span>
+        <input id="f-bind-${entry.fieldKey}" class="binding-input" data-bind-dup="${dupId}" data-bind-dupprop="${entry.prop}" data-bind-field-key="${entry.fieldKey}" type="text" value="${esc(entry.val)}" placeholder="Ejemplo: ${esc(entry.ph)}" spellcheck="false" autocomplete="off">
+        <button type="button" class="binding-clear-btn ${entry.val?'is-visible':''}" data-action="clear-bind-dup" data-dup="${dupId}" data-prop="${entry.prop}" data-field="${entry.fieldKey}" title="Borrar selección" aria-label="Borrar selección">${icon('eraser',13)}</button>
+        ${hasDropdown?`<button type="button" class="binding-dropdown-toggle" data-action="toggle-bind-dropdown" data-field="${entry.fieldKey}" title="Ver todas las opciones" aria-label="Ver todas las opciones" aria-expanded="false">${icon('chevronDown',12)}</button>`:''}
+        <span class="binding-input-status ${entry.val?'valid':'optional'}">${icon(entry.val?'check':'info',entry.val?14:13)}</span>
+       </div>
+       ${hasDropdown?`<div class="binding-dropdown-menu" id="dropdown-menu-${entry.fieldKey}" role="listbox" aria-label="Opciones para ${esc(entry.label)}"></div>`:''}
+      </div>
+     </div>`;
    }
-   const hasDropdown=Boolean(pbipModel&&['measure','compareMeasure','targetMeasure'].includes(prop));
-   const quickBadge=pbipModel&&hasDropdown?`<span class="pbip-quick-chip" title="Autocompletado activo">${pbipModel.measures.length} medidas</span>`:'';
-   fieldsHTML+=`
-    <div class="binding-field" data-binding-field="${dupId}">
-     <label class="binding-field-label" for="f-bind-${dupId}">
-      <span>${label}</span>
-      <div class="binding-badges-wrap">
-       ${quickBadge}
-       <span class="target-element-badge">Copia independiente</span>
-      </div>
-     </label>
-     <div class="binding-dropdown-wrap ${hasDropdown?'has-dropdown':''}">
-      <div class="binding-input-wrap">
-       <span class="binding-input-icon">${iconChar}</span>
-       <input id="f-bind-${dupId}" class="binding-input" data-bind-dup="${dupId}" data-bind-dupprop="${prop}" type="text" value="${esc(val)}" placeholder="Ejemplo: ${esc(ph)}" spellcheck="false" autocomplete="off">
-       <button type="button" class="binding-clear-btn ${val?'is-visible':''}" data-action="clear-bind-dup" data-dup="${dupId}" data-prop="${prop}" title="Borrar selección" aria-label="Borrar selección">${icon('eraser',13)}</button>
-       ${hasDropdown?`<button type="button" class="binding-dropdown-toggle" data-action="toggle-bind-dropdown" data-field="${dupId}" title="Ver todas las opciones" aria-label="Ver todas las opciones" aria-expanded="false">${icon('chevronDown',12)}</button>`:''}
-       <span class="binding-input-status ${val?'valid':'optional'}">${icon(val?'check':'info',val?14:13)}</span>
-      </div>
-      ${hasDropdown?`<div class="binding-dropdown-menu" id="dropdown-menu-${dupId}" role="listbox" aria-label="Opciones para ${esc(label)}"></div>`:''}
-     </div>
-    </div>`;
   }
  }
  fieldsHTML+=`</div></div>`;
@@ -2658,15 +2711,37 @@ function openDataBindingModal(focusKey=null){
 
 function cardDimensionsPanel(){return `<div class="field-row">${field('width','Ancho · px','number',{min:200,max:800})}${field('height','Alto · px','number',{min:200,max:650})}</div><p class="geometry-note">Mínimo 200 × 200 px. Los elementos visuales escalables se adaptan proporcionalmente al tamaño de la tarjeta.</p>`;}
 function layoutPanel(){return `<div class="field"><label>Distribución</label><div class="layout-options">${[['stacked','Vertical'],['chart-left','Gráfico izq.'],['chart-right','Gráfico der.']].filter(([id])=>id==='stacked'||elementAvailable(c,'trend')).map(([id,label])=>`<button data-layout="${id}" class="${c.layout===id?'active':''}" aria-pressed="${c.layout===id}" title="Aplicar distribución: ${label}"><span class="layout-mini ${id}"><i></i><b></b></span>${label}</button>`).join('')}</div><small>Aplicar una distribución recoloca los elementos. Puedes deshacerlo.</small></div>`;}
-function chartPanel(){
+function chartPanel(targetId='trend'){
+ const isOrig=targetId==='trend';
+ const st=isOrig?c:elementState(c,targetId);
  const pro=mode!=='essential',adv=mode==='advanced';
- let h=select('chartKind','Visual',[['trend','Tendencia'],['donut','Donut · avance del objetivo']]);
- if(c.chartKind==='donut')return h+(tab==='style'&&pro?range('trendHeight','Altura del gráfico',24,240):'')+field('targetMeasure','Medida objetivo')+range('donutThickness','Grosor del anillo',4,28)+check('donutLabel','Mostrar porcentaje central')+'<p class="field-help">Valor / objetivo positivo. El anillo se limita a 100 %; la etiqueta muestra el avance real.</p>';
- h+=select('trendStyle','Representación',[['area','Línea con área'],['line','Solo línea'],['bars','Barras']]);
- if(c.trendStyle!=='bars')h+=select('trendCurve','Trazado',[['smooth','Suave'],['linear','Recto'],['step','Escalonado']]);
- if(c.trendStyle==='area')h+=select('areaFill','Relleno del área',[['gradient','Degradado suave'],['solid','Uniforme']])+(pro?percentRange('fillOpacity','Intensidad del área'):'');
- if(pro)h+=(tab==='style'?range('trendHeight','Altura del gráfico',24,240):'')+check('showMax','Máximo y etiqueta')+check('showMin','Mínimo y etiqueta')+check('showDot','Destacar último punto');
- if(adv)h+=range('lineWidth','Grosor del trazo',1,6,'px',.2)+select('trendGrid','Guías de fondo',[['none','Sin guías'],['horizontal','Líneas sutiles'],['dots','Líneas de puntos']])+check('showMarkerGuides','Guías en máximo y mínimo')+check('zeroBase','Incluir cero en la escala');
+ const cKind=st.chartKind||c.chartKind;
+ const tStyle=st.trendStyle||c.trendStyle;
+ const tCurve=st.trendCurve||c.trendCurve;
+ const aFill=st.areaFill||c.areaFill;
+ const fOpacity=st.fillOpacity??c.fillOpacity;
+ const lWidth=st.lineWidth??c.lineWidth;
+ const tGrid=st.trendGrid||c.trendGrid;
+ const dThick=st.donutThickness??c.donutThickness;
+ const dLabel=st.donutLabel!==undefined?st.donutLabel:c.donutLabel;
+ const sMax=st.showMax!==undefined?st.showMax:c.showMax;
+ const sMin=st.showMin!==undefined?st.showMin:c.showMin;
+ const sDot=st.showDot!==undefined?st.showDot:c.showDot;
+ const sGuides=st.showMarkerGuides!==undefined?st.showMarkerGuides:c.showMarkerGuides;
+ const zBase=st.zeroBase!==undefined?st.zeroBase:c.zeroBase;
+
+ const dSel=(k,l,opts)=>isOrig?select(k,l,opts):`<div class="field"><label for="f-dup-${k}-${targetId}">${l}</label><select id="f-dup-${k}-${targetId}" data-dupval="${k}" data-dupid="${targetId}">${opts.map(([v,txt])=>`<option value="${v}" ${(k==='chartKind'?cKind:k==='trendStyle'?tStyle:k==='trendCurve'?tCurve:k==='areaFill'?aFill:tGrid)===v?'selected':''}>${txt}</option>`).join('')}</select></div>`;
+ const dChk=(k,l)=>isOrig?check(k,l):`<label class="toggle-field" for="f-dup-${k}-${targetId}"><span>${l}</span><input id="f-dup-${k}-${targetId}" type="checkbox" data-dupval="${k}" data-dupid="${targetId}" ${(k==='donutLabel'?dLabel:k==='showMax'?sMax:k==='showMin'?sMin:k==='showDot'?sDot:k==='showMarkerGuides'?sGuides:zBase)?'checked':''}><span class="toggle-track"></span></label>`;
+ const dRng=(k,l,min,max,unit='px',step=1)=>isOrig?range(k,l,min,max,unit,step):`<div class="field"><label for="f-dup-${k}-${targetId}">${l}</label><div class="range-wrap"><input id="f-dup-${k}-${targetId}" data-dupval="${k}" data-dupid="${targetId}" type="range" min="${min}" max="${max}" step="${step}" value="${k==='donutThickness'?dThick:lWidth}"><output for="f-dup-${k}-${targetId}">${k==='donutThickness'?dThick:lWidth}${unit}</output></div></div>`;
+ const dPct=(k,l)=>isOrig?percentRange(k,l):`<div class="field"><label for="f-dup-${k}-${targetId}">${l}</label><div class="range-wrap"><input id="f-dup-${k}-${targetId}" data-dupval="${k}" data-dupid="${targetId}" type="range" min="0" max="100" step="1" value="${Math.round(fOpacity*100)}"><output for="f-dup-${k}-${targetId}">${Math.round(fOpacity*100)}%</output></div></div>`;
+
+ let h=dSel('chartKind','Visual',[['trend','Tendencia'],['donut','Donut · avance del objetivo']]);
+ if(cKind==='donut')return h+(tab==='style'&&pro?(isOrig?range('trendHeight','Altura del gráfico',24,240):''):'')+(isOrig?field('targetMeasure','Medida objetivo'):'')+dRng('donutThickness','Grosor del anillo',4,28)+dChk('donutLabel','Mostrar porcentaje central')+'<p class="field-help">Valor / objetivo positivo. El anillo se limita a 100 %; la etiqueta muestra el avance real.</p>';
+ h+=dSel('trendStyle','Representación',[['area','Línea con área'],['line','Solo línea'],['bars','Barras']]);
+ if(tStyle!=='bars')h+=dSel('trendCurve','Trazado',[['smooth','Suave'],['linear','Recto'],['step','Escalonado']]);
+ if(tStyle==='area')h+=dSel('areaFill','Relleno del área',[['gradient','Degradado suave'],['solid','Uniforme']])+(pro?dPct('fillOpacity','Intensidad del área'):'');
+ if(pro)h+=(tab==='style'&&(isOrig?range('trendHeight','Altura del gráfico',24,240):''))+dChk('showMax','Máximo y etiqueta')+dChk('showMin','Mínimo y etiqueta')+dChk('showDot','Destacar último punto');
+ if(adv)h+=dRng('lineWidth','Grosor del trazo',1,6,'px',.2)+dSel('trendGrid','Guías de fondo',[['none','Sin guías'],['horizontal','Líneas sutiles'],['dots','Líneas de puntos']])+dChk('showMarkerGuides','Guías en máximo y mínimo')+dChk('zeroBase','Incluir cero en la escala');
  return h+(pro?'<p class="geometry-note">Las etiquetas necesitan al menos 100 × 56 px. En gráficos pequeños se conservan los puntos.</p>':'');
 }
 function cardInspector(){return `<div class="selected-object-heading"><span>${icon('square',20)}</span><div><strong>Tarjeta</strong><small>Lienzo de tamaño fijo</small></div>${ib('deselect','Deseleccionar','close')}</div>`+section('01','Tamaño del lienzo',cardDimensionsPanel())+section('02','Distribución',layoutPanel())+section('03','Superficie y efectos',surfaceInspector(),false);}

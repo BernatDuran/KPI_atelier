@@ -594,9 +594,10 @@ button:active:not(:disabled) {
   flex-direction:column;
   align-items:safe center;
   justify-content:safe center;
-  padding:48px 40px;
+  padding:26px 32px;
   overflow:auto;
-  gap:22px;
+  scrollbar-gutter:stable;
+  gap:14px;
   transition:background-color .25s
 }
 .stage.dark-stage {
@@ -3498,11 +3499,44 @@ dialog #toast {
   color:#4f7040
 }
 .glass-stage {
+  position:relative;
   background-image:radial-gradient(ellipse at 70% 35%,var(--glass-accent),transparent 60%),radial-gradient(#c8d0bf99 .65px,transparent .65px);
   background-size:100% 100%,16px 16px
 }
-.glass-stage.dark-stage {
-  background-image:radial-gradient(ellipse at 70% 35%,var(--glass-accent),transparent 60%),radial-gradient(#586455 1px,transparent 1px)
+.glass-stage::before,
+.glass-stage::after {
+  content:"";
+  position:absolute;
+  pointer-events:none;
+  border-radius:50%;
+  z-index:0;
+  transition:opacity .3s ease
+}
+.glass-stage::before {
+  width:240px;
+  height:240px;
+  top:22%;
+  left:18%;
+  background:radial-gradient(circle,rgba(99,102,241,.45) 0%,rgba(168,85,247,.25) 50%,transparent 70%);
+  filter:blur(32px)
+}
+.glass-stage::after {
+  width:280px;
+  height:280px;
+  bottom:18%;
+  right:20%;
+  background:radial-gradient(circle,rgba(16,185,129,.4) 0%,rgba(59,130,246,.2) 60%,transparent 75%);
+  filter:blur(36px)
+}
+.glass-stage.dark-stage::before {
+  background:radial-gradient(circle,rgba(129,140,248,.35) 0%,rgba(192,132,252,.2) 50%,transparent 70%)
+}
+.glass-stage.dark-stage::after {
+  background:radial-gradient(circle,rgba(52,211,153,.3) 0%,rgba(96,165,250,.15) 60%,transparent 75%)
+}
+.glass-stage .card-fit {
+  position:relative;
+  z-index:1
 }
 .glass-stage .main-card {
   filter:none
@@ -3709,12 +3743,8 @@ dialog #toast {
 .is-dragging .selection-name {
   display:none!important
 }
-.is-dragging #stage,
-.is-dragging.stage,
-.stage.guides-active,
-#stage:has(#smart-guides:not(:empty)) {
-  overflow:clip!important
-}
+/* Preserve stage scroll context during dragging/guides to prevent jump */
+
 
 @media(max-width:680px){.current-family{gap:8px}.current-family .compact-guide{margin-left:0}.canvas-object-label{min-width:0;flex:1}.canvas-object-label>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.canvas-object-actions{flex-shrink:0}.smart-guide b{display:none}}
 

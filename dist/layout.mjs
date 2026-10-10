@@ -20,7 +20,7 @@ export function presetFrames(c){
  put('footer',p,h-p-12,w*.54,13);put('period',p+w*.56,h-p-12,w*.44,13);
  return f;
 }
-export function elementFrame(c,id){return elementState(c,id).frame||presetFrames(c)[id];}
+export function elementFrame(c,id){return elementState(c,id).frame||presetFrames(c)[id]||presetFrames(c)[id?.replace(/_copy\d+$/,'')];}
 export function freezeLayout(c){
  const frames=presetFrames(c);
  const baseEntries=ELEMENT_IDS.map(id=>[id,{...elementState(c,id),frame:elementState(c,id).frame||frames[id]}]);
@@ -131,4 +131,4 @@ export function resizeCard(c,width=c.width,height=c.height,adaptive=true){
  return {...freezeLayout(c),width:clamp(Math.round(width),...CARD_LIMITS.width),height:clamp(Math.round(height),...CARD_LIMITS.height)};
 }
 export function applyLayout(c,layout){return {...c,geometryVersion:2,layout,elements:Object.fromEntries(ELEMENT_IDS.map(id=>{const p={...elementState(c,id),x:0,y:0,width:0};delete p.frame;return [id,p]}))};}
-export function chartDimensions(c){const p=elementState(c,'trend');return {width:Math.max(24,p.width||elementFrame(c,'trend').width),height:c.trendHeight};}
+export function chartDimensions(c,elementId='trend'){const p=elementState(c,elementId),f=elementFrame(c,elementId);const w=p.width||f?.width||(c.width-2*c.padding-2*c.borderWidth);const h=p.size||(elementId==='trend'?c.trendHeight:p.trendHeight)||c.trendHeight||75;return {width:Math.max(24,w),height:h};}
