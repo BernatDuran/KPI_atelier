@@ -71,13 +71,28 @@ export function cardHTML(c,d=sampleData(c),editor=false){
   if(!def)continue;
   const dupState=elementState(c,dupId);
   if(!dupState||dupState.deleted)continue;
-  let dupContent='';
-  if(def.kind==='icon'){dupContent=icon(dupState.icon||c.icon,elementSize(c,dupId),color(dupId));}
-  else if(def.baseId==='value'){dupContent=d[`val_${dupId}`]||esc(formatNumber(c.sampleValue,{...c,...dupState}));}
-  else if(def.baseId==='delta'){dupContent=d[`delta_${dupId}`]||`${d.arrow} ${d.delta}`;}
-  else if(def.baseId==='status'){dupContent=`<span style="font-weight:600;color:${color(dupId)}">${d.status}</span>`;}
-  else {dupContent=esc(dupState.text!==undefined?dupState.text:(def.contentKey?c[def.contentKey]:def.label));}
-  el(dupId,dupContent);
+  let dupContent='',dupExtra='';
+  if(def.kind==='icon'){
+   dupContent=icon(dupState.icon||c.icon,elementSize(c,dupId),color(dupId));
+   dupExtra=`display:flex;flex-shrink:0;line-height:0;background:${bg(dupId)};border-radius:8px;`;
+  }
+  else if(def.baseId==='value'){
+   dupContent=d[`val_${dupId}`]||esc(formatNumber(c.sampleValue,{...c,...dupState}));
+   dupExtra=`line-height:1.12;letter-spacing:-1.8px;font-weight:${c.fontWeight};`;
+  }
+  else if(def.baseId==='delta'){
+   dupContent=d[`delta_${dupId}`]||`${d.arrow} ${d.delta}`;
+   dupExtra=`background:${bg(dupId)};padding:5px 8px;border-radius:6px;font-weight:600;line-height:1.4;width:fit-content;`;
+  }
+  else if(def.baseId==='status'){
+   dupContent=`<span style="font-weight:600;color:${color(dupId)}">${d.status}</span>`;
+   dupExtra=`display:flex;align-items:center;gap:10px;padding:14px;border-radius:10px;line-height:1.4;background:${bg(dupId)};`;
+  }
+  else {
+   dupContent=esc(dupState.text!==undefined?dupState.text:(def.contentKey?c[def.contentKey]:def.label));
+   dupExtra='line-height:1.4;';
+  }
+  el(dupId,dupContent,dupExtra);
  }
  return `<div${editor?' data-card-surface="true"':''} style="${style}">${heading}${metric}${comparison}${status}${trend}${goal}${prior}${footer}${detached.join('')}</div>`;
 }

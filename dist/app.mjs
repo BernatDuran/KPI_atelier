@@ -16,7 +16,7 @@ saved=saved.filter(x=>x&&typeof x.id==='string'&&x.config).map(x=>({...x,config:
 let view='designer',mode=read('kpi-atelier-mode','essential'),tab='content',filter='all',query='',context=false,zoom=100,canvasDark=false;
 if(!['essential','advanced'].includes(mode))mode=mode==='pro'?'advanced':'essential';
 let undo=[],redo=[],lastEdit=0,resizeObserver,toastTimer,lastFocus;
-let cardSelected=false,selectedElement=null,moveStep=read('kpi-atelier-step',1)===5?5:1,layersOpen=false,gesture=null,ignoreCanvasClick=false;
+let cardSelected=false,selectedElement=null,selectedElements=new Set(),moveStep=read('kpi-atelier-step',1)===5?5:1,layersOpen=false,gesture=null,ignoreCanvasClick=false,formatPainterSource=null,deleteConfirmLayer=null,deleteConfirmTimer=null;
 let draggedLayer=null;
 let guidesEnabled=read('kpi-atelier-guides',true)!==false,guidePreviewUntil=0,guideTimer;
 const inspectorSections=new Map(),inspectorPositions=new Map();
@@ -752,6 +752,15 @@ document.addEventListener('click',e=>{
      const name = pendingRoundtripName;
      pendingRoundtripConf = null;
      pendingRoundtripName = '';
+     if(conf.measure && String(conf.measure).trim()){
+      conf._measureBound = true;
+     }
+     if(conf.targetMeasure && String(conf.targetMeasure).trim()){
+      conf._targetCustomized = true;
+     }
+     if(conf.dateTable && String(conf.dateTable).trim()){
+      conf._dateCustomized = true;
+     }
      setConfig(conf, true);
      openDataBindingModal();
      toast(`⚡ Tarjeta cargada en el lienzo desde '${esc(name)}'.`);
@@ -818,71 +827,174 @@ document.addEventListener('click',e=>{
 });
 $('#file-import').addEventListener('change',async e=>{const f=e.target.files[0];e.target.value='';if(!f)return;if(f.size>100000){toast('El JSON es demasiado grande (máximo 100 KB).');return;}try{const data=JSON.parse(await f.text());if(data.schema!=='kpi-atelier'||data.version!==1||!data.config||typeof data.config!=='object'||Array.isArray(data.config))throw Error('Selecciona un JSON de configuración de KPI Atelier v1.');const conf=sanitizeConfig(data.config);requestNavigation(()=>{loadDesign(conf);toast('Configuración importada.');});}catch(err){toast(err.message||'No se pudo leer el archivo.');}});
 $('#modal').addEventListener('click',e=>{if(e.target===$('#modal')){const r=$('#modal').getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)closeModal();}});
-let clipboardElement=null;
-function copySelectedElement(){
- if(!selectedElement||$('#modal').open)return;
- const p=elementState(c,selectedElement);
- const def=resolveElementDef(selectedElement)||ELEMENTS[selectedElement];
- clipboardElement={
-  baseId:def.baseId||selectedElement,
-  state:structuredClone(p),
-  text:p.text!==undefined?p.text:(def.contentKey?c[def.contentKey]:''),
-  icon:p.icon||c.icon
- };
- toast(`Copiado: ${def.label}`);
+let clipboardElement=null,clipboardElements=[];
+function copySelectedElements(){
+ if($('#modal').open)return;
+ const targets=selectedElements.size>0?[...selectedElements]:(selectedElement?[selectedElement]:[]);
+ if(!targets.length)return;
+ clipboardElements=targets.map(id=>{
+  const p=elementState(c,id);
+  const def=resolveElementDef(id)||ELEMENTS[id];
+  return {
+   id,
+   baseId:def?.baseId||id,
+   state:structuredClone(p),
+   text:p.text!==undefined?p.text:(def?.contentKey?c[def.contentKey]:''),
+   icon:p.icon||c.icon,
+   label:def?.label||id
+  };
+ });
+ clipboardElement=clipboardElements[0];
+ if(clipboardElements.length===1){
+  toast(`Copiado: ${clipboardElements[0].label}`);
+ }else{
+  toast(`Copiados ${clipboardElements.length} elementos en bloque.`);
+ }
 }
+function copySelectedElement(){copySelectedElements();}
 
-function pasteElement(){
- if(!clipboardElement||$('#modal').open||context)return;
- const baseId=clipboardElement.baseId;
- const def=resolveElementDef(baseId)||ELEMENTS[baseId];
- if(!def)return;
+function pasteElements(){
+ if(!clipboardElements.length||$('#modal').open||context)return;
  const allKeys=Object.keys(c.elements||{});
  const dupCountTotal=allKeys.filter(k=>k.includes('_copy')&&!c.elements[k].deleted).length;
- if(dupCountTotal>=4){
-  toast('Límite de duplicados alcanzado (máximo 4 por tarjeta).');
+ if(dupCountTotal+clipboardElements.length>8){
+  toast('Límite de duplicados alcanzado (máximo 8 copias en la tarjeta).');
   return;
  }
- const dupCountForBase=allKeys.filter(k=>k.startsWith(baseId+'_copy')&&!c.elements[k].deleted).length;
- if(dupCountForBase>=2){
-  toast(`Límite alcanzado para '${def.label}' (máximo 2 copias).`);
-  return;
+ let nextConf=c;
+ const newIds=[];
+ for(const item of clipboardElements){
+  const baseId=item.baseId;
+  const def=resolveElementDef(baseId)||ELEMENTS[baseId];
+  if(!def)continue;
+  const curKeys=Object.keys(nextConf.elements||{});
+  const baseDups=curKeys.filter(k=>k.startsWith(baseId+'_copy')&&!nextConf.elements[k]?.deleted).length;
+  if(baseDups>=2){
+   toast(`Límite alcanzado: máximo 2 copias para ${def.label}.`);
+   continue;
+  }
+  let nextIdx=1;
+  while(nextConf.elements?.[`${baseId}_copy${nextIdx}`]&&!nextConf.elements[`${baseId}_copy${nextIdx}`].deleted){
+   nextIdx++;
+  }
+  const newId=`${baseId}_copy${nextIdx}`;
+  resolveElementDef(newId);
+  const origFrame=nextConf.elements?.[item.id]?.frame||item.state?.frame||measureElementFrame(item.id)||{left:24,top:24,width:120,height:24};
+  const newFrame={
+   ...origFrame,
+   left:Math.min(nextConf.width-60,origFrame.left+16),
+   top:Math.min(nextConf.height-40,origFrame.top+16)
+  };
+  const newElState={
+   ...item.state,
+   x:0,
+   y:0,
+   hidden:false,
+   deleted:false,
+   frame:newFrame,
+   ...(item.text!==undefined?{text:item.text}:{}),
+   ...(item.icon?{icon:item.icon}:{})
+  };
+  nextConf={
+   ...nextConf,
+   elements:{...nextConf.elements,[newId]:newElState},
+   layerOrder:[newId,...layerOrder(nextConf).filter(k=>k!==newId)]
+  };
+  newIds.push(newId);
  }
- let nextIdx=1;
- while(c.elements?.[`${baseId}_copy${nextIdx}`]&&!c.elements[`${baseId}_copy${nextIdx}`].deleted){
-  nextIdx++;
+ if(newIds.length===1){
+  directChange(nextConf);
+  selectElement(newIds[0]);
+  toast(`Duplicado: ${ELEMENTS[newIds[0]].label}`);
+ }else if(newIds.length>1){
+  directChange(nextConf);
+  selectedElements=new Set(newIds);
+  selectedElement=newIds[0];
+  positionSelection();
+  renderCanvasBar();
+  toast(`Duplicados ${newIds.length} elementos en bloque.`);
  }
- const newId=`${baseId}_copy${nextIdx}`;
- resolveElementDef(newId);
- const origFrame=c.elements?.[selectedElement||baseId]?.frame||measureElementFrame(selectedElement||baseId);
- const newFrame=origFrame?{
-  ...origFrame,
-  left:Math.min(c.width-60,origFrame.left+16),
-  top:Math.min(c.height-40,origFrame.top+16)
- }:{left:24,top:24,width:120,height:24};
- const newElState={
-  ...clipboardElement.state,
-  x:0,
-  y:0,
-  hidden:false,
-  deleted:false,
-  frame:newFrame,
-  ...(clipboardElement.text!==undefined?{text:clipboardElement.text}:{}),
-  ...(clipboardElement.icon?{icon:clipboardElement.icon}:{})
+}
+function pasteElement(){pasteElements();}
+
+function applyFormatPainter(targetId){
+ if(!formatPainterSource||formatPainterSource===targetId)return false;
+ const srcDef=resolveElementDef(formatPainterSource)||ELEMENTS[formatPainterSource];
+ const tgtDef=resolveElementDef(targetId)||ELEMENTS[targetId];
+ const srcBase=srcDef?.baseId||formatPainterSource;
+ const tgtBase=tgtDef?.baseId||targetId;
+ if(srcBase!==tgtBase&&srcDef?.kind!==tgtDef?.kind){
+  toast(`El copiado de formato solo es compatible entre elementos del mismo tipo (${srcDef?.label||'origen'}).`);
+  return false;
+ }
+ const srcP=elementState(c,formatPainterSource);
+ const tgtP=elementState(c,targetId);
+ const srcApp=appearance(c,formatPainterSource);
+ const appearancePatch={
+  colorMode:srcApp.colorMode,
+  color:srcApp.color,
+  backgroundColor:srcApp.backgroundColor,
+  backgroundMode:srcApp.backgroundMode,
+  backgroundOpacity:srcApp.backgroundOpacity,
+  opacity:srcApp.opacity
  };
- const nextElements={...c.elements,[newId]:newElState};
- const nextLayerOrder=[newId,...layerOrder(c).filter(k=>k!==newId)];
- directChange({...c,elements:nextElements,layerOrder:nextLayerOrder});
- selectElement(newId);
- toast(`Duplicado: ${ELEMENTS[newId].label}`);
+ const srcSize=elementSize(c,formatPainterSource);
+ const sizePatch={};
+ if(tgtDef.isDuplicate){
+  sizePatch.size=srcSize;
+ }else if(tgtDef.sizeKey){
+  sizePatch[tgtDef.sizeKey]=srcSize;
+ }
+ if(srcP.width){
+  sizePatch.width=srcP.width;
+ }
+ const formatPatch={};
+ if(srcP.format!==undefined)formatPatch.format=srcP.format;
+ else if(srcBase==='value')formatPatch.format=c.format;
+ if(srcP.decimals!==undefined)formatPatch.decimals=srcP.decimals;
+ else if(srcBase==='value')formatPatch.decimals=c.decimals;
+ if(srcP.currency!==undefined)formatPatch.currency=srcP.currency;
+ else if(srcBase==='value')formatPatch.currency=c.currency;
+ if(srcP.unit!==undefined)formatPatch.unit=srcP.unit;
+ else if(srcBase==='value')formatPatch.unit=c.unit;
+ if(srcP.suffix!==undefined)formatPatch.suffix=srcP.suffix;
+ else if(srcBase==='value')formatPatch.suffix=c.suffix;
+ if(srcP.deltaMode!==undefined)formatPatch.deltaMode=srcP.deltaMode;
+ else if(srcBase==='delta')formatPatch.deltaMode=c.deltaMode;
+
+ let next=c;
+ if(!tgtDef.isDuplicate){
+  if(srcSize&&tgtDef.sizeKey)next={...next,[tgtDef.sizeKey]:srcSize};
+  if(tgtBase==='value'){
+   if(formatPatch.format)next.format=formatPatch.format;
+   if(formatPatch.decimals!==undefined)next.decimals=formatPatch.decimals;
+   if(formatPatch.currency)next.currency=formatPatch.currency;
+   if(formatPatch.unit)next.unit=formatPatch.unit;
+   if(formatPatch.suffix!==undefined)next.suffix=formatPatch.suffix;
+  }
+  if(tgtBase==='delta'&&formatPatch.deltaMode){
+   next.deltaMode=formatPatch.deltaMode;
+  }
+ }
+ next=updateElement(next,targetId,{
+  ...tgtP,
+  ...appearancePatch,
+  ...sizePatch,
+  ...formatPatch
+ });
+ formatPainterSource=null;
+ directChange(next);
+ selectElement(targetId);
+ toast(`🎨 Formato copiado a '${tgtDef.label}'.`);
+ return true;
 }
 
 document.addEventListener('keydown',e=>{
  if((e.ctrlKey||e.metaKey)&&e.key==='s'){e.preventDefault();app.querySelector('[data-action="save"]')?.click();}
  if((e.ctrlKey||e.metaKey)&&e.key==='z'&&!['INPUT','TEXTAREA'].includes(document.activeElement.tagName)&&!$('#modal').open){e.preventDefault();app.querySelector(`[data-action="${e.shiftKey?'redo':'undo'}"]`)?.click();}
  if((e.ctrlKey||e.metaKey)&&!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)&&!$('#modal').open){
-  if(e.key==='c'||e.key==='C'){e.preventDefault();copySelectedElement();}
-  if(e.key==='v'||e.key==='V'){e.preventDefault();pasteElement();}
+  if(e.key==='c'||e.key==='C'){e.preventDefault();copySelectedElements();}
+  if(e.key==='v'||e.key==='V'){e.preventDefault();pasteElements();}
  }
 });
 function rememberInspector(){
@@ -959,7 +1071,7 @@ function renderGuides(){
  const box=rect(selected),card={width:surface.width/scale,height:surface.height/scale};
  const peers=[...main.querySelectorAll('[data-element]')].filter(node=>node!==selected&&elementVisible(c,node.dataset.element)).map(rect);
  const result=alignmentGuides(box,card,peers,c.padding+c.borderWidth,3/scale),active=!!gesture||Date.now()<guidePreviewUntil;
- if(!active&&!result.outside&&!result.overlaps?.length){overlay.innerHTML='';return;}
+ if(!active&&!result.outside){overlay.innerHTML='';return;}
  const left=surface.left-parent.left,top=surface.top-parent.top,w=surface.width,h=surface.height,inset=(c.padding+c.borderWidth)*scale;
 
  const boundaryClasses=['guide-boundary'];
@@ -1023,7 +1135,7 @@ function renderGuides(){
  let readoutText='',readoutClass='';
  if(result.outside){
   readoutText='⛔ Fuera del borde: '+outside;readoutClass='outside';
- }else if(result.overlaps&&result.overlaps.length){
+ }else if(active&&result.overlaps&&result.overlaps.length){
   const peerNames=result.overlaps.map(o=>o.peer.label).filter(Boolean);
   readoutText='⚠️ Solapamiento con '+(peerNames.join(', ')||'otro elemento');readoutClass='overlap';
  }else if(edgeSnapSides){
@@ -1045,10 +1157,18 @@ function elementInspector(){
  let specific='';
  if(def.isDuplicate){
   if(def.baseId==='value'){
-   specific=`<div class="field"><label for="f-dup-measure">Medida del valor</label><input id="f-dup-measure" data-dupval="measure" value="${esc(p.measure!==undefined?p.measure:c.measure)}" placeholder="[Nombre de medida]" list="dl-pbip-measures"></div>`+
-    `<div class="field"><label for="f-dup-format">Formato del valor</label><select id="f-dup-format" data-dupval="format">${formats.map(([k,l])=>`<option value="${k}" ${(p.format||c.format)===k?'selected':''}>${l}</option>`).join('')}</select></div>`+
-    `<div class="field"><label for="f-dup-decimals">Decimales</label><select id="f-dup-decimals" data-dupval="decimals">${[[0,'0'],[1,'1'],[2,'2'],[3,'3']].map(([k,l])=>`<option value="${k}" ${(p.decimals??c.decimals)===k?'selected':''}>${l}</option>`).join('')}</select></div>`+
-    `<div class="field"><label for="f-dup-suffix">Sufijo del valor</label><input id="f-dup-suffix" data-dupval="suffix" value="${esc(p.suffix!==undefined?p.suffix:c.suffix)}" placeholder="ej. € o %"></div>`;
+   const curFmt=p.format||c.format;
+   const curCurr=p.currency||c.currency;
+   const curUnit=p.unit||c.unit;
+   const curDec=p.decimals??c.decimals;
+   const curMeas=p.measure!==undefined?p.measure:c.measure;
+   const curSuf=p.suffix!==undefined?p.suffix:c.suffix;
+   specific=`<div class="field"><label for="f-dup-measure">Medida del valor</label><input id="f-dup-measure" data-dupval="measure" value="${esc(curMeas)}" placeholder="[Nombre de medida]" list="dl-pbip-measures"></div>`+
+    `<div class="field"><label for="f-dup-format">Formato del valor</label><select id="f-dup-format" data-dupval="format">${formats.map(([k,l])=>`<option value="${k}" ${curFmt===k?'selected':''}>${l}</option>`).join('')}</select></div>`+
+    (curFmt==='currency'?`<div class="field"><label for="f-dup-currency">Moneda</label><select id="f-dup-currency" data-dupval="currency">${[['EUR','Euro · €'],['USD','Dólar · $'],['GBP','Libra · £']].map(([k,l])=>`<option value="${k}" ${curCurr===k?'selected':''}>${l}</option>`).join('')}</select></div>`:'')+
+    `<div class="field-row"><div class="field"><label for="f-dup-unit">Escala</label><select id="f-dup-unit" data-dupval="unit">${[['auto','Automática'],['none','Sin escalar'],['k','Miles'],['m','Millones']].map(([k,l])=>`<option value="${k}" ${curUnit===k?'selected':''}>${l}</option>`).join('')}</select></div>`+
+    `<div class="field"><label for="f-dup-decimals">Decimales</label><select id="f-dup-decimals" data-dupval="decimals">${[[0,'0'],[1,'1'],[2,'2'],[3,'3']].map(([k,l])=>`<option value="${k}" ${curDec===k?'selected':''}>${l}</option>`).join('')}</select></div></div>`+
+    `<div class="field"><label for="f-dup-suffix">Sufijo del valor</label><input id="f-dup-suffix" data-dupval="suffix" value="${esc(curSuf)}" placeholder="ej. € o %"></div>`;
   }else if(def.baseId==='icon'){
    specific=iconPickerField();
   }else if(def.baseId==='delta'){
@@ -1063,7 +1183,13 @@ function elementInspector(){
  }else{
   specific=def.contentKey?field(def.contentKey,def.label):'';
   if(id==='icon')specific=iconPickerField();
-  if(id==='value')specific=select('format','Formato del valor',formats)+select('decimals','Decimales',[[0,'0'],[1,'1'],[2,'2'],[3,'3']]);
+  if(id==='value'){
+   specific=`<div class="field"><label for="f-val-measure">Medida del valor</label><input id="f-val-measure" data-key="measure" value="${esc(c.measure||'')}" placeholder="[Nombre de medida]" list="dl-pbip-measures"></div>`+
+    select('format','Formato del valor',formats)+
+    (c.format==='currency'?select('currency','Moneda',[['EUR','Euro · €'],['USD','Dólar · $'],['GBP','Libra · £']]):'')+
+    `<div class="field-row">${select('unit','Escala',[['auto','Automática'],['none','Sin escalar'],['k','Miles'],['m','Millones']])}${select('decimals','Decimales',[[0,'0'],[1,'1'],[2,'2'],[3,'3']])}</div>`+
+    field('suffix','Sufijo del valor');
+  }
   if(['delta','compareLabel','referenceLabel','referenceValue'].includes(id))specific=select('comparison','Comparar con',comparisons)+(id==='delta'?select('deltaMode','Mostrar diferencia',[['relative','Porcentaje'],['absolute','Diferencia absoluta'],['pp','Puntos porcentuales']]):'');
   if(id==='trend')specific=chartPanel();
   if(['goalLabel','progress','progressLabel'].includes(id))specific=field('targetMeasure','Medida objetivo');
@@ -1080,8 +1206,30 @@ function elementInspector(){
  section('03','Posición y tamaño',`<div class="field-row">${geom('x','Desplazamiento X · px',p.x,-1000,1000)}${geom('y','Desplazamiento Y · px',p.y,-1000,1000)}</div><p class="geometry-note">Posición independiente: el tamaño no mueve otros elementos ni la tarjeta. Flechas: ${moveStep} px · Mayús: ${moveStep===1?5:1} px.</p>`+sizeRange+geom('width','Ancho del elemento · px',p.width,0,800)+`<p class="geometry-note">Ancho 0 = ${p.frame?(def.kind==='icon'?'tamaño del icono':'ancho al desplazarlo'):'automático'}. Asa lateral: ancho; esquina: tamaño.</p>`+(p.frame?btn('release-element','Volver a posición de plantilla','restore','button quiet appearance-reset')+`<p class="geometry-note">Recupera su posición y ancho de plantilla sin cambiar los demás elementos.</p>`:''))+
  section('04','Visibilidad',`<div class="element-action-row">${btn(p.deleted?'restore-element':'hide-element',p.deleted?'Restaurar':hidden?'Mostrar':'Ocultar',p.deleted?'restore':hidden?'eye':'eyeOff','button secondary')}${!p.deleted?btn('delete-element','Eliminar','trash','button quiet'):''}</div><p class="field-help">Ocultar conserva el espacio. Eliminar retira el elemento. Puedes recuperarlo desde Capas o Deshacer.</p>${btn('reset-element','Restablecer este elemento','reset','button quiet')}`);
 }
-function selectElement(id,focus=true){
- if(!ELEMENTS[id])return;cardSelected=false;rememberInspector();if(selectedElement!==id)inspectorSections.set('element:Apariencia',true);selectedElement=id;tab='element';inspectorPositions.set('element',0);renderInspector();renderCanvasBar();positionSelection();renderGuides();
+function selectElement(id,focus=true,toggle=false){
+ if(!ELEMENTS[id])return;
+ cardSelected=false;
+ rememberInspector();
+ if(toggle){
+  if(selectedElements.has(id)){
+   selectedElements.delete(id);
+   if(selectedElements.size===0){deselect();return;}
+   selectedElement=[...selectedElements][selectedElements.size-1];
+  }else{
+   selectedElements.add(id);
+   selectedElement=id;
+  }
+ }else{
+  selectedElements=new Set([id]);
+  selectedElement=id;
+ }
+ if(selectedElement!==id)inspectorSections.set('element:Apariencia',true);
+ tab='element';
+ inspectorPositions.set('element',0);
+ renderInspector();
+ renderCanvasBar();
+ positionSelection();
+ renderGuides();
  if(focus)app.querySelector(`[data-element="${id}"]`)?.focus({preventScroll:true});
 }
 function renderCanvasBar(){
@@ -1091,14 +1239,21 @@ function renderCanvasBar(){
   return;
  }
  const layerScroll=bar.querySelector('.layers-popover')?.scrollTop||0;
- bar.innerHTML=`<div class="canvas-object-label">${icon(selectedElement?'cursor':'move',13)}<span>${selectedElement?ELEMENTS[selectedElement].label:cardSelected?'Tarjeta seleccionada':'Selecciona un elemento'}</span></div><div class="canvas-object-actions"><button class="card-select-btn ${cardSelected?'active':''}" data-action="select-card" aria-pressed="${cardSelected}" title="Seleccionar tarjeta y ajustar bordes / tamaño">${icon('card',14)}<span>Tarjeta</span></button>${selectedElement?`${ib('smaller-element','Reducir tamaño','minus')}${ib('bigger-element','Aumentar tamaño','plus')}${ib('hide-element',elementState(c,selectedElement).hidden?'Mostrar elemento':'Ocultar elemento','eyeOff')}${ib('delete-element','Eliminar elemento','trash')}`:''}<div class="pixel-step" aria-label="Paso de movimiento"><button data-move-step="1" class="${moveStep===1?'active':''}" aria-pressed="${moveStep===1}" title="Mover de 1 en 1 píxel con las flechas">1 px</button><button data-move-step="5" class="${moveStep===5?'active':''}" aria-pressed="${moveStep===5}" title="Mover de 5 en 5 píxeles con las flechas">5 px</button></div>${ib('guides',guidesEnabled?'Ocultar guías de alineación (regla)':'Mostrar guías de alineación (regla)','ruler',`aria-pressed="${guidesEnabled}" title="${guidesEnabled?'Ocultar guías de alineación (regla)':'Mostrar guías de alineación (regla)'}"`)}<button class="layers-button ${layersOpen?'active':''}" data-action="layers" aria-expanded="${layersOpen}" title="Ver y reordenar capas">${icon('layers',14)}<span>Capas</span></button></div>${layersOpen?layersPanel():''}`;
+ const isMulti=selectedElements.size>1;
+ const labelText=isMulti?`Selección múltiple (${selectedElements.size})`:selectedElement?ELEMENTS[selectedElement].label:cardSelected?'Tarjeta seleccionada':'Selecciona un elemento';
+ const formatPainterBtn=selectedElement&&!isMulti?`<button class="format-painter-btn ${formatPainterSource?'active':''}" data-action="format-painter" title="${formatPainterSource?'Copiar formato activo (clic en otro elemento para aplicar)':`Copiar formato de ${ELEMENTS[selectedElement].label}`}">${icon('brush',14)}<span>${formatPainterSource?'Copiando…':'Copiar formato'}</span></button>`:'';
+ const elementActions=selectedElement?`${ib('smaller-element','Reducir tamaño','minus')}${ib('bigger-element','Aumentar tamaño','plus')}${ib('hide-element',elementState(c,selectedElement).hidden?'Mostrar elemento':'Ocultar elemento','eyeOff')}${ib('delete-element','Eliminar elemento','trash')}${formatPainterBtn}`:'';
+ bar.innerHTML=`<div class="canvas-object-label">${icon(selectedElement?'cursor':'move',13)}<span>${labelText}</span></div><div class="canvas-object-actions"><button class="card-select-btn ${cardSelected?'active':''}" data-action="select-card" aria-pressed="${cardSelected}" title="Seleccionar tarjeta y ajustar bordes / tamaño">${icon('card',14)}<span>Tarjeta</span></button>${elementActions}<div class="pixel-step" aria-label="Paso de movimiento"><button data-move-step="1" class="${moveStep===1?'active':''}" aria-pressed="${moveStep===1}" title="Mover de 1 en 1 píxel con las flechas">1 px</button><button data-move-step="5" class="${moveStep===5?'active':''}" aria-pressed="${moveStep===5}" title="Mover de 5 en 5 píxeles con las flechas">5 px</button></div>${ib('guides',guidesEnabled?'Ocultar guías de alineación (regla)':'Mostrar guías de alineación (regla)','ruler',`aria-pressed="${guidesEnabled}" title="${guidesEnabled?'Ocultar guías de alineación (regla)':'Mostrar guías de alineación (regla)'}"`)}<button class="layers-button ${layersOpen?'active':''}" data-action="layers" aria-expanded="${layersOpen}" title="Ver y reordenar capas">${icon('layers',14)}<span>Capas</span></button></div>${layersOpen?layersPanel():''}`;
  const popup=bar.querySelector('.layers-popover');if(popup)popup.scrollTop=layerScroll;
 }
 function layersPanel(){
  const ids=layerOrder(c).filter(id=>elementAvailable(c,id));
  return `<div class="layers-popover" role="region" aria-label="Capas de la tarjeta"><div class="layers-heading"><strong>Elementos de la tarjeta</strong>${ib('layers','Cerrar capas','close')}</div><p class="layers-hint">Arriba = delante <span>Arrastra o usa ↑ ↓</span></p>${ids.map((id,index)=>{
   const state=elementState(c,id),visible=elementVisible(c,id),label=ELEMENTS[id].label;
-  return `<div class="layer-row ${selectedElement===id?'active':''} ${state.deleted?'deleted':''}" data-layer-row="${id}"><button class="layer-drag" draggable="true" data-layer-drag="${id}" aria-label="Arrastrar capa ${label}" title="Arrastrar · Alt + ↑/↓ para ordenar">${icon('grip',13)}</button><button class="layer-select" data-select-element="${id}" aria-pressed="${selectedElement===id}">${icon(ELEMENTS[id].kind==='text'?'text':id==='icon'?c.icon:id==='trend'?'trend':'signal',14)}<span>${label}<small>${state.deleted?'Eliminado':visible?'Visible':'Oculto'}${state.frame?' · Posición libre':''}</small></span></button><div class="layer-controls"><button class="layer-order-button" data-layer-id="${id}" data-layer-move="-1" ${index===0?'disabled':''} title="Subir: traer delante" aria-label="Subir capa ${label}">${icon('arrowUp',13)}</button><button class="layer-order-button" data-layer-id="${id}" data-layer-move="1" ${index===ids.length-1?'disabled':''} title="Bajar: enviar detrás" aria-label="Bajar capa ${label}">${icon('arrowDown',13)}</button><button class="layer-visibility" data-layer-visibility="${id}" title="${state.deleted?'Restaurar':visible?'Ocultar':'Mostrar'}" aria-label="${state.deleted?'Restaurar':visible?'Ocultar':'Mostrar'} ${label}">${icon(state.deleted?'restore':visible?'eye':'eyeOff',15)}</button></div></div>`;
+  const isConfirming=deleteConfirmLayer===id;
+  const isSelected=selectedElements.has(id);
+  const deleteBtn=!state.deleted?`<button class="layer-delete ${isConfirming?'confirming':''}" data-layer-delete="${id}" title="${isConfirming?'Clic para confirmar eliminación':'Eliminar capa'}" aria-label="Eliminar ${label}">${isConfirming?'¿Borrar?':icon('trash',13)}</button>`:'';
+  return `<div class="layer-row ${isSelected?'active':''} ${state.deleted?'deleted':''}" data-layer-row="${id}"><button class="layer-drag" draggable="true" data-layer-drag="${id}" aria-label="Arrastrar capa ${label}" title="Arrastrar · Alt + ↑/↓ para ordenar">${icon('grip',13)}</button><button class="layer-select" data-select-element="${id}" aria-pressed="${isSelected}">${icon(ELEMENTS[id].kind==='text'?'text':id==='icon'?c.icon:id==='trend'?'trend':'signal',14)}<span>${label}<small>${state.deleted?'Eliminado':visible?'Visible':'Oculto'}${state.frame?' · Posición libre':''}</small></span></button><div class="layer-controls"><button class="layer-order-button" data-layer-id="${id}" data-layer-move="-1" ${index===0?'disabled':''} title="Subir: traer delante" aria-label="Subir capa ${label}">${icon('arrowUp',13)}</button><button class="layer-order-button" data-layer-id="${id}" data-layer-move="1" ${index===ids.length-1?'disabled':''} title="Bajar: enviar detrás" aria-label="Bajar capa ${label}">${icon('arrowDown',13)}</button><button class="layer-visibility" data-layer-visibility="${id}" title="${state.deleted?'Restaurar':visible?'Ocultar':'Mostrar'}" aria-label="${state.deleted?'Restaurar':visible?'Ocultar':'Mostrar'} ${label}">${icon(state.deleted?'restore':visible?'eye':'eyeOff',15)}</button>${deleteBtn}</div></div>`;
  }).join('')}<p class="layers-footnote">El orden cambia la superposición, conserva las posiciones.</p></div>`;
 }
 function commitLayerOrder(next,id,direction=null){
@@ -1135,7 +1290,24 @@ app.addEventListener('keydown',e=>{
 });
 function positionSelection(){
  const overlay=$('#selection-overlay'),fit=$('#card-fit');if(!overlay||!fit)return;const focusedHandle=document.activeElement?.dataset?.cardResize;
- app.querySelectorAll('[data-element]').forEach(e=>{e.classList.toggle('is-selected',e.dataset.element===selectedElement);e.setAttribute('aria-pressed',e.dataset.element===selectedElement?'true':'false');});
+ app.querySelectorAll('[data-element]').forEach(e=>{
+  const isSel=selectedElements.has(e.dataset.element);
+  e.classList.toggle('is-selected',isSel);
+  e.classList.toggle('is-multi-selected',isSel&&selectedElements.size>1);
+  e.setAttribute('aria-pressed',isSel?'true':'false');
+ });
+ if(selectedElements.size>1){
+  const nodes=[...selectedElements].map(id=>app.querySelector(`[data-element="${id}"]`)).filter(Boolean);
+  if(!nodes.length){overlay.hidden=true;return;}
+  const rects=nodes.map(n=>n.getBoundingClientRect());
+  const minL=Math.min(...rects.map(r=>r.left)),minT=Math.min(...rects.map(r=>r.top));
+  const maxR=Math.max(...rects.map(r=>r.right)),maxB=Math.max(...rects.map(r=>r.bottom));
+  const parent=fit.getBoundingClientRect();
+  overlay.hidden=false;
+  overlay.style.cssText=`left:${minL-parent.left}px;top:${minT-parent.top}px;width:${maxR-minL}px;height:${maxB-minT}px;`;
+  overlay.innerHTML=`<span class="selection-name group-selection-badge">${selectedElements.size} elementos seleccionados</span>`;
+  return;
+ }
  const el=cardSelected?$('#main-card')?.firstElementChild:selectedElement?app.querySelector(`[data-element="${selectedElement}"]`):null;
  if(!el||(!cardSelected&&!elementVisible(c,selectedElement))){overlay.hidden=true;return;}
  const box=el.getBoundingClientRect(),parent=fit.getBoundingClientRect();
@@ -1152,21 +1324,83 @@ function syncElementControls(){
 }
 function directChange(next,saveHistory=true){if(saveHistory)record();c=sanitizeConfig(next);persist();refreshCard();renderInspector();renderCanvasBar();updateHistoryButtons();}
 function elementAction(action){
- const id=selectedElement;if(!id)return;let next=c;
- if(action==='hide-element'){const p=elementState(c,id);next=p.hidden||p.deleted||!elementEnabled(c,id)?restoreElement(c,id):updateElement(c,id,{hidden:true});}
- if(action==='delete-element'){next=updateElement(c,id,{deleted:true,hidden:false});toast('Elemento eliminado. Recupéralo desde Capas o Deshacer.');}
+ const id=selectedElement;if(!id&&!selectedElements.size)return;let next=c;
+ if(action==='hide-element'){
+  if(selectedElements.size>1){
+   next=c;
+   for(const selId of selectedElements){
+    const p=elementState(next,selId);
+    next=p.hidden||p.deleted||!elementEnabled(next,selId)?restoreElement(next,selId):updateElement(next,selId,{hidden:true});
+   }
+   directChange(next);
+   return;
+  }
+  const p=elementState(c,id);next=p.hidden||p.deleted||!elementEnabled(c,id)?restoreElement(c,id):updateElement(c,id,{hidden:true});
+ }
+ if(action==='delete-element'){
+  if(selectedElements.size>1){
+   const count=selectedElements.size;
+   next=c;
+   for(const selId of selectedElements){
+    next=updateElement(next,selId,{deleted:true,hidden:false});
+   }
+   toast(`${count} elementos eliminados. Recupéralos desde Capas o Deshacer.`);
+   selectedElements.clear();
+   selectedElement=null;
+   directChange(next);
+   return;
+  }
+  next=updateElement(c,id,{deleted:true,hidden:false});toast('Elemento eliminado. Recupéralo desde Capas o Deshacer.');
+ }
  if(action==='restore-element')next=restoreElement(c,id);
  if(action==='release-element')next=releaseElement(c,id);
  if(action==='smaller-element'||action==='bigger-element')next=resizeElement(c,id,action==='bigger-element'?1:-1);
  if(action==='reset-element'){const template=TEMPLATES.find(t=>t.id===c.id)?.config||BASE;next=restoreElement({...c,elements:{...c.elements,[id]:{...template.elements?.[id],x:0,y:0,width:0}}},id);next[ELEMENTS[id].sizeKey]=elementSize(template,id);}
  directChange(next);app.querySelector(`[data-element="${id}"]`)?.focus({preventScroll:true});
 }
-function deselect(){rememberInspector();cardSelected=false;selectedElement=null;if(['element','card'].includes(tab))tab='content';renderInspector();renderCanvasBar();positionSelection();renderGuides();}
+function deselect(){rememberInspector();cardSelected=false;selectedElement=null;selectedElements.clear();formatPainterSource=null;deleteConfirmLayer=null;if(deleteConfirmTimer)clearTimeout(deleteConfirmTimer);if(['element','card'].includes(tab))tab='content';renderInspector();renderCanvasBar();positionSelection();renderGuides();}
 app.addEventListener('pointerdown',e=>{
  if(context||e.button!==0)return;const cardHandle=e.target.closest('[data-card-resize]');if(cardHandle){startCardGesture(e,cardHandle.dataset.cardResize);return;}const handle=e.target.closest('[data-resize]'),el=e.target.closest('[data-element]');
- if(!handle&&!el)return;if(el)selectElement(el.dataset.element);
+ if(!handle&&!el)return;
+ if(formatPainterSource&&el){
+  e.preventDefault();
+  applyFormatPainter(el.dataset.element);
+  return;
+ }
+ const isCtrl=e.ctrlKey||e.metaKey;
+ if(el){
+  if(isCtrl){
+   selectElement(el.dataset.element,false,true);
+   return;
+  }
+  if(!selectedElements.has(el.dataset.element)){
+   selectElement(el.dataset.element);
+  }
+ }
  if(!selectedElement||!elementVisible(c,selectedElement))return;
- const node=app.querySelector(`[data-element="${selectedElement}"]`),scale=$('#main-card').getBoundingClientRect().width/c.width;
+ const scale=$('#main-card').getBoundingClientRect().width/c.width;
+ if(!handle&&selectedElements.size>1){
+  const members=[...selectedElements];
+  const items=members.map(mId=>{
+   const node=app.querySelector(`[data-element="${mId}"]`);
+   const frame=c.elements?.[mId]?.frame||measureElementFrame(mId);
+   const p=elementState(c,mId);
+   const bBox=node?node.getBoundingClientRect():null;
+   const w=bBox?bBox.width/scale:(p.width||frame?.width||100);
+   const h=bBox?bBox.height/scale:(frame?.height||24);
+   const left=(frame?.left||0)+p.x;
+   const top=(frame?.top||0)+p.y;
+   return {id:mId,frame,p,w,h,left,top};
+  });
+  const minDx=Math.max(...items.map(it=>-it.left));
+  const maxDx=Math.min(...items.map(it=>c.width-(it.left+it.w)));
+  const minDy=Math.max(...items.map(it=>-it.top));
+  const maxDy=Math.min(...items.map(it=>c.height-(it.top+it.h)));
+  gesture={kind:'group-move',id:selectedElement,items,minDx,maxDx,minDy,maxDy,startX:e.clientX,startY:e.clientY,start:structuredClone(c),scale,changed:false,pointer:e.pointerId,undoSnapshot:[...undo],redo:[...redo]};
+  app.setPointerCapture(e.pointerId);renderGuides();e.preventDefault();
+  return;
+ }
+ const node=app.querySelector(`[data-element="${selectedElement}"]`);
  gesture={id:selectedElement,kind:handle?.dataset.resize||'move',startX:e.clientX,startY:e.clientY,start:structuredClone(c),scale,width:node.getBoundingClientRect().width/scale,frame:measureElementFrame(selectedElement),changed:false,pointer:e.pointerId,undoSnapshot:[...undo],redo:[...redo]};
  app.setPointerCapture(e.pointerId);renderGuides();e.preventDefault();
 });
@@ -1177,6 +1411,16 @@ app.addEventListener('pointermove',e=>{
  const dx=(e.clientX-g.startX)/g.scale,dy=(e.clientY-g.startY)/g.scale,step=e.shiftKey?(moveStep===1?5:1):moveStep;
  let next=g.start;
  if(g.card)next=resizeCard(g.start,g.start.width+(g.kind==='s'?0:Math.round(dx/step)*step),g.start.height+(g.kind==='e'?0:Math.round(dy/step)*step),true);
+ else if(g.kind==='group-move'){
+  const rawDx=(e.clientX-g.startX)/g.scale,rawDy=(e.clientY-g.startY)/g.scale;
+  const snappedDx=Math.round(rawDx/step)*step,snappedDy=Math.round(rawDy/step)*step;
+  const clampedDx=Math.max(g.minDx,Math.min(g.maxDx,snappedDx));
+  const clampedDy=Math.max(g.minDy,Math.min(g.maxDy,snappedDy));
+  next=g.start;
+  for(const it of g.items){
+   next=moveElement(next,it.id,clampedDx,clampedDy,step,it.frame);
+  }
+ }
  else if(g.kind==='move')next=moveElement(g.start,g.id,dx,dy,step,g.frame);
  else {
   let detachedConfig=detachElement(g.start,g.id,g.frame);
@@ -1227,9 +1471,9 @@ app.addEventListener('pointermove',e=>{
  }
  c=sanitizeConfig(next);refreshCard();if(g.card)syncCardControls();else syncElementControls();updateHistoryButtons();
 });
-function finishGesture(cancel=false){if(!gesture)return;const g=gesture;gesture=null;app.classList.remove('is-dragging');if(app.hasPointerCapture(g.pointer))app.releasePointerCapture(g.pointer);if(cancel&&g.changed){c=g.start;undo=g.undoSnapshot;redo=g.redo;refreshCard();}if(g.changed){persist();renderInspector();updateHistoryButtons();ignoreCanvasClick=true;setTimeout(()=>ignoreCanvasClick=false,0);}if(g.card){fitMain();$('#main-card')?.focus({preventScroll:true});}else app.querySelector(`[data-element="${g.id}"]`)?.focus({preventScroll:true});renderGuides();}
+function finishGesture(cancel=false){if(!gesture)return;const g=gesture;gesture=null;app.classList.remove('is-dragging');if(app.hasPointerCapture(g.pointer))app.releasePointerCapture(g.pointer);if(cancel&&g.changed){c=g.start;undo=g.undoSnapshot;redo=g.redo;refreshCard();}if(g.changed){persist();renderInspector();updateHistoryButtons();ignoreCanvasClick=true;setTimeout(()=>ignoreCanvasClick=false,0);}if(g.card){fitMain();$('#main-card')?.focus({preventScroll:true});}else if(g.kind==='group-move'){positionSelection();renderGuides();}else if(g.id){app.querySelector(`[data-element="${g.id}"]`)?.focus({preventScroll:true});}renderGuides();}
 app.addEventListener('pointerup',()=>finishGesture());app.addEventListener('pointercancel',()=>finishGesture(true));
-app.addEventListener('click',e=>{if(ignoreCanvasClick)return;const el=e.target.closest('[data-element]');if(el){if(selectedElement!==el.dataset.element)selectElement(el.dataset.element);return;}if(e.target.closest('[data-card-surface]')){selectCard();return;}if(e.target.closest('#stage')&&!e.target.closest('#selection-overlay')&&(selectedElement||cardSelected))deselect();});
+app.addEventListener('click',e=>{if(ignoreCanvasClick||formatPainterSource)return;const isCtrl=e.ctrlKey||e.metaKey;const el=e.target.closest('[data-element]');if(el){if(isCtrl)return;if(selectedElement!==el.dataset.element||selectedElements.size>1)selectElement(el.dataset.element);return;}if(e.target.closest('[data-card-surface]')){selectCard();return;}if(e.target.closest('#stage')&&!e.target.closest('#selection-overlay')&&(selectedElement||cardSelected))deselect();});
 document.addEventListener('keydown',e=>{
  const target=e.target;
  const bindKey=target?.dataset?.bindKey;
@@ -1300,11 +1544,43 @@ document.addEventListener('keydown',e=>{
  if(e.target.closest?.('.layers-popover'))return;
  if($('#modal').open||!selectedElement||context||view!=='designer'||!e.target.closest?.('#stage,#canvas-edit-bar'))return;
  if(['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)||e.target.isContentEditable)return;
- if(e.key==='Escape'){e.preventDefault();deselect();return;}
+ if(e.key==='Escape'){if(formatPainterSource){e.preventDefault();formatPainterSource=null;renderCanvasBar();toast('Copiar formato cancelado.');return;}e.preventDefault();deselect();return;}
  if(e.key==='Delete'||e.key==='Backspace'){e.preventDefault();elementAction('delete-element');return;}
  if((e.key==='Enter'||e.key===' ')&&e.target.matches('[data-element]')){e.preventDefault();selectElement(e.target.dataset.element);return;}
  const step=e.shiftKey?(moveStep===1?5:1):moveStep;
- if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)){e.preventDefault();flashGuides();directChange(moveElement(c,selectedElement,e.key==='ArrowLeft'?-step:e.key==='ArrowRight'?step:0,e.key==='ArrowUp'?-step:e.key==='ArrowDown'?step:0,step,measureElementFrame(selectedElement)));app.querySelector(`[data-element="${selectedElement}"]`)?.focus({preventScroll:true});}
+ if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)){
+  e.preventDefault();flashGuides();
+  const reqDx=e.key==='ArrowLeft'?-step:e.key==='ArrowRight'?step:0;
+  const reqDy=e.key==='ArrowUp'?-step:e.key==='ArrowDown'?step:0;
+  if(selectedElements.size>1){
+   const members=[...selectedElements];
+   const items=members.map(mId=>{
+    const frame=c.elements?.[mId]?.frame||measureElementFrame(mId);
+    const p=elementState(c,mId);
+    const w=p.width||frame?.width||100;
+    const h=frame?.height||24;
+    const left=(frame?.left||0)+p.x;
+    const top=(frame?.top||0)+p.y;
+    return {id:mId,frame,w,h,left,top};
+   });
+   const minDx=Math.max(...items.map(it=>-it.left));
+   const maxDx=Math.min(...items.map(it=>c.width-(it.left+it.w)));
+   const minDy=Math.max(...items.map(it=>-it.top));
+   const maxDy=Math.min(...items.map(it=>c.height-(it.top+it.h)));
+   const clampedDx=Math.max(minDx,Math.min(maxDx,reqDx));
+   const clampedDy=Math.max(minDy,Math.min(maxDy,reqDy));
+   if(clampedDx!==0||clampedDy!==0){
+    let next=c;
+    for(const it of items){
+     next=moveElement(next,it.id,clampedDx,clampedDy,step,it.frame);
+    }
+    directChange(next);
+   }
+  }else{
+   directChange(moveElement(c,selectedElement,reqDx,reqDy,step,measureElementFrame(selectedElement)));
+   app.querySelector(`[data-element="${selectedElement}"]`)?.focus({preventScroll:true});
+  }
+ }
  if(e.key==='+'||e.key==='='||e.key==='-'){e.preventDefault();flashGuides();elementAction(e.key==='-'?'smaller-element':'bigger-element');}
 });
 document.addEventListener('click',e=>{
@@ -1316,10 +1592,45 @@ document.addEventListener('click',e=>{
  if(b.dataset.selectElement){selectElement(b.dataset.selectElement);return;}
  if(b.dataset.layerMove){commitLayerOrder(moveLayer(c,b.dataset.layerId,Number(b.dataset.layerMove)),b.dataset.layerId,b.dataset.layerMove);return;}
  if(b.dataset.layerVisibility){const id=b.dataset.layerVisibility;selectedElement=id;directChange(elementVisible(c,id)?updateElement(c,id,{hidden:true}):restoreElement(c,id));return;}
+ if(b.dataset.layerDelete){
+  const id=b.dataset.layerDelete;
+  if(deleteConfirmLayer===id){
+   deleteConfirmLayer=null;
+   if(deleteConfirmTimer)clearTimeout(deleteConfirmTimer);
+   const wasSelected=selectedElement===id||selectedElements.has(id);
+   let next=updateElement(c,id,{deleted:true,hidden:false});
+   if(wasSelected){
+    selectedElements.delete(id);
+    if(selectedElement===id)selectedElement=[...selectedElements][0]||null;
+   }
+   toast(`Elemento '${ELEMENTS[id]?.label||id}' eliminado.`);
+   directChange(next);
+   renderCanvasBar();
+  }else{
+   deleteConfirmLayer=id;
+   if(deleteConfirmTimer)clearTimeout(deleteConfirmTimer);
+   deleteConfirmTimer=setTimeout(()=>{
+    deleteConfirmLayer=null;
+    renderCanvasBar();
+   },3500);
+   renderCanvasBar();
+  }
+  return;
+ }
  const a=b.dataset.action;if(a==='layers'){layersOpen=!layersOpen;renderCanvasBar();}
  else if(a==='guides'){guidesEnabled=!guidesEnabled;try{localStorage.setItem('kpi-atelier-guides',JSON.stringify(guidesEnabled));}catch{}renderCanvasBar();renderGuides();}
  else if(a==='select-card')selectCard();
  else if(a==='deselect')deselect();
+ else if(a==='format-painter'){
+  if(formatPainterSource){
+   formatPainterSource=null;
+   toast('Copiar formato cancelado.');
+  }else if(selectedElement){
+   formatPainterSource=selectedElement;
+   toast(`Formato de '${ELEMENTS[selectedElement]?.label||selectedElement}' copiado. Haz clic en otro elemento del mismo tipo.`);
+  }
+  renderCanvasBar();
+ }
  else if(['hide-element','delete-element','restore-element','reset-element','release-element','smaller-element','bigger-element'].includes(a))elementAction(a);
  else if(a==='icons')openIconPicker();
  else if(a==='themes')openThemeStudio();

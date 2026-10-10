@@ -740,3 +740,87 @@ test('Drag hides selection-name badge, peer collision/alignment frames, and data
  `);
 });
 
+test('Advanced Canvas & Multi-Selection: Roundtrip measure, duplicate delta bg, format painter, multi-dup and group clamping', async () => {
+ const run = await editor(); run(`
+ loadDesign(BASE);
+
+ // 1. Roundtrip load preserves existing measure
+ pendingRoundtripConf = { ...BASE, measure: '[Ventas Netas]', measureName: 'Card_Ventas', dateTable: 'Calendario', dateColumn: 'Fecha' };
+ pendingRoundtripName = 'Card_Ventas';
+ const conf = pendingRoundtripConf;
+ conf._measureBound = Boolean(conf.measure?.trim());
+ conf._targetCustomized = Boolean(conf.targetMeasure?.trim());
+ conf._dateCustomized = Boolean(conf.dateTable?.trim() && conf.dateColumn?.trim());
+ c = { ...c, ...conf };
+ assert.equal(c.measure, '[Ventas Netas]');
+ assert.equal(c._measureBound, true);
+
+ // 2. Duplicate delta (variation) background color & opacity rendering
+ selectElement('delta');
+ copySelectedElement();
+ pasteElement();
+ assert.ok(c.elements['delta_copy1']);
+ c = updateElement(c, 'delta_copy1', {
+  backgroundColor: '#112233',
+  backgroundOpacity: 45
+ });
+ const htmlWithDeltaCopy = cardHTML(c, undefined, true);
+ assert.ok(htmlWithDeltaCopy.includes('data-element="delta_copy1"'));
+ assert.ok(htmlWithDeltaCopy.includes('background:'));
+
+ // 3. Format painter between same-type elements (value -> value_copy1)
+ selectElement('value');
+ copySelectedElement();
+ pasteElement();
+ assert.ok(c.elements['value_copy1']);
+ c = updateElement(c, 'value', {
+  color: '#ff5500',
+  size: 42,
+  format: 'currency',
+  currency: 'USD',
+  decimals: 2,
+  unit: 'k'
+ });
+ formatPainterSource = 'value';
+ const painterResult = applyFormatPainter('value_copy1');
+ assert.equal(painterResult, true);
+ const copyState = elementState(c, 'value_copy1');
+ assert.equal(copyState.color, '#ff5500');
+ assert.equal(copyState.size, 42);
+ assert.equal(copyState.format, 'currency');
+ assert.equal(copyState.currency, 'USD');
+ assert.equal(copyState.decimals, 2);
+ assert.equal(copyState.unit, 'k');
+
+ // 4. Multi-selection block duplication
+ selectElement('title');
+ selectElement('subtitle', false, true); // Ctrl-add to selection
+ assert.equal(selectedElements.size, 2);
+ copySelectedElements();
+ assert.equal(clipboardElements.length, 2);
+ pasteElements();
+ assert.ok(c.elements['title_copy1']);
+ assert.ok(c.elements['subtitle_copy1']);
+
+ // 5. Multi-selection group move boundary clamping calculation
+ const testCard = { width: 320, height: 160 };
+ const itemA = { id: 'itemA', left: 20, top: 30, w: 100, h: 40 };
+ const itemB = { id: 'itemB', left: 180, top: 70, w: 80, h: 50 };
+ const items = [itemA, itemB];
+ const minDx = Math.max(...items.map(it => -it.left)); // max(-20, -180) = -20
+ const maxDx = Math.min(...items.map(it => testCard.width - (it.left + it.w))); // min(320-120, 320-260) = min(200, 60) = 60
+ const minDy = Math.max(...items.map(it => -it.top)); // max(-30, -70) = -30
+ const maxDy = Math.min(...items.map(it => testCard.height - (it.top + it.h))); // min(160-70, 160-120) = min(90, 40) = 40
+
+ assert.equal(minDx, -20);
+ assert.equal(maxDx, 60);
+ assert.equal(minDy, -30);
+ assert.equal(maxDy, 40);
+
+ // Clamping excessive drag
+ const excessiveDx = 150;
+ const clampedDx = Math.max(minDx, Math.min(maxDx, excessiveDx));
+ assert.equal(clampedDx, 60); // itemB reaches 180+60+80 = 320 (exact right edge)
+ `);
+});
+

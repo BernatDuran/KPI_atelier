@@ -45,7 +45,8 @@ export const EXTRA_PATHS={
  text:'M4 4h16M12 4v17M8 21h8M4 4v4m16-4v4',
  cursor:'M4 2l16 11-8 1-3 8z',
  restore:'M3 10a9 9 0 1 1 2 8M3 3v7h7',
- minus:'M5 12h14'
+ minus:'M5 12h14',
+ brush:'M18 3l3 3-10 10H8v-3L18 3zM3 21h18M5 17a3 3 0 0 0 3 3'
 };
 export const ICON_OPTIONS=[
  ['trend','Tendencia','Datos'],['chart','Gráfico','Datos'],['pie','Distribución','Datos'],['activity','Actividad','Datos'],['gauge','Rendimiento','Datos'],['database','Datos','Datos'],['layers','Portfolio','Datos'],['percent','Porcentaje','Finanzas'],['wallet','Cartera','Finanzas'],['coins','Ingresos','Finanzas'],['receipt','Facturación','Finanzas'],['briefcase','Negocio','Negocio'],['cart','Pedidos','Negocio'],['bag','Compras','Negocio'],['handshake','Acuerdo','Negocio'],['building','Empresa','Negocio'],['users','Personas','Personas'],['heart','Experiencia','Personas'],['graduation','Formación','Personas'],['fingerprint','Identidad','Personas'],['trophy','Logro','Objetivos'],['target','Objetivo','Objetivos'],['star','Calidad','Objetivos'],['flag','Hito','Objetivos'],['award','Reconocimiento','Objetivos'],['bolt','Eficiencia','Operaciones'],['box','Inventario','Operaciones'],['factory','Producción','Operaciones'],['truck','Logística','Operaciones'],['wrench','Intervención','Operaciones'],['gear','Proceso','Operaciones'],['battery','Energía','Operaciones'],['leaf','Sostenibilidad','Operaciones'],['globe','Mercados','Negocio'],['pin','Ubicación','Negocio'],['clock','Tiempo','Servicio'],['calendar','Calendario','Servicio'],['hourglass','Espera','Servicio'],['shield','Servicio','Servicio'],['mail','Correo','Servicio'],['phone','Llamadas','Servicio'],['chat','Conversaciones','Servicio'],['headset','Soporte','Servicio'],['cloud','Cloud','Tecnología'],['cpu','Tecnología','Tecnología'],['lightbulb','Innovación','Tecnología'],['rocket','Lanzamiento','Tecnología']
