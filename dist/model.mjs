@@ -113,11 +113,35 @@ export function isValidMeasureName(name){
  if(/[\[\]"'\r\n\t=]/.test(t))return false;
  return true;
 }
+export function getCircularConflict(c){
+ if(!c||!c.measureName)return null;
+ const norm=s=>(s||'').replace(/^\[|\]$/g,'').trim().toLowerCase();
+ const target=norm(c.measureName);
+ if(!target)return null;
+ if(norm(c.measure)&&target===norm(c.measure)){
+  return {type:'medida principal',name:c.measure.trim(),field:'measure'};
+ }
+ if((needsGoal(c)||(needsCompare(c)&&c.comparison==='target'))&&c.targetMeasure){
+  const tTrim=c.targetMeasure.trim();
+  if(!/^-?\d+(\.\d+)?$/.test(tTrim)&&target===norm(tTrim)){
+   return {type:'medida objetivo',name:tTrim,field:'targetMeasure'};
+  }
+ }
+ if(needsCompare(c)&&c.comparison==='custom'&&c.compareMeasure&&target===norm(c.compareMeasure)){
+  return {type:'medida de referencia',name:c.compareMeasure.trim(),field:'compareMeasure'};
+ }
+ if(needsDate(c)&&c.dateColumn&&target===norm(c.dateColumn)){
+  return {type:'columna de fechas',name:c.dateColumn.trim(),field:'dateColumn'};
+ }
+ return null;
+}
 export function checks(c){
  const issues=[];
  if(rendered(c,'title')&&!c.title.trim())issues.push({level:'error',text:'Añade un título para la tarjeta.',field:'title'});
  if(!c.measure.trim())issues.push({level:'error',text:'Indica el nombre de la medida principal.',field:'measure'});
  if(!isValidMeasureName(c.measureName))issues.push({level:'error',text:'Indica un nombre de medida DAX válido (sin corchetes [], comillas ni saltos de línea).',field:'measureName'});
+ const circ=getCircularConflict(c);
+ if(circ)issues.push({level:'error',text:`Dependencia circular: el nombre de la medida resultante ('${c.measureName.trim()}') no puede coincidir con la ${circ.type} ('${circ.name}'). Modifícalo en KPI Atelier para continuar.`,field:'measureName'});
  if(needsDate(c)&&(!c.dateTable.trim()||!c.dateColumn.trim()))issues.push({level:'error',text:'Completa la tabla calendario y su columna de fecha.',field:!c.dateTable.trim()?'dateTable':'dateColumn'});
  if((needsGoal(c)||(needsCompare(c)&&c.comparison==='target'))&&!c.targetMeasure.trim())issues.push({level:'error',text:'Indica una medida u objetivo numérico (ej. 0 o 100).',field:'targetMeasure'});
  if(needsCompare(c)&&c.comparison==='custom'&&!c.compareMeasure.trim())issues.push({level:'error',text:'Indica la medida de comparación.',field:'compareMeasure'});

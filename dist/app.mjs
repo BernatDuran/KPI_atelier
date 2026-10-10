@@ -1,7 +1,7 @@
 import {resizeCard,applyLayout} from './layout.mjs';
 import {COLOR_SPEC,colorModes,appearance,elementColor,elementBackground,trendFill,SURFACE_EFFECTS} from './appearance.mjs';
 import {alignmentGuides} from './guides.mjs';
-import {BASE,TEMPLATES,THEMES,FAMILIES,sanitizeConfig,checks,familyName,needsTrend,needsDate,needsGoal,needsCompare,isValidMeasureName} from './model.mjs';
+import {BASE,TEMPLATES,THEMES,FAMILIES,sanitizeConfig,checks,getCircularConflict,familyName,needsTrend,needsDate,needsGoal,needsCompare,isValidMeasureName} from './model.mjs';
 import {icon,esc,cardHTML,sampleData} from './cards.mjs';
 import {generateDAX} from './dax.mjs';
 import {ELEMENTS,ELEMENT_IDS,SIZE_LIMITS,elementState,elementSize,elementAvailable,elementEnabled,elementVisible,updateElement,moveElement,resizeElement,restoreElement,clamp,frameFromBounds,detachElement,releaseElement,layerOrder,moveLayer,reorderLayer,resolveElementDef} from './elements.mjs';
@@ -464,6 +464,16 @@ document.addEventListener('click',e=>{
    toast('Corrige el campo indicado para continuar.');
   }
  },
+ 'fix-circular-name':()=>{
+  const cleanId=c.measureName.replace(/^\[|\]$/g,'').trim().replace(/[^\p{L}\p{N}_ ]/gu,'').trim().replace(/\s+/g,'_');
+  const safeName=cleanId.startsWith('KPI_')?`${cleanId}_Card`:`KPI_${cleanId}`;
+  c=sanitizeConfig({...c,measureName:safeName});
+  persist();
+  refreshCard();
+  closeModal();
+  toast(`Nombre actualizado a '${safeName}'. Ya puedes sincronizar sin conflicto.`);
+  exportModal();
+ },
  undo:()=>{if(undo.length){redo.push(c);c=undo.pop();persist();render();}},redo:()=>{if(redo.length){undo.push(c);c=redo.pop();persist();render();}},
  reset:()=>{const template=TEMPLATES.find(x=>x.id===c.id)||TEMPLATES[0];openModal('¿Restaurar la plantilla?','Volverás a los ajustes originales de '+template.name+'.','<p>Podrás recuperar los cambios con Deshacer.</p>',btn('close-modal','Cancelar',null,'button secondary')+btn('confirm-reset','Restaurar','reset','button primary'));},
  'confirm-reset':()=>{closeModal();setConfig((TEMPLATES.find(x=>x.id===c.id)||TEMPLATES[0]).config,true);toast('Plantilla restaurada.');},
@@ -474,6 +484,30 @@ document.addEventListener('click',e=>{
     return;
    }
    const b=$('#modal')?.querySelector('[data-action="inject-live-measure"]');
+
+   // Pre-check 0: Control en la capa más alta contra dependencia circular
+   const circConflict=getCircularConflict(c);
+   if(circConflict){
+    openModal(
+     'Dependencia circular detectada',
+     'Corrige el nombre de la medida en KPI Atelier antes de sincronizar con Power BI.',
+     `<div class="inject-confirm-alert error">
+       <div class="inject-confirm-icon">${icon('alertTriangle',20)}</div>
+       <div>
+        <strong>Conflicto con ${esc(circConflict.type)}</strong>
+        <p>La medida DAX resultante se llama <code>${esc(c.measureName)}</code>, que coincide exactamente con la ${esc(circConflict.type)} <code>[${esc(circConflict.name)}]</code>.</p>
+        <p>En Power BI, una medida no puede utilizar su propia fórmula para calcularse a sí misma (provocaría un error de dependencia circular en el servidor).</p>
+        <p>Modifica el nombre de la medida resultante en KPI Atelier para continuar.</p>
+       </div>
+      </div>`,
+     btn('close-modal','Cerrar',null,'button secondary')+
+     `<button type="button" class="button primary" data-action="fix-circular-name">
+       ${icon('sparkles',14)} <span>Renombrar a KPI_${esc(c.measureName.replace(/^\[|\]$/g,'').trim().replace(/[^\p{L}\p{N}_ ]/gu,'').trim().replace(/\s+/g,'_'))}</span>
+      </button>`,
+     'circular-conflict-modal'
+    );
+    return;
+   }
 
    // Pre-check 1: Verify referenced measures exist in model
    const modelMeasureNames=(pbipModel.measures||[]).map(m=>m.name.toLowerCase());
@@ -532,7 +566,11 @@ document.addEventListener('click',e=>{
       }
      fetchLivePbiModel(pbipModel.server,pbipModel.database||'').then(cat=>setPbipModel(cat,false)).catch(()=>{});
     }catch(err){
-     toast(`Error al inyectar medida: ${err.message}`);
+     let msg=err.message||'';
+     if(/dependencia circular|circular dependency/i.test(msg)){
+      msg=`Se detectó una dependencia circular en Power BI. La medida '${c.measureName}' no puede referenciarse a sí misma. Modifica el nombre de salida en KPI Atelier para continuar.`;
+     }
+     toast(`Error al inyectar medida: ${msg}`);
      if(injectBtn){
       injectBtn.disabled=false;
       injectBtn.innerHTML=`${icon('sparkles',14)} <span>Reintentar inyección</span>`;
@@ -880,12 +918,20 @@ function renderGuides(){
   if(result.marginBreach?.bottom)safeClasses.push('breach-bottom');
 
   html+=`<div class="${safeClasses.join(' ')}" style="left:${left+inset}px;top:${top+inset}px;width:${Math.max(0,w-2*inset)}px;height:${Math.max(0,h-2*inset)}px"></div>`;
-  html+=result.lines.map(line=>`<span class="smart-guide ${line.axis==='x'?'vertical':'horizontal'} ${line.kind} ${line.exact?'exact':''}" style="left:${left+(line.axis==='x'?line.position*scale:-8)}px;top:${top+(line.axis==='y'?line.position*scale:-8)}px;${line.axis==='x'?'height:'+(h+16):'width:'+(w+16)}px"><b>${line.label}</b></span>`).join('');
+  // Mínimas líneas necesarias: máximo 1 línea en el eje X y 1 en el eje Y (el mejor ajuste / snap exacto)
+  const snapX=result.edgeSnaps?.left||result.edgeSnaps?.right||result.marginSnaps?.left||result.marginSnaps?.right;
+  const snapY=result.edgeSnaps?.top||result.edgeSnaps?.bottom||result.marginSnaps?.top||result.marginSnaps?.bottom;
+  const candidateX=result.lines.filter(l=>l.axis==='x'&&(!snapX||l.kind==='peer'||l.kind==='center'));
+  const candidateY=result.lines.filter(l=>l.axis==='y'&&(!snapY||l.kind==='peer'||l.kind==='center'));
+  const bestX=candidateX.sort((a,b)=>(b.exact?1:0)-(a.exact?1:0))[0];
+  const bestY=candidateY.sort((a,b)=>(b.exact?1:0)-(a.exact?1:0))[0];
+  const minimalLines=[bestX,bestY].filter(Boolean);
+
+  html+=minimalLines.map(line=>`<span class="smart-guide ${line.axis==='x'?'vertical':'horizontal'} ${line.kind} ${line.exact?'exact':''}" style="left:${left+(line.axis==='x'?line.position*scale:-8)}px;top:${top+(line.axis==='y'?line.position*scale:-8)}px;${line.axis==='x'?'height:'+(h+16):'width:'+(w+16)}px">${line.exact?`<b>${line.label}</b>`:''}</span>`).join('');
 
   if(result.overlaps&&result.overlaps.length){
    for(const ov of result.overlaps){
-    html+=`<div class="guide-overlap-zone" style="left:${left+ov.rect.left*scale}px;top:${top+ov.rect.top*scale}px;width:${ov.rect.width*scale}px;height:${ov.rect.height*scale}px"><span class="guide-overlap-pill">Solapamiento</span></div>`;
-    html+=`<div class="guide-peer-box" style="left:${left+ov.peer.left*scale}px;top:${top+ov.peer.top*scale}px;width:${ov.peer.width*scale}px;height:${ov.peer.height*scale}px"></div>`;
+    html+=`<div class="guide-overlap-zone" style="left:${left+ov.rect.left*scale}px;top:${top+ov.rect.top*scale}px;width:${ov.rect.width*scale}px;height:${ov.rect.height*scale}px"></div>`;
    }
   }
  }
@@ -1518,9 +1564,10 @@ function highlightBindingElements(key,active){
 }
 
 function updateBindingFieldStatus(key){
+ const circ=key==='measureName'?getCircularConflict(c):null;
  const isErr=Boolean(
   (key==='measure'&&!c.measure.trim())||
-  (key==='measureName'&&!isValidMeasureName(c.measureName))||
+  (key==='measureName'&&(!isValidMeasureName(c.measureName)||circ))||
   (key==='dateTable'&&needsDate(c)&&!c.dateTable.trim())||
   (key==='dateColumn'&&needsDate(c)&&!c.dateColumn.trim())||
   (key==='targetMeasure'&&(needsGoal(c)||(needsCompare(c)&&c.comparison==='target'))&&!c.targetMeasure.trim())||
@@ -1536,7 +1583,11 @@ function updateBindingFieldStatus(key){
  }
  if(helpEl){
   helpEl.classList.toggle('error',isErr);
-  if(isErr){
+  if(circ){
+   helpEl.textContent=`⚠️ No puede coincidir con ${circ.type} (dependencia circular)`;
+   helpEl.style.display='';
+   helpEl.classList.remove('is-hidden');
+  }else if(isErr){
    helpEl.textContent='Este campo es obligatorio para la tarjeta actual';
    helpEl.style.display='';
    helpEl.classList.remove('is-hidden');

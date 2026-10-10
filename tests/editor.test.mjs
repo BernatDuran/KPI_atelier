@@ -538,3 +538,50 @@ test('Step-1 size keys (+/-) independent of pixel toggle, and alignment boundary
  assert.equal(noOverlapRes.overlaps.length, 0);
  `);
 });
+
+test('Circular dependency pre-check prevents injection and flags self-referencing measure in UI and model', async () => {
+ const run = await editor();
+ run(`
+ loadDesign(BASE);
+
+ // 1. Model level checks: getCircularConflict and checks()
+ const normalConf = { ...BASE, measure: 'Horas Absentismo', measureName: 'KPI_Horas_Absentismo' };
+ assert.equal(getCircularConflict(normalConf), null);
+ assert.equal(checks(normalConf).some(i => i.field === 'measureName'), false);
+
+ const circularConf = { ...BASE, measure: 'Horas Absentismo', measureName: 'Horas Absentismo' };
+ const conflict = getCircularConflict(circularConf);
+ assert.ok(conflict);
+ assert.equal(conflict.type, 'medida principal');
+ assert.equal(conflict.field, 'measure');
+
+ const issues = checks(circularConf);
+ const circIssue = issues.find(i => i.field === 'measureName');
+ assert.ok(circIssue);
+ assert.ok(circIssue.text.includes('Dependencia circular'));
+
+ // Target measure collision
+ const targetColl = { ...BASE, measure: 'Ventas', targetMeasure: 'Meta 2026', measureName: 'Meta 2026' };
+ const targetConflict = getCircularConflict(targetColl);
+ assert.ok(targetConflict);
+ assert.equal(targetConflict.type, 'medida objetivo');
+
+ // 2. App injection pre-check: when circular conflict exists, inject-live-measure halts and opens circular modal
+ setConfig(circularConf);
+ setPbipModel({
+  isLiveConnection: true,
+  server: 'localhost:50000',
+  database: 'test-db',
+  reportName: 'Report.pbix',
+  measures: [{ name: 'Horas Absentismo', table: 'Activities' }]
+ });
+
+ fire('document', 'click', { target: button({ action: 'inject-live-measure' }) });
+ assert.ok($('#modal').innerHTML.includes('Dependencia circular detectada'));
+
+ // 3. 1-Click fix circular name updates measureName and resolves issue
+ fire('document', 'click', { target: button({ action: 'fix-circular-name' }) });
+ assert.equal(c.measureName, 'KPI_Horas_Absentismo');
+ assert.equal(getCircularConflict(c), null);
+ `);
+});
