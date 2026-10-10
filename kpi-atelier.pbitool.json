@@ -1,0 +1,8 @@
+{
+    "version":  "1.0",
+    "name":  "KPI Atelier",
+    "description":  "Estudio de diseno visual y generacion de medidas DAX para tarjetas KPI en Power BI Desktop.",
+    "path":  "C:\\Users\\bduran\\Desktop\\KPI_Atelier\\kpi-atelier.cmd",
+    "arguments":  "\"%server%\" \"%database%\"",
+    "iconData":  "image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAABJElEQVR4nO3ZwQ3CUAgG4G7hCB68OIAnLw7mKq7QCVzHHTQeNM1LgQI/r1Qh4WRq/++hCWmHoaqqbx3Pl2dkhwfe7Q+hDQX1DM5BXOF7B6cgmwxvQmQLr0b8BID7ovvjuirCDHgHbzsdgDt9CXAbR1ibEZrTbxGpAZufQJb/gAswhawRHAZYu/8XgKwCFKAABdADsjQc0Hu9gAKkDTU1gFuxIxERgFPT+QFM+HAEEkCF/yJSAhacPmQK1LUogBTePYU0AAuCu84FUIY3T+FzHzVAQlgBWgQFQD2Z0wJUU5jewwyYQzjCq6ZAAdxPp52ARVNop2wCUAhneHEKcz9RU3hpEp7mENRnkPdkKMjctkptsCFvKhEQaf3u/t4Y3fDAVVV8vQDLjiEx+MKP9gAAAABJRU5ErkJggg=="
+}
