@@ -668,3 +668,75 @@ test('Pixel-perfect alignment guides (diff <= 0.5), live model pre-validation, a
  applyBindingFieldValue('targetMeasure', 'Objetivo 2026');
  `);
 });
+
+test('Drag hides selection-name badge, peer collision/alignment frames, and data modal non-bindable elements', async () => {
+ const run = await editor();
+ run(`
+ loadDesign(BASE);
+
+ // 1. Selection overlay renders selection-name badge
+ selectElement('title');
+ positionSelection();
+ const overlayHTML = $('#selection-overlay').innerHTML;
+ assert.ok(overlayHTML.includes('selection-name'));
+ assert.ok(overlayHTML.includes('Título del KPI'));
+
+ // 2. Peer alignment lines include peer reference
+ const peerTitle = { id: 'title', label: 'Título del KPI', left: 60, top: 20, width: 140, height: 24 };
+ const alignedBox = { left: 60, top: 80, width: 100, height: 30 };
+ const guidesAlign = alignmentGuides(alignedBox, { width: 440, height: 400 }, [peerTitle], 28);
+ const peerLine = guidesAlign.lines.find(l => l.kind === 'peer' && l.position === 60);
+ assert.ok(peerLine);
+ assert.equal(peerLine.peer?.id, 'title');
+
+ // 3. Peer collision in alignmentGuides
+ const collidingBox = { left: 40, top: 25, width: 100, height: 30 };
+ const guidesCollide = alignmentGuides(collidingBox, { width: 440, height: 400 }, [peerTitle], 28);
+ assert.equal(guidesCollide.overlaps.length, 1);
+ assert.equal(guidesCollide.overlaps[0].peer.id, 'title');
+
+ // 4. Data binding modal: delta and compareLabel are not is-bindable for non-custom cards
+ const elements = [
+  { id: 'value', classList: new Set() },
+  { id: 'title', classList: new Set() },
+  { id: 'delta', classList: new Set() },
+  { id: 'compareLabel', classList: new Set() }
+ ];
+ const mockCard = {
+  querySelectorAll: () => elements.map(e => ({
+   dataset: { element: e.id },
+   classList: {
+    toggle: (cls, val) => { val ? e.classList.add(cls) : e.classList.delete(cls); },
+    remove: (...cls) => cls.forEach(c => e.classList.delete(c)),
+    contains: cls => e.classList.has(cls)
+   },
+   removeAttribute: () => {}
+  }))
+ };
+
+ c = { ...BASE, comparison: 'yoy', showComparison: true };
+ const activeFields = new Set(['measure', 'measureName']);
+ if (needsDate(c)) { activeFields.add('dateTable'); activeFields.add('dateColumn'); }
+ if (needsGoal(c) || c.comparison === 'target') { activeFields.add('targetMeasure'); }
+ if (needsCompare(c) && c.comparison === 'custom') { activeFields.add('compareMeasure'); }
+
+ mockCard.querySelectorAll().forEach(el => {
+  const id = el.dataset.element;
+  const def = resolveElementDef(id);
+  const isDuplicate = Boolean(def?.isDuplicate);
+  if (id === 'compareLabel' || (id === 'delta' && c.comparison !== 'custom')) {
+   el.classList.remove('is-bindable', 'binding-highlight');
+   return;
+  }
+  const fieldKey = ELEMENT_TO_FIELD[id];
+  const isBindable = isDuplicate || Boolean(fieldKey && activeFields.has(fieldKey));
+  el.classList.toggle('is-bindable', isBindable);
+ });
+
+ assert.equal(elements.find(e => e.id === 'value').classList.has('is-bindable'), true);
+ assert.equal(elements.find(e => e.id === 'title').classList.has('is-bindable'), true);
+ assert.equal(elements.find(e => e.id === 'delta').classList.has('is-bindable'), false);
+ assert.equal(elements.find(e => e.id === 'compareLabel').classList.has('is-bindable'), false);
+ `);
+});
+

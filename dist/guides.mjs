@@ -1,14 +1,14 @@
 // Geometry in card pixels: independent of zoom and pointer-event implementation.
 export function alignmentGuides(box,card,peers=[],padding=0,tolerance=3){
  const lines=[],seen=new Set();
- const add=(axis,position,kind,label,exact=false)=>{const key=axis+':'+position;if(!seen.has(key)){seen.add(key);lines.push({axis,position,kind,label,exact});}};
+ const add=(axis,position,kind,label,exact=false,peer=null)=>{const key=axis+':'+position;if(!seen.has(key)){seen.add(key);lines.push({axis,position,kind,label,exact,peer});}};
  for(const axis of ['x','y']){
   const size=axis==='x'?'width':'height',start=axis==='x'?'left':'top';
   const anchors=[box[start],box[start]+box[size]/2,box[start]+box[size]];
   const targets=[{p:0,kind:'edge',label:'Borde'},{p:card[size],kind:'edge',label:'Borde'},
    {p:padding,kind:'margin',label:'Margen'},{p:card[size]-padding,kind:'margin',label:'Margen'},
    {p:card[size]/2,kind:'center',label:'Centro'},
-   ...peers.flatMap(peer=>[peer[start],peer[start]+peer[size]/2,peer[start]+peer[size]].map(p=>({p,kind:'peer',label:peer.label?`Alineación (${peer.label})`:'Alineación'})))];
+   ...peers.flatMap(peer=>[peer[start],peer[start]+peer[size]/2,peer[start]+peer[size]].map(p=>({p,kind:'peer',label:peer.label?`Alineación (${peer.label})`:'Alineación',peer})))];
   // Edges and margins win over equivalent peer lines.
   for(const target of targets){
    if(target.p>=0&&target.p<=card[size]){
@@ -17,7 +17,7 @@ export function alignmentGuides(box,card,peers=[],padding=0,tolerance=3){
      const diff=Math.abs(matching-target.p);
      const exact=diff<=0.5;
      const label=exact?(target.kind==='center'?'Centro exacto':`${target.label} exacto${diff<0.05?' (0 px)':''}`):target.label;
-     add(axis,target.p,target.kind,label,exact);
+     add(axis,target.p,target.kind,label,exact,target.peer||null);
     }
    }
   }

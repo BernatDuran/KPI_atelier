@@ -993,10 +993,24 @@ function renderGuides(){
 
   html+=minimalLines.map(line=>`<span class="smart-guide ${line.axis==='x'?'vertical':'horizontal'} ${line.kind} ${line.exact?'exact':''}" style="left:${left+(line.axis==='x'?line.position*scale:-8)}px;top:${top+(line.axis==='y'?line.position*scale:-8)}px;${line.axis==='x'?'height:'+(h+16):'width:'+(w+16)}px">${line.exact?`<b>${line.label}</b>`:''}</span>`).join('');
 
+  const collidingPeers=new Map();
   if(result.overlaps&&result.overlaps.length){
    for(const ov of result.overlaps){
+    if(ov.peer&&!collidingPeers.has(ov.peer.id))collidingPeers.set(ov.peer.id,ov.peer);
     html+=`<div class="guide-overlap-zone" style="left:${left+ov.rect.left*scale}px;top:${top+ov.rect.top*scale}px;width:${ov.rect.width*scale}px;height:${ov.rect.height*scale}px"></div>`;
    }
+  }
+  for(const peer of collidingPeers.values()){
+   html+=`<div class="guide-peer-box collision" style="left:${left+peer.left*scale}px;top:${top+peer.top*scale}px;width:${peer.width*scale}px;height:${peer.height*scale}px" title="Colisión con ${peer.label}"></div>`;
+  }
+  const alignedPeers=new Map();
+  for(const line of minimalLines){
+   if(line.kind==='peer'&&line.peer&&!collidingPeers.has(line.peer.id)&&!alignedPeers.has(line.peer.id)){
+    alignedPeers.set(line.peer.id,line.peer);
+   }
+  }
+  for(const peer of alignedPeers.values()){
+   html+=`<div class="guide-peer-box align" style="left:${left+peer.left*scale}px;top:${top+peer.top*scale}px;width:${peer.width*scale}px;height:${peer.height*scale}px" title="Alineado con ${peer.label}"></div>`;
   }
  }
 
@@ -1582,7 +1596,7 @@ const FIELD_TO_ELEMENTS={
  dateTable:['trend','period'],
  dateColumn:['period'],
  targetMeasure:['progress','progressLabel','goalLabel'],
- compareMeasure:['delta','compareLabel','referenceValue','referenceLabel']
+ compareMeasure:['referenceValue','referenceLabel']
 };
 const ELEMENT_TO_FIELD={
  value:'measure',
@@ -1591,7 +1605,6 @@ const ELEMENT_TO_FIELD={
  progressLabel:'targetMeasure',
  goalLabel:'targetMeasure',
  delta:'compareMeasure',
- compareLabel:'compareMeasure',
  referenceValue:'compareMeasure',
  referenceLabel:'compareMeasure',
  period:'dateColumn',
@@ -1686,15 +1699,22 @@ function updateBindableElements(){
  const activeFields=new Set(['measure','measureName']);
  if(needsDate(c)){activeFields.add('dateTable');activeFields.add('dateColumn');}
  if(needsGoal(c)||c.comparison==='target'){activeFields.add('targetMeasure');}
- if(needsCompare(c)){activeFields.add('compareMeasure');}
+ if(needsCompare(c)&&c.comparison==='custom'){activeFields.add('compareMeasure');}
  inner.querySelectorAll('[data-element]').forEach(el=>{
   const id=el.dataset.element;
   const def=resolveElementDef(id);
   const isDuplicate=Boolean(def?.isDuplicate);
+  if(id==='compareLabel'||(id==='delta'&&c.comparison!=='custom')){
+   el.classList.remove('is-bindable','binding-highlight');
+   el.removeAttribute('role');
+   el.removeAttribute('tabindex');
+   return;
+  }
   const fieldKey=ELEMENT_TO_FIELD[id];
   const isBindable=isDuplicate||Boolean(fieldKey&&activeFields.has(fieldKey));
   el.classList.toggle('is-bindable',isBindable);
   if(!isBindable){
+   el.classList.remove('binding-highlight');
    el.removeAttribute('role');
    el.removeAttribute('tabindex');
   }
@@ -1702,6 +1722,7 @@ function updateBindableElements(){
 }
 
 function fitBindingCard(){
+ updateBindableElements();
  requestAnimationFrame(()=>{
   const wrap=document.querySelector('.binding-card-wrap'),inner=document.getElementById('binding-card-inner');
   if(!wrap||!inner)return;
