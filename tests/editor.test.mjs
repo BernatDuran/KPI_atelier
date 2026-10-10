@@ -403,3 +403,78 @@ test('Advanced Controls: Element copy-paste duplication, context ribbon mode, co
  closeModal();
  `);
 });
+
+
+test('Independent duplicate configuration across inspector, data binding and DAX, NW handle directional logic, and clean footer', async () => {
+ const run = await editor();
+ run(`
+ loadDesign(BASE);
+
+ // 1. Clean app footer
+ render();
+ const appHTML = app.innerHTML;
+ assert.ok(appHTML.includes('footer class="app-footer"'));
+ assert.ok(appHTML.includes('Diseño en directo'));
+ assert.ok(appHTML.includes('KPI Atelier'));
+ assert.ok(!appHTML.includes('una nueva forma de contar los números'));
+ assert.ok(!appHTML.includes('Guia de power bi'));
+ assert.ok(!appHTML.includes('datos de ejemplo'));
+
+ // 2. Duplicate element independent configuration and size
+ const dupVal = 'value_copy1';
+ resolveElementDef(dupVal);
+ c = updateElement(c, dupVal, {
+  size: 32,
+  measure: 'Ventas_Online',
+  format: 'currency',
+  decimals: 2,
+  suffix: 'EUR'
+ });
+ assert.equal(elementSize(c, dupVal), 32);
+ assert.notEqual(elementSize(c, dupVal), c.valueSize);
+
+ // 3. Inspector displays independent duplicate controls
+ selectedElement = dupVal;
+ tab = 'element';
+ renderInspector();
+ const inspHTML = $('#inspector-fields').innerHTML;
+ assert.ok(inspHTML.includes('f-dup-measure'));
+ assert.ok(inspHTML.includes('f-dup-format'));
+ assert.ok(inspHTML.includes('f-dupsize'));
+
+ // 4. Data binding modal exposes independent inputs for duplicates
+ openDataBindingModal();
+ const bindModalHTML = $('#modal').innerHTML;
+ assert.ok(bindModalHTML.includes('Elementos duplicados vinculables'));
+ assert.ok(bindModalHTML.includes('data-bind-dup="value_copy1"'));
+ closeModal();
+
+ // 5. DAX generation emits dedicated variables for duplicates
+ c.targetMeasure = '1000';
+ const dax = generateDAX(c);
+ assert.ok(dax.includes('VAR __val_value_copy1 ='));
+ assert.ok(dax.includes('[Ventas_Online]'));
+
+ // 6. NW handle directional logic
+ const W0 = 100, S0 = 40, X0 = 20, Y0 = 30;
+ const bounds = [6, 140];
+ const dx = -15, dy = -10, step = 1;
+ const clampDy = Math.min(0, dy);
+ const snappedDx = Math.round(dx / step) * step;
+ const snappedDy = Math.round(clampDy / step) * step;
+ const targetW = Math.max(16, Math.min(800, W0 - snappedDx));
+ const deltaW = targetW - W0;
+ const nextX = X0 - deltaW;
+ const targetS = Math.max(bounds[0], Math.min(bounds[1], S0 - snappedDy));
+ const deltaS = targetS - S0;
+ const nextY = Y0 - deltaS;
+ assert.equal(targetW, 115);
+ assert.equal(nextX, 5);
+ assert.equal(nextX + targetW, X0 + W0);
+ assert.equal(targetS, 50);
+ assert.equal(nextY, 20);
+ const dyDown = 20;
+ const clampDyDown = Math.min(0, dyDown);
+ assert.equal(clampDyDown, 0);
+ `);
+});

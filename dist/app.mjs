@@ -283,6 +283,20 @@ app.addEventListener('input',e=>{
   const next=updateElement(c,id,{text:t.value});
   c=sanitizeConfig(next);persist();refreshCard();updateHistoryButtons();return;
  }
+ if(t.dataset.dupsize&&selectedElement){
+  const now=Date.now();if(now-lastEdit>700)record();lastEdit=now;
+  const id=t.dataset.dupsize,val=Number(t.value);
+  if(t.nextElementSibling&&t.nextElementSibling.tagName==='OUTPUT')t.nextElementSibling.textContent=val+'px';
+  const next=updateElement(c,id,{size:val});
+  c=sanitizeConfig(next);persist();refreshCard();updateHistoryButtons();return;
+ }
+ if(t.dataset.dupval&&selectedElement){
+  const now=Date.now();if(now-lastEdit>700)record();lastEdit=now;
+  const prop=t.dataset.dupval;let val=t.value;
+  if(prop==='decimals')val=Number(val);
+  const next=updateElement(c,selectedElement,{[prop]:val});
+  c=sanitizeConfig(next);persist();refreshCard();updateHistoryButtons();return;
+ }
  if(t.dataset.elprop&&selectedElement){
   const now=Date.now();if(now-lastEdit>700)record();lastEdit=now;
   const id=selectedElement,key=t.dataset.elprop,value=Number(t.value),state=elementState(c,id);
@@ -304,6 +318,12 @@ app.addEventListener('change',e=>{
  const t=e.target;
  if(t.type==='number'&&(t.dataset.key||t.dataset.elprop)){commitNumber(t);return;}
  if(t.id==='family-filter'){filter=t.value;$('#rail-cards').innerHTML=railCards();fitThumbs();return;}
+ if(t.dataset.dupval&&selectedElement){
+  const prop=t.dataset.dupval;let val=t.value;
+  if(prop==='decimals')val=Number(val);
+  const next=updateElement(c,selectedElement,{[prop]:val});
+  c=sanitizeConfig(next);persist();refreshCard();renderInspector();updateHistoryButtons();return;
+ }
  if(t.dataset.appearance&&selectedElement){if(t.tagName==='SELECT')renderInspector();else if(t.dataset.hex!==undefined&&t.getAttribute('aria-invalid')==='true')toast('Escribe un color HEX de 6 caracteres, por ejemplo #477568.');return;}
  if(t.dataset.elprop&&selectedElement){t.value=elementState(c,selectedElement)[t.dataset.elprop];renderInspector();}
  if(t.dataset.key&&(t.tagName==='SELECT'||t.type==='checkbox'||t.type==='color'))renderInspector();
@@ -1122,7 +1142,7 @@ document.addEventListener('click',e=>{
  else if(a==='themes')openThemeStudio();
 });
 function openIconPicker(){openModal('Un símbolo para cada historia.',`${ICON_OPTIONS.length} iconos vectoriales para dar contexto a tu KPI.`,`<label class="search-box icon-search">${icon('search',16)}<input id="icon-search" type="search" placeholder="Busca: ventas, tiempo, personas…" aria-label="Buscar iconos"></label><div id="icon-grid" class="icon-grid">${iconGrid('')}</div>`,btn('close-modal','Cerrar',null,'button secondary'),'icon-modal');}
-function iconGrid(query){return ICON_OPTIONS.filter(x=>x.join(' ').toLocaleLowerCase('es').includes(query.toLocaleLowerCase('es'))).map(([id,label,group])=>`<button data-pick-icon="${id}" class="${c.icon===id?'active':''}" title="${label} · ${group}">${icon(id,25)}<span>${label}</span></button>`).join('')||'<p class="field-help">No hay iconos con ese nombre.</p>';}
+function iconGrid(query){const activeIcon=(selectedElement&&elementState(c,selectedElement).icon)||c.icon;return ICON_OPTIONS.filter(x=>x.join(' ').toLocaleLowerCase('es').includes(query.toLocaleLowerCase('es'))).map(([id,label,group])=>`<button data-pick-icon="${id}" class="${activeIcon===id?'active':''}" title="${label} · ${group}">${icon(id,25)}<span>${label}</span></button>`).join('')||'<p class="field-help">No hay iconos con ese nombre.</p>';}
 function themeTile(id,name,colors,custom=false){return `<button ${custom?'data-draft-custom':'data-draft-theme'}="${id}" class="studio-theme-tile"><span class="theme-strip">${['background','accent','text','positive'].map(key=>`<i style="background:${colors[key]}"></i>`).join('')}</span><span>${esc(name)}</span>${icon('chevron',12)}</button>`;}
 function openThemeStudio(){
  paletteDraft=paletteFrom(c);colorRole='accent';colorHSV=hexToHSV(paletteDraft[colorRole]);
@@ -1165,6 +1185,25 @@ document.addEventListener('click',e=>{
 });
 document.addEventListener('input',e=>{
  if(e.target.id==='icon-search')$('#icon-grid').innerHTML=iconGrid(e.target.value);
+ const dupId=e.target.dataset?.bindDup;
+ if(dupId){
+  const prop=e.target.dataset?.bindDupprop||'measure';
+  const val=e.target.value;
+  c=updateElement(c,dupId,{[prop]:val});
+  persist();
+  const clearBtn=document.querySelector(`[data-action="clear-bind-dup"][data-dup="${dupId}"]`);
+  if(clearBtn)clearBtn.classList.toggle('is-visible',Boolean(val));
+  const inner=document.getElementById('binding-card-inner');
+  if(inner){
+   inner.innerHTML=cardHTML(c,undefined,true);
+   const el=inner.querySelector(`[data-element="${dupId}"]`);
+   if(el)el.classList.add('binding-highlight');
+   fitBindingCard();
+  }
+  refreshCard();
+  renderStatus();
+  return;
+ }
  const bindKey=e.target.dataset?.bindKey;
  if(bindKey){
   if(bindKey==='measure'){
@@ -1227,6 +1266,24 @@ document.addEventListener('input',e=>{
  }
 });
 document.addEventListener('click',e=>{
+ const clearDupBtn=e.target.closest?.('[data-action="clear-bind-dup"]');
+ if(clearDupBtn){
+  const dupId=clearDupBtn.dataset.dup;
+  const prop=clearDupBtn.dataset.prop||'measure';
+  c=updateElement(c,dupId,{[prop]:''});
+  persist();
+  const input=document.getElementById(`f-bind-${dupId}`);
+  if(input){input.value='';input.focus();}
+  clearDupBtn.classList.remove('is-visible');
+  const inner=document.getElementById('binding-card-inner');
+  if(inner){
+   inner.innerHTML=cardHTML(c,undefined,true);
+   fitBindingCard();
+  }
+  refreshCard();
+  renderStatus();
+  return;
+ }
  const clearBtn=e.target.closest?.('[data-action="clear-bind-field"]');
  if(clearBtn){
   const fieldKey=clearBtn.dataset.field;
@@ -1275,7 +1332,8 @@ document.addEventListener('click',e=>{
  if(bindingEl){
   e.preventDefault();
   const id=bindingEl.dataset.element;
-  const fieldKey=ELEMENT_TO_FIELD[id];
+  const def=resolveElementDef(id);
+  const fieldKey=ELEMENT_TO_FIELD[id]||(def?.isDuplicate?id:null);
   if(fieldKey){
    const input=document.getElementById(`f-bind-${fieldKey}`);
    if(input){
@@ -1292,10 +1350,10 @@ document.addEventListener('click',e=>{
   return;
  }
  const b=e.target.closest('[data-pick-icon]');
- if(!b)return;closeModal();directChange({...restoreElement(c,'icon'),icon:b.dataset.pickIcon});toast('Icono actualizado.');
+ if(!b)return;closeModal();const def=selectedElement?resolveElementDef(selectedElement):null;if(def?.isDuplicate&&def.baseId==='icon'){directChange(updateElement(c,selectedElement,{icon:b.dataset.pickIcon}));}else{directChange({...restoreElement(c,'icon'),icon:b.dataset.pickIcon});}toast('Icono actualizado.');
 });
 document.addEventListener('focusin',e=>{
- const key=e.target.dataset?.bindKey;
+ const key=e.target.dataset?.bindKey||e.target.dataset?.bindDup;
  if(key){
   highlightBindingElements(key,true);
   if(pbipModel&&['measure','targetMeasure','compareMeasure','dateTable','dateColumn'].includes(key)){
@@ -1313,7 +1371,7 @@ document.addEventListener('focusin',e=>{
  }
 });
 document.addEventListener('focusout',e=>{
- const key=e.target.dataset?.bindKey;
+ const key=e.target.dataset?.bindKey||e.target.dataset?.bindDup;
  if(key)highlightBindingElements(key,false);
 });
 document.addEventListener('mouseover',e=>{
@@ -1324,7 +1382,7 @@ document.addEventListener('mouseout',e=>{
  const wrap=e.target.closest?.('[data-binding-field]');
  if(wrap){
   const key=wrap.dataset.bindingField;
-  if(document.activeElement?.dataset?.bindKey!==key)highlightBindingElements(key,false);
+  if(document.activeElement?.dataset?.bindKey!==key&&document.activeElement?.dataset?.bindDup!==key)highlightBindingElements(key,false);
  }
 });
 document.addEventListener('change',e=>{
@@ -1391,7 +1449,7 @@ function dataSummaryCard(){
 }
 
 function highlightBindingElements(key,active){
- const targets=FIELD_TO_ELEMENTS[key]||[];
+ const targets=FIELD_TO_ELEMENTS[key]||(resolveElementDef(key)?.isDuplicate?[key]:[]);
  const card=document.getElementById('binding-card-inner');
  if(!card)return;
  targets.forEach(id=>{
@@ -1455,8 +1513,10 @@ function updateBindableElements(){
  if(needsCompare(c)){activeFields.add('compareMeasure');}
  inner.querySelectorAll('[data-element]').forEach(el=>{
   const id=el.dataset.element;
+  const def=resolveElementDef(id);
+  const isDuplicate=Boolean(def?.isDuplicate);
   const fieldKey=ELEMENT_TO_FIELD[id];
-  const isBindable=Boolean(fieldKey&&activeFields.has(fieldKey));
+  const isBindable=isDuplicate||Boolean(fieldKey&&activeFields.has(fieldKey));
   el.classList.toggle('is-bindable',isBindable);
   if(!isBindable){
    el.removeAttribute('role');
@@ -1751,6 +1811,72 @@ function openDataBindingModal(focusKey=null){
    <div class="binding-section-divider"></div>
    <div class="binding-section-head"><span>↔</span>Comparativa personalizada<small>Requerido</small></div>
    ${fieldMarkup('compareMeasure','Medida de comparación','fx','','Variación')}`;
+ }
+ const activeDupIds=Object.keys(c.elements||{}).filter(id=>{
+  const def=resolveElementDef(id);
+  const st=elementState(c,id);
+  return def?.isDuplicate&&!st.deleted&&!st.hidden;
+ });
+ if(activeDupIds.length){
+  fieldsHTML+=`
+   <div class="binding-section-divider"></div>
+   <div class="binding-section-head"><span>📑</span>Elementos duplicados vinculables<small>${activeDupIds.length} activo${activeDupIds.length>1?'s':''}</small></div>`;
+  for(const dupId of activeDupIds){
+   const def=resolveElementDef(dupId);
+   const st=elementState(c,dupId);
+   let label=def.label;
+   let prop='measure';
+   let ph='Medida o valor';
+   let val='';
+   let iconChar='fx';
+   if(def.baseId==='value'){
+    prop='measure';
+    label=`Medida de ${def.label}`;
+    ph=pbipModel?.measures?.[0]?.name||'Medida numérica';
+    val=st.measure||'';
+    iconChar='fx';
+   }else if(def.baseId==='delta'){
+    prop='compareMeasure';
+    label=`Comparación de ${def.label}`;
+    ph=pbipModel?.measures?.[0]?.name||'Medida de comparación';
+    val=st.compareMeasure||'';
+    iconChar='fx';
+   }else if(['goalLabel','progressLabel','progress'].includes(def.baseId)){
+    prop='targetMeasure';
+    label=`Objetivo de ${def.label}`;
+    ph='[Objetivo] o número';
+    val=st.targetMeasure||'';
+    iconChar='🎯';
+   }else if(def.baseId==='icon'){
+    prop='icon';
+    label=`Icono de ${def.label}`;
+    ph=st.icon||c.icon||'icono';
+    val=st.icon||'';
+    iconChar='★';
+   }else{
+    prop='text';
+    label=`Texto de ${def.label}`;
+    ph=def.label;
+    val=st.text!==undefined?st.text:'';
+    iconChar='T';
+   }
+   const hasDropdown=Boolean(pbipModel&&['measure','compareMeasure','targetMeasure'].includes(prop));
+   fieldsHTML+=`
+    <div class="binding-field" data-binding-field="${dupId}">
+     <label class="binding-field-label" for="f-bind-${dupId}">
+      <span>${label}</span>
+      <div class="binding-badges-wrap"><span class="target-element-badge">Copia independiente</span></div>
+     </label>
+     <div class="binding-dropdown-wrap ${hasDropdown?'has-dropdown':''}">
+      <div class="binding-input-wrap">
+       <span class="binding-input-icon">${iconChar}</span>
+       <input id="f-bind-${dupId}" class="binding-input" data-bind-dup="${dupId}" data-bind-dupprop="${prop}" type="text" value="${esc(val)}" placeholder="Ejemplo: ${esc(ph)}" spellcheck="false" autocomplete="off" ${hasDropdown?'list="dl-pbip-measures"':''}>
+       <button type="button" class="binding-clear-btn ${val?'is-visible':''}" data-action="clear-bind-dup" data-dup="${dupId}" data-prop="${prop}" title="Borrar" aria-label="Borrar">${icon('eraser',13)}</button>
+       <span class="binding-input-status ${val?'valid':'optional'}">${icon(val?'check':'info',val?14:13)}</span>
+      </div>
+     </div>
+    </div>`;
+  }
  }
  fieldsHTML+=`</div></div>`;
 
