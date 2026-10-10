@@ -1,0 +1,43 @@
+{
+  "app": "KPI Atelier",
+  "version": "1.4.0",
+  "source_commit": "54f2e502347f7caf1d0bfa652ad05dd91daf9d1c",
+  "export_date": "2026-10-09",
+  "source_files_unchanged": [
+    "README.md",
+    "dist/app.mjs",
+    "dist/appearance.mjs",
+    "dist/cards.mjs",
+    "dist/charts.mjs",
+    "dist/colors.mjs",
+    "dist/dax.mjs",
+    "dist/elements.mjs",
+    "dist/guides.mjs",
+    "dist/icons.mjs",
+    "dist/index.html",
+    "dist/layout.mjs",
+    "dist/model.mjs",
+    "dist/styles.css",
+    "package.json",
+    "tests/core.test.mjs",
+    "tests/editor.test.mjs"
+  ],
+  "omissions": [
+    "Git history and checkout-local state",
+    "Original Sites project_id; portable hosting example supplied instead",
+    "Browser-local designs, drafts and themes"
+  ],
+  "added_for_export": [
+    "INICIO_RAPIDO_ES.md",
+    "ARQUITECTURA_ES.md",
+    "scripts/serve.mjs",
+    "docs/hosting.example.json",
+    "EXPORTACION.json",
+    "SHA256SUMS.txt"
+  ],
+  "tests": {
+    "passed": 45,
+    "browser_visual_qa": false,
+    "power_bi_execution": false
+  }
+}
