@@ -1061,10 +1061,11 @@ test('Horizontal duplicate adaptive scaling, guide containment, typology parity 
   assert.equal(dupState.y, 0, 'Offsets must be absorbed into frame');
   assert.equal(dupState.width, dupState.frame.width, 'state.width must match new frame.width');
 
-  // 2. Guide containment and styles
+  // 2. Guide containment and styles: outside by default, no scroll triggered
   const css = fs.readFileSync('dist/styles.css', 'utf8');
-  assert.ok(css.includes('#smart-guides {\n  position:absolute;\n  inset:0;\n  z-index:4;\n  pointer-events:none;\n  color:#609983;\n  overflow:hidden\n}'), 'smart-guides must have overflow:hidden');
-  assert.ok(css.includes('.smart-guide.exact.horizontal b {\n  right:12px;\n  bottom:3px;'), 'horizontal exact badge must stay inside guide line');
+  assert.ok(css.includes('.smart-guide.exact.horizontal b {\n  left:calc(100% + 3px);\n  top:-7px;'), 'horizontal exact badge must be outside to the right by default');
+  assert.ok(css.includes('.smart-guide.exact.vertical b {\n  bottom:100%;\n  left:3px;'), 'vertical exact badge must be outside on top by default');
+  assert.ok(css.includes('.is-dragging #stage,\n.is-dragging.stage,\n.stage.guides-active,\n#stage:has(#smart-guides:not(:empty)) {\n  overflow:clip!important\n}'), 'stage must not scroll during drag or guide display');
 
   // 3. Typology parity for duplicates
   resolveElementDef('delta_copy1');

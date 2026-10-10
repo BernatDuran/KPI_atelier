@@ -3513,8 +3513,7 @@ dialog #toast {
   inset:0;
   z-index:4;
   pointer-events:none;
-  color:#609983;
-  overflow:hidden
+  color:#609983
 }
 .guide-boundary {
   position:absolute;
@@ -3633,18 +3632,32 @@ dialog #toast {
   box-shadow:0 1px 3px #15803d15
 }
 .smart-guide.exact.vertical b {
-  top:12px;
+  bottom:100%;
   left:3px;
-  max-width:180px;
+  max-width:220px;
   overflow:hidden;
   text-overflow:ellipsis
 }
+.smart-guide.exact.vertical.flip-inside b {
+  bottom:auto;
+  top:12px
+}
 .smart-guide.exact.horizontal b {
-  right:12px;
-  bottom:3px;
-  max-width:calc(100% - 24px);
+  left:calc(100% + 3px);
+  top:-7px;
+  max-width:240px;
   overflow:hidden;
   text-overflow:ellipsis
+}
+.smart-guide.exact.horizontal.flip-inside b {
+  left:auto;
+  right:12px;
+  bottom:3px;
+  top:auto
+}
+.smart-guide.exact.horizontal.flip-left b {
+  left:auto;
+  right:calc(100% + 3px)
 }
 .guide-overlap-zone {
   position:absolute;
@@ -3695,6 +3708,12 @@ dialog #toast {
 }
 .is-dragging .selection-name {
   display:none!important
+}
+.is-dragging #stage,
+.is-dragging.stage,
+.stage.guides-active,
+#stage:has(#smart-guides:not(:empty)) {
+  overflow:clip!important
 }
 
 @media(max-width:680px){.current-family{gap:8px}.current-family .compact-guide{margin-left:0}.canvas-object-label{min-width:0;flex:1}.canvas-object-label>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.canvas-object-actions{flex-shrink:0}.smart-guide b{display:none}}

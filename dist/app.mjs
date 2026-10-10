@@ -1186,7 +1186,7 @@ function flashGuides(){guidePreviewUntil=Date.now()+850;clearTimeout(guideTimer)
 function renderGuides(){
  const overlay=$('#smart-guides'),fit=$('#card-fit'),main=$('#main-card');if(!overlay||!fit||!main)return;
  const selected=selectedElement?app.querySelector(`[data-element="${selectedElement}"]`):null;
- if(!guidesEnabled||!selected||!elementVisible(c,selectedElement)){overlay.innerHTML='';return;}
+ if(!guidesEnabled||!selected||!elementVisible(c,selectedElement)){overlay.innerHTML='';$('#stage')?.classList.remove('guides-active');return;}
  const parent=fit.getBoundingClientRect(),surface=(main.firstElementChild||main).getBoundingClientRect(),scale=surface.width/c.width;
  if(!scale)return;
  const rect=node=>{
@@ -1205,7 +1205,7 @@ function renderGuides(){
  const box=rect(selected),card={width:surface.width/scale,height:surface.height/scale};
  const peers=[...main.querySelectorAll('[data-element]')].filter(node=>node!==selected&&elementVisible(c,node.dataset.element)).map(rect);
  const result=alignmentGuides(box,card,peers,c.padding+c.borderWidth,3/scale),active=!!gesture||Date.now()<guidePreviewUntil;
- if(!active&&!result.outside){overlay.innerHTML='';return;}
+ if(!active&&!result.outside){overlay.innerHTML='';$('#stage')?.classList.remove('guides-active');return;}
  const left=surface.left-parent.left,top=surface.top-parent.top,w=surface.width,h=surface.height,inset=(c.padding+c.borderWidth)*scale;
 
  const boundaryClasses=['guide-boundary'];
@@ -1237,7 +1237,23 @@ function renderGuides(){
   const bestY=candidateY.sort((a,b)=>(b.exact?1:0)-(a.exact?1:0))[0];
   const minimalLines=[bestX,bestY].filter(Boolean);
 
-  html+=minimalLines.map(line=>`<span class="smart-guide ${line.axis==='x'?'vertical':'horizontal'} ${line.kind} ${line.exact?'exact':''}" style="left:${left+(line.axis==='x'?line.position*scale:-8)}px;top:${top+(line.axis==='y'?line.position*scale:-8)}px;${line.axis==='x'?'height:'+(h+16):'width:'+(w+16)}px">${line.exact?`<b>${line.label}</b>`:''}</span>`).join('');
+  const stage=$('#stage');
+  const stageRect=stage?stage.getBoundingClientRect():null;
+  stage?.classList.toggle('guides-active',true);
+  html+=minimalLines.map(line=>{
+   let flipClass='';
+   if(line.exact){
+    if(line.axis==='y'){
+     const spaceRight=stageRect?(stageRect.right-surface.right):200;
+     const spaceLeft=stageRect?(surface.left-stageRect.left):200;
+     if(spaceRight<140){flipClass=spaceLeft>=140?'flip-left':'flip-inside';}
+    }else{
+     const spaceTop=stageRect?(surface.top-stageRect.top):100;
+     if(spaceTop<24)flipClass='flip-inside';
+    }
+   }
+   return `<span class="smart-guide ${line.axis==='x'?'vertical':'horizontal'} ${line.kind} ${line.exact?'exact':''} ${flipClass}" style="left:${left+(line.axis==='x'?line.position*scale:-8)}px;top:${top+(line.axis==='y'?line.position*scale:-8)}px;${line.axis==='x'?'height:'+(h+16):'width:'+(w+16)}px">${line.exact?`<b>${line.label}</b>`:''}</span>`;
+  }).join('');
 
   const collidingPeers=new Map();
   if(result.overlaps&&result.overlaps.length){
@@ -1282,8 +1298,17 @@ function renderGuides(){
   readoutText=`${Math.round(box.width)} × ${Math.round(box.height)} px · Guías de alineación`;
  }
 
- const roLeft=Math.max(8,Math.min(w-180,left+4));
- const roTop=Math.max(8,Math.min(h-26,top+h-28));
+ const stage=$('#stage');
+ const stageRect=stage?stage.getBoundingClientRect():null;
+ let roTop=top+h+12;
+ if(stageRect){
+  const spaceBottom=stageRect.bottom-surface.bottom;
+  const spaceTop=surface.top-stageRect.top;
+  if(spaceBottom<36){
+   roTop=spaceTop>=36?(top-32):Math.max(8,top+h-28);
+  }
+ }
+ const roLeft=left;
  html+=`<span class="guide-readout ${readoutClass}" style="left:${roLeft}px;top:${roTop}px">${readoutText}</span>`;
  overlay.innerHTML=html;
 }
