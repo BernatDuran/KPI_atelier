@@ -85,7 +85,7 @@ function render(){
   app.innerHTML=`<header class="app-header"><a class="brand" href="#" data-action="home" aria-label="KPI Atelier, inicio"><span class="brand-icon">${icon('chart',22)}</span><strong>kpi<span class="brand-divider">/</span>atelier<span class="brand-dot">.</span></strong></a><nav class="top-nav" aria-label="Navegación principal">${btn('view-designer','Diseñador','sliders',view==='designer'?'selected':'')}${btn('view-library',`Biblioteca <span class="count">${TEMPLATES.length}</span>`,'grid',view==='library'?'selected':'')}${btn('view-saved','Mis diseños','folder',view==='saved'?'selected':'')}</nav><div class="header-right">${pbipModel?.isLiveConnection?`<span class="pbip-live-pill" title="Power BI Desktop conectado: ${esc(getFriendlyReportName(pbipModel))}"><i class="pbip-live-dot"></i> ${esc(getFriendlyReportName(pbipModel))}</span>`:''}${ib('guide','Guía de uso','book')}<span class="avatar">BD</span></div></header>
  <div class="page-heading"><div><div class="eyebrow">TU ESTUDIO DE DISEÑO <span> / </span> POWER BI</div><h1>${view==='designer'?'Grandes datos. <em>Mejor diseño.</em>':view==='library'?'Un buen diseño empieza aquí.':'Tus ideas, listas para volver.'}</h1><p>${view==='designer'?'Dale a cada KPI el protagonismo que merece.':view==='library'?`${TEMPLATES.length} puntos de partida. Infinitas posibilidades. Todo editable.`:'Guarda tus tarjetas y construye tu propio lenguaje visual.'}</p></div><div class="heading-actions"><span id="save-state" class="save-state"></span>${btn('import','Importar','upload','button secondary')}${btn('save','Guardar diseño','save','button secondary')}${btn('open-data-modal','Conectar datos','sliders','button secondary')}${btn('export','Generar medida DAX','code','button primary')}</div></div>
  ${view==='designer'?designer():view==='library'?library():savedView()}
- <footer class="app-footer"><span><i class="tiny-dot"></i> Diseño en directo · Datos de ejemplo</span><span>KPI Atelier <span class="footer-slash">/</span> Una nueva forma de contar tus números.</span><button data-action="guide">Guía de Power BI ${icon('arrow',13)}</button></footer>`;
+ <footer class="app-footer"><span><i class="tiny-dot"></i> Diseño en directo</span><span>KPI Atelier</span></footer>`;
  if(view==='designer'){renderInspector();renderStage();}
  fitThumbs();showDirty();
 }
@@ -923,9 +923,10 @@ function positionSelection(){
 }
 function refreshCard(){showDirty();const inner=$('#main-card');if(inner){inner.innerHTML=cardHTML(c,undefined,true);fitMain();}else renderStage();renderStatus();}
 function syncElementControls(){
- const id=selectedElement;if(!id)return;const p=elementState(c,id),key=ELEMENTS[id].sizeKey;
+ const id=selectedElement;if(!id)return;const p=elementState(c,id),def=resolveElementDef(id)||ELEMENTS[id],key=def?.sizeKey;
  app.querySelectorAll('[data-elprop]').forEach(input=>{if(document.activeElement!==input)input.value=p[input.dataset.elprop];});
- app.querySelectorAll(`[data-key="${key}"]`).forEach(input=>{if(document.activeElement!==input)input.value=c[key];const output=input.parentElement.querySelector('output');if(output)output.textContent=c[key]+'px';});
+ if(key){app.querySelectorAll(`[data-key="${key}"]`).forEach(input=>{if(document.activeElement!==input)input.value=c[key];const output=input.parentElement.querySelector('output');if(output)output.textContent=c[key]+'px';});}
+ app.querySelectorAll(`[data-dupsize="${id}"]`).forEach(input=>{if(document.activeElement!==input)input.value=elementSize(c,id);const output=input.parentElement.querySelector('output');if(output)output.textContent=elementSize(c,id)+'px';});
 }
 function directChange(next,saveHistory=true){if(saveHistory)record();c=sanitizeConfig(next);persist();refreshCard();renderInspector();renderCanvasBar();updateHistoryButtons();}
 function elementAction(action){
@@ -956,18 +957,51 @@ app.addEventListener('pointermove',e=>{
  if(g.card)next=resizeCard(g.start,g.start.width+(g.kind==='s'?0:Math.round(dx/step)*step),g.start.height+(g.kind==='e'?0:Math.round(dy/step)*step),true);
  else if(g.kind==='move')next=moveElement(g.start,g.id,dx,dy,step,g.frame);
  else {
-  let vDelta, hDelta;
+  let detachedConfig=detachElement(g.start,g.id,g.frame);
+  const def=resolveElementDef(g.id)||ELEMENTS[g.id];
+  const bounds=SIZE_LIMITS[def.kind];
+  const p0=elementState(detachedConfig,g.id);
+  const S0=elementSize(detachedConfig,g.id);
+  const W0=Math.round(p0.width||g.width);
+  const X0=p0.x;
+  const Y0=p0.y;
+
   if(g.kind==='nw'){
    const clampDy=Math.min(0,dy);
-   vDelta=-clampDy;
-   hDelta=-dx;
-  } else {
+   const snappedDx=Math.round(dx/step)*step;
+   const snappedDy=Math.round(clampDy/step)*step;
+
+   // Width & X: dragging left grows width leftward; right edge stays fixed
+   const targetW=Math.max(16,Math.min(800,W0-snappedDx));
+   const deltaW=targetW-W0;
+   const nextX=X0-deltaW;
+
+   // Size & Y: dragging up grows size upward; bottom edge stays fixed
+   const targetS=clamp(S0-snappedDy,...bounds);
+   const deltaS=targetS-S0;
+   const nextY=Y0-deltaS;
+
+   next=updateElement(detachedConfig,g.id,{x:nextX,y:nextY,width:targetW});
+   if(def?.isDuplicate){
+    next=updateElement(next,g.id,{size:targetS});
+   }else{
+    next={...next,[def.sizeKey]:targetS};
+   }
+  }else{
    const clampDy=Math.max(0,dy);
-   vDelta=clampDy;
-   hDelta=dx;
+   const snappedDx=Math.round(dx/step)*step;
+   const snappedDy=Math.round(clampDy/step)*step;
+
+   const targetW=Math.max(16,Math.min(800,W0+snappedDx));
+   const targetS=clamp(S0+snappedDy,...bounds);
+
+   next=updateElement(detachedConfig,g.id,{width:targetW});
+   if(def?.isDuplicate){
+    next=updateElement(next,g.id,{size:targetS});
+   }else{
+    next={...next,[def.sizeKey]:targetS};
+   }
   }
-  next=resizeElement(g.start,g.id,vDelta,'size',g.width,step);
-  next=resizeElement(next,g.id,hDelta,'width',g.width,step);
  }
  c=sanitizeConfig(next);refreshCard();if(g.card)syncCardControls();else syncElementControls();updateHistoryButtons();
 });

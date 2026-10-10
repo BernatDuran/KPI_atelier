@@ -62,7 +62,13 @@ export function sanitizeElements(raw){
  }return result;
 }
 export function elementState(c,id){return {x:0,y:0,width:0,hidden:false,deleted:false,...c.elements?.[id]};}
-export function elementSize(c,id){resolveElementDef(id);const e=ELEMENTS[id];return !e?12:c[e.sizeKey]??(id==='progress'&&c.type==='target'?8:e.defaultSize);}
+export function elementSize(c,id){
+ resolveElementDef(id);
+ const e=ELEMENTS[id];
+ if(!e)return 12;
+ if(c.elements?.[id]?.size!==undefined)return c.elements[id].size;
+ return c[e.sizeKey]??(id==='progress'&&c.type==='target'?8:e.defaultSize);
+}
 export function elementAvailable(c,id){
  resolveElementDef(id);
  const def=ELEMENTS[id];
@@ -101,7 +107,11 @@ export function moveElement(c,id,dx,dy,step=1,frame=null){
 }
 export function resizeElement(c,id,delta,axis='size',measuredWidth=100,step=1){
  if(axis==='width'){const p=elementState(c,id);return updateElement(c,id,{width:clamp(Math.round(p.width||measuredWidth)+snap(delta,step),16,800)});}
- const def=ELEMENTS[id],bounds=SIZE_LIMITS[def.kind];return {...c,[def.sizeKey]:clamp(elementSize(c,id)+snap(delta,step),...bounds)};
+ resolveElementDef(id);
+ const def=ELEMENTS[id],bounds=SIZE_LIMITS[def.kind];
+ const newSize=clamp(elementSize(c,id)+snap(delta,step),...bounds);
+ if(def?.isDuplicate){return updateElement(c,id,{size:newSize});}
+ return {...c,[def.sizeKey]:newSize};
 }
 export function restoreElement(c,id){const def=ELEMENTS[id];const n=updateElement(c,id,{hidden:false,deleted:false});if(def.toggle)n[def.toggle]=true;return n;}
 export function releaseElement(c,id){const p={...elementState(c,id),x:0,y:0,width:0};delete p.frame;return {...c,elements:{...c.elements,[id]:p}};}

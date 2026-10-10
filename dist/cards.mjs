@@ -73,12 +73,21 @@ export function cardHTML(c,d=sampleData(c),editor=false){
   if(!dupState||dupState.deleted)continue;
   let dupContent='';
   if(def.kind==='icon'){dupContent=icon(dupState.icon||c.icon,elementSize(c,dupId),color(dupId));}
-  else if(def.baseId==='value'){dupContent=d.value;}
-  else if(def.baseId==='delta'){dupContent=`${d.arrow} ${d.delta}`;}
+  else if(def.baseId==='value'){dupContent=d[`val_${dupId}`]||esc(formatNumber(c.sampleValue,{...c,...dupState}));}
+  else if(def.baseId==='delta'){dupContent=d[`delta_${dupId}`]||`${d.arrow} ${d.delta}`;}
   else if(def.baseId==='status'){dupContent=`<span style="font-weight:600;color:${color(dupId)}">${d.status}</span>`;}
   else {dupContent=esc(dupState.text!==undefined?dupState.text:(def.contentKey?c[def.contentKey]:def.label));}
   el(dupId,dupContent);
  }
  return `<div${editor?' data-card-surface="true"':''} style="${style}">${heading}${metric}${comparison}${status}${trend}${goal}${prior}${footer}${detached.join('')}</div>`;
 }
-export function tokenData(){return Object.fromEntries(['value','delta','arrow','deltaColor','previous','target','targettext','progress','progressWidth','goalColor','status','statusColor','statusGoodOpacity','statusWarnOpacity','statusBadOpacity','trend','period','trendLabel','footer'].map(k=>[k,`@@${k}@@`]));}
+export function tokenData(c=null){
+ const tokens=Object.fromEntries(['value','delta','arrow','deltaColor','previous','target','targettext','progress','progressWidth','goalColor','status','statusColor','statusGoodOpacity','statusWarnOpacity','statusBadOpacity','trend','period','trendLabel','footer'].map(k=>[k,`@@${k}@@`]));
+ if(c&&c.elements){
+  for(const dupId of Object.keys(c.elements).filter(id=>id.includes('_copy'))){
+   tokens[`val_${dupId}`]=`@@val_${dupId}@@`;
+   tokens[`delta_${dupId}`]=`@@delta_${dupId}@@`;
+  }
+ }
+ return tokens;
+}

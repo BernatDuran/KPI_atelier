@@ -1,7 +1,7 @@
 import {chartGeometry,trendSVG,markerSVG,emptyTrend,hash} from './charts.mjs';
 import {elementColor,trendFill,appearance} from './appearance.mjs';
 import {needsDate,needsTrend,needsGoal,needsCompare,checks} from './model.mjs';
-import {elementEnabled,elementState} from './elements.mjs';
+import {elementEnabled,elementState,resolveElementDef} from './elements.mjs';
 import {cardHTML,tokenData,esc} from './cards.mjs';
 
 export const quote = s => '"' + String(s).replaceAll('"', '""') + '"';
@@ -28,8 +28,8 @@ export const tableRef = s => "'" + String(s).replaceAll("'", "''") + "'";
 const colRef = s => '[' + String(s).replaceAll(']', ']]') + ']';
 
 export function compileHTML(html) {
- const parts = html.split(/(@@[a-zA-Z]+@@)/g).filter(Boolean);
- return parts.map(p => /^@@[a-zA-Z]+@@$/.test(p) ? '__' + p.slice(2, -2) : quote(p)).join(' &\n    ');
+ const parts = html.split(/(@@[a-zA-Z0-9_]+@@)/g).filter(Boolean);
+ return parts.map(p => /^@@[a-zA-Z0-9_]+@@$/.test(p) ? '__' + p.slice(2, -2) : quote(p)).join(' &\n    ');
 }
 
 function formatted(v, c) {
@@ -187,7 +187,32 @@ export function generateDAX(c) {
   code += `VAR __trend = ""\nVAR __footer = ${quote(esc(c.footer || 'Rendimiento del período'))}\n`;
  }
 
- code += `RETURN\n    ${compileHTML(cardHTML(c, tokenData()))}\n`;
+ const dupIds = Object.keys(c.elements || {}).filter(k => k.includes('_copy') && !c.elements[k].deleted);
+ for (const dupId of dupIds) {
+  const def = resolveElementDef(dupId);
+  if (!def) continue;
+  const dupState = elementState(c, dupId);
+  if (def.baseId === 'value') {
+   const dupMeasure = dupState.measure && dupState.measure.trim() ? measureRef(dupState.measure) : m;
+   const dupConf = {
+    ...c,
+    format: dupState.format || c.format,
+    decimals: dupState.decimals ?? c.decimals,
+    unit: dupState.unit || c.unit,
+    currency: dupState.currency || c.currency,
+    suffix: dupState.suffix !== undefined ? dupState.suffix : c.suffix
+   };
+   code += `VAR __val_${dupId} = ${formatted(dupMeasure, dupConf)}\n`;
+  } else if (def.baseId === 'delta') {
+   const dupCompare = dupState.compareMeasure && dupState.compareMeasure.trim() ? measureRef(dupState.compareMeasure) : '__Reference';
+   const dupMode = dupState.deltaMode || c.deltaMode;
+   code += `VAR __Diff_${dupId} = IF ( NOT ISBLANK ( __Current ) && NOT ISBLANK ( ${dupCompare} ), __Current - ${dupCompare} )\n` +
+    `VAR __Rel_${dupId} = DIVIDE ( __Diff_${dupId}, ABS ( ${dupCompare} ) )\n` +
+    `VAR __delta_${dupId} = ${dupMode === 'absolute' ? `IF ( ISBLANK ( __Diff_${dupId} ), "—", IF ( __Diff_${dupId} > 0, "+", "" ) & ${formatted(`__Diff_${dupId}`, c)} )` : dupMode === 'pp' ? `IF ( ISBLANK ( __Diff_${dupId} ), "—", FORMAT ( __Diff_${dupId} * 100, "+0.0;-0.0;0.0", __Cfg_Locale ) & " pp" )` : `IF ( ISBLANK ( __Rel_${dupId} ), "—", FORMAT ( __Rel_${dupId}, "+0.0%;-0.0%;0.0%", __Cfg_Locale ) )`}\n`;
+  }
+ }
+
+ code += `RETURN\n    ${compileHTML(cardHTML(c, tokenData(c)))}\n`;
  return code;
 }
 
