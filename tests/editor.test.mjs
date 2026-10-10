@@ -440,7 +440,7 @@ test('Independent duplicate configuration across inspector, data binding and DAX
  tab = 'element';
  renderInspector();
  const inspHTML = $('#inspector-fields').innerHTML;
- assert.ok(inspHTML.includes('f-dup-measure'));
+ assert.ok(!inspHTML.includes('f-dup-measure'), 'Measure inputs must not appear in inspector');
  assert.ok(inspHTML.includes('f-dup-format'));
  assert.ok(inspHTML.includes('f-dupsize'));
 
@@ -449,6 +449,7 @@ test('Independent duplicate configuration across inspector, data binding and DAX
  const bindModalHTML = $('#modal').innerHTML;
  assert.ok(bindModalHTML.includes('Elementos duplicados vinculables'));
  assert.ok(bindModalHTML.includes('data-bind-dup="value_copy1"'));
+ assert.ok(!bindModalHTML.includes('list="dl-pbip-measures"'), 'Duplicate measure input must not use native datalist');
  closeModal();
 
  // 5. DAX generation emits dedicated variables for duplicates
@@ -1090,4 +1091,69 @@ test('Horizontal duplicate adaptive scaling, guide containment, typology parity 
   assert.ok(cardHtml.includes('vs. mes anterior'), 'compareLabel_copy1 with comparison mom must render vs. mes anterior');
   assert.ok(cardHtml.includes('Excelente'), 'status_copy1 must render custom statusGood text');
 });
+
+test('Inspector content/element parity and exclusion of measure inputs, unified delta fields, and pure custom dropdowns in modal', async () => {
+  const run = await editor();
+  run(`
+  loadDesign(BASE);
+
+  // 1. Original delta visual inspection has comparison, direction and deltaMode, but NO measure input
+  selectedElement = 'delta';
+  tab = 'element';
+  renderInspector();
+  let insp = $('#inspector-fields').innerHTML;
+  assert.ok(insp.includes('Comparar con'), 'Original delta must have Comparar con');
+  assert.ok(insp.includes('¿Qué significa mejorar?'), 'Original delta must have ¿Qué significa mejorar?');
+  assert.ok(insp.includes('Mostrar diferencia'), 'Original delta must have Mostrar diferencia');
+  assert.ok(!insp.includes('Medida de comparación'), 'Original delta must NOT have Medida de comparación');
+
+  // 2. Duplicate delta visual inspection has exact same 3 fields and NO measure input
+  resolveElementDef('delta_copy1');
+  c = updateElement(c, 'delta_copy1', { comparison: 'prev', direction: 'up', deltaMode: 'relative' });
+  selectedElement = 'delta_copy1';
+  renderInspector();
+  insp = $('#inspector-fields').innerHTML;
+  assert.ok(insp.includes('Comparar con'), 'Duplicate delta must have Comparar con');
+  assert.ok(insp.includes('¿Qué significa mejorar?'), 'Duplicate delta must have ¿Qué significa mejorar?');
+  assert.ok(insp.includes('Mostrar diferencia'), 'Duplicate delta must have Mostrar diferencia');
+  assert.ok(!insp.includes('Medida de comparación'), 'Duplicate delta must NOT have Medida de comparación');
+
+  // 3. Original and duplicate value visuals have NO measure input in inspector
+  selectedElement = 'value';
+  renderInspector();
+  insp = $('#inspector-fields').innerHTML;
+  assert.ok(!insp.includes('Medida del valor'), 'Original value must NOT have Medida del valor in element inspector');
+  assert.ok(insp.includes('Formato del valor'), 'Original value has format');
+
+  resolveElementDef('value_copy1');
+  c = updateElement(c, 'value_copy1', { format: 'currency', currency: 'EUR' });
+  selectedElement = 'value_copy1';
+  renderInspector();
+  insp = $('#inspector-fields').innerHTML;
+  assert.ok(!insp.includes('Medida del valor'), 'Duplicate value must NOT have Medida del valor in element inspector');
+  assert.ok(insp.includes('Formato del valor'), 'Duplicate value has format');
+
+  // 4. In Content tab (no selection), duplicates have NO measure input
+  tab = 'content';
+  selectedElement = null;
+  renderInspector();
+  insp = $('#inspector-fields').innerHTML;
+  assert.ok(!insp.includes('Medida del valor'), 'Content tab must NOT have Medida del valor');
+  assert.ok(!insp.includes('Medida de comparación'), 'Content tab must NOT have Medida de comparación');
+
+  // 5. Data binding modal does NOT use native datalist for duplicates
+  setPbipModel({
+    modelName: 'TestModel',
+    measures: [{ name: 'Ventas', table: 'Fact' }],
+    tables: ['Fact', 'Calendario'],
+    dateTables: [{ name: 'Calendario', dateColumns: ['Fecha'], primaryDateColumn: 'Fecha' }]
+  });
+  openDataBindingModal();
+  const modalHTML = $('#modal').innerHTML;
+  assert.ok(modalHTML.includes('data-bind-dup="value_copy1"'));
+  assert.ok(!modalHTML.includes('list="dl-pbip-measures"'), 'Modal must not attach list="dl-pbip-measures" to inputs');
+  closeModal();
+  `);
+});
+
 

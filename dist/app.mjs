@@ -130,10 +130,8 @@ function duplicateContentFields(baseIds){
    const curCurr=st.currency||c.currency;
    const curUnit=st.unit||c.unit;
    const curDec=st.decimals??c.decimals;
-   const curMeas=st.measure!==undefined?st.measure:'';
    const curSuf=st.suffix!==undefined?st.suffix:(c.suffix||'');
-   fields=`<div class="field"><label for="f-dup-m-${dupId}">Medida del valor</label><input id="f-dup-m-${dupId}" data-dupval="measure" data-dupid="${dupId}" value="${esc(curMeas)}" placeholder="[Nombre de medida]" list="dl-pbip-measures"></div>`+
-    `<div class="field"><label for="f-dup-fmt-${dupId}">Formato del valor</label><select id="f-dup-fmt-${dupId}" data-dupval="format" data-dupid="${dupId}">${formats.map(([k,l])=>`<option value="${k}" ${curFmt===k?'selected':''}>${l}</option>`).join('')}</select></div>`+
+   fields=`<div class="field"><label for="f-dup-fmt-${dupId}">Formato del valor</label><select id="f-dup-fmt-${dupId}" data-dupval="format" data-dupid="${dupId}">${formats.map(([k,l])=>`<option value="${k}" ${curFmt===k?'selected':''}>${l}</option>`).join('')}</select></div>`+
     (curFmt==='currency'?`<div class="field"><label for="f-dup-cur-${dupId}">Moneda</label><select id="f-dup-cur-${dupId}" data-dupval="currency" data-dupid="${dupId}">${[['EUR','Euro · €'],['USD','Dólar · $'],['GBP','Libra · £']].map(([k,l])=>`<option value="${k}" ${curCurr===k?'selected':''}>${l}</option>`).join('')}</select></div>`:'')+
     `<div class="field-row"><div class="field"><label for="f-dup-u-${dupId}">Escala</label><select id="f-dup-u-${dupId}" data-dupval="unit" data-dupid="${dupId}">${[['auto','Automática'],['none','Sin escalar'],['k','Miles'],['m','Millones']].map(([k,l])=>`<option value="${k}" ${curUnit===k?'selected':''}>${l}</option>`).join('')}</select></div>`+
     `<div class="field"><label for="f-dup-dec-${dupId}">Decimales</label><select id="f-dup-dec-${dupId}" data-dupval="decimals" data-dupid="${dupId}">${[[0,'0'],[1,'1'],[2,'2'],[3,'3']].map(([k,l])=>`<option value="${k}" ${curDec===k?'selected':''}>${l}</option>`).join('')}</select></div></div>`+
@@ -142,11 +140,9 @@ function duplicateContentFields(baseIds){
    const curComp=st.comparison||c.comparison;
    const curDir=st.direction||c.direction;
    const curMode=st.deltaMode||c.deltaMode;
-   const curCmpMeas=st.compareMeasure!==undefined?st.compareMeasure:(c.compareMeasure||'');
    fields=`<div class="field"><label for="f-dup-cmpmode-${dupId}">Comparar con</label><select id="f-dup-cmpmode-${dupId}" data-dupval="comparison" data-dupid="${dupId}">${comparisons.map(([k,l])=>`<option value="${k}" ${curComp===k?'selected':''}>${l}</option>`).join('')}</select></div>`+
     `<div class="field"><label for="f-dup-dir-${dupId}">¿Qué significa mejorar?</label><select id="f-dup-dir-${dupId}" data-dupval="direction" data-dupid="${dupId}">${[['up','Cuanto más, mejor ↑'],['down','Cuanto menos, mejor ↓'],['neutral','Sin valoración favorable']].map(([k,l])=>`<option value="${k}" ${curDir===k?'selected':''}>${l}</option>`).join('')}</select></div>`+
-    `<div class="field"><label for="f-dup-dm-${dupId}">Mostrar diferencia</label><select id="f-dup-dm-${dupId}" data-dupval="deltaMode" data-dupid="${dupId}">${[['relative','Porcentaje'],['absolute','Diferencia absoluta'],['pp','Puntos porcentuales']].map(([k,l])=>`<option value="${k}" ${curMode===k?'selected':''}>${l}</option>`).join('')}</select></div>`+
-    `<div class="field"><label for="f-dup-cmp-${dupId}">Medida de comparación</label><input id="f-dup-cmp-${dupId}" data-dupval="compareMeasure" data-dupid="${dupId}" value="${esc(curCmpMeas)}" placeholder="[Medida de referencia]" list="dl-pbip-measures"></div>`;
+    `<div class="field"><label for="f-dup-dm-${dupId}">Mostrar diferencia</label><select id="f-dup-dm-${dupId}" data-dupval="deltaMode" data-dupid="${dupId}">${[['relative','Porcentaje'],['absolute','Diferencia absoluta'],['pp','Puntos porcentuales']].map(([k,l])=>`<option value="${k}" ${curMode===k?'selected':''}>${l}</option>`).join('')}</select></div>`;
   }else if(def.baseId==='compareLabel'){
    const curComp=st.comparison||c.comparison;
    const curTxt=st.text!==undefined?st.text:'';
@@ -165,15 +161,12 @@ function duplicateContentFields(baseIds){
     `<div class="field"><label for="f-dup-sb-${dupId}">Texto desfavorable</label><input id="f-dup-sb-${dupId}" data-dupval="statusBad" data-dupid="${dupId}" value="${esc(curBad)}"></div>`;
   }else if(['referenceLabel','referenceValue'].includes(def.baseId)){
    const curComp=st.comparison||c.comparison;
-   const curCmpMeas=st.compareMeasure!==undefined?st.compareMeasure:(c.compareMeasure||'');
-   fields=`<div class="field"><label for="f-dup-rcmp-${dupId}">Comparar con</label><select id="f-dup-rcmp-${dupId}" data-dupval="comparison" data-dupid="${dupId}">${comparisons.map(([k,l])=>`<option value="${k}" ${curComp===k?'selected':''}>${l}</option>`).join('')}</select></div>`+
-    `<div class="field"><label for="f-dup-rcm-${dupId}">Medida de referencia</label><input id="f-dup-rcm-${dupId}" data-dupval="compareMeasure" data-dupid="${dupId}" value="${esc(curCmpMeas)}" placeholder="[Medida de referencia]" list="dl-pbip-measures"></div>`;
+   fields=`<div class="field"><label for="f-dup-rcmp-${dupId}">Comparar con</label><select id="f-dup-rcmp-${dupId}" data-dupval="comparison" data-dupid="${dupId}">${comparisons.map(([k,l])=>`<option value="${k}" ${curComp===k?'selected':''}>${l}</option>`).join('')}</select></div>`;
   }else if(def.baseId==='icon'){
    const curIcon=st.icon||c.icon;
    fields=`<div class="field"><label for="f-dup-ico-${dupId}">Icono</label><select id="f-dup-ico-${dupId}" data-dupval="icon" data-dupid="${dupId}">${ICON_OPTIONS.map(([k,l])=>`<option value="${k}" ${curIcon===k?'selected':''}>${l}</option>`).join('')}</select></div>`;
   }else if(['goalLabel','progressLabel','progress'].includes(def.baseId)){
-   const curTarget=st.targetMeasure!==undefined?st.targetMeasure:(c.targetMeasure||'');
-   fields=`<div class="field"><label for="f-dup-tgt-${dupId}">Medida u objetivo</label><input id="f-dup-tgt-${dupId}" data-dupval="targetMeasure" data-dupid="${dupId}" value="${esc(curTarget)}" placeholder="ej. [Objetivo] o 100" list="dl-pbip-measures"></div>`;
+   fields='<p class="field-help">La medida objetivo se configura en Conectar datos del modelo.</p>';
   }else{
    const currentVal=st.text!==undefined?st.text:(def.contentKey?c[def.contentKey]:def.label);
    fields=`<div class="field"><label for="f-dup-txt-${dupId}">Texto</label><input id="f-dup-txt-${dupId}" data-duptext="${dupId}" data-dupid="${dupId}" value="${esc(currentVal)}" placeholder="Texto del elemento…"></div>`;
@@ -1322,10 +1315,8 @@ function elementInspector(){
    const curCurr=p.currency||c.currency;
    const curUnit=p.unit||c.unit;
    const curDec=p.decimals??c.decimals;
-   const curMeas=p.measure!==undefined?p.measure:c.measure;
    const curSuf=p.suffix!==undefined?p.suffix:c.suffix;
-   specific=`<div class="field"><label for="f-dup-measure">Medida del valor</label><input id="f-dup-measure" data-dupval="measure" value="${esc(curMeas)}" placeholder="[Nombre de medida]" list="dl-pbip-measures"></div>`+
-    `<div class="field"><label for="f-dup-format">Formato del valor</label><select id="f-dup-format" data-dupval="format">${formats.map(([k,l])=>`<option value="${k}" ${curFmt===k?'selected':''}>${l}</option>`).join('')}</select></div>`+
+   specific=`<div class="field"><label for="f-dup-format">Formato del valor</label><select id="f-dup-format" data-dupval="format">${formats.map(([k,l])=>`<option value="${k}" ${curFmt===k?'selected':''}>${l}</option>`).join('')}</select></div>`+
     (curFmt==='currency'?`<div class="field"><label for="f-dup-currency">Moneda</label><select id="f-dup-currency" data-dupval="currency">${[['EUR','Euro · €'],['USD','Dólar · $'],['GBP','Libra · £']].map(([k,l])=>`<option value="${k}" ${curCurr===k?'selected':''}>${l}</option>`).join('')}</select></div>`:'')+
     `<div class="field-row"><div class="field"><label for="f-dup-unit">Escala</label><select id="f-dup-unit" data-dupval="unit">${[['auto','Automática'],['none','Sin escalar'],['k','Miles'],['m','Millones']].map(([k,l])=>`<option value="${k}" ${curUnit===k?'selected':''}>${l}</option>`).join('')}</select></div>`+
     `<div class="field"><label for="f-dup-decimals">Decimales</label><select id="f-dup-decimals" data-dupval="decimals">${[[0,'0'],[1,'1'],[2,'2'],[3,'3']].map(([k,l])=>`<option value="${k}" ${curDec===k?'selected':''}>${l}</option>`).join('')}</select></div></div>`+
@@ -1336,11 +1327,9 @@ function elementInspector(){
    const curComp=p.comparison||c.comparison;
    const curDir=p.direction||c.direction;
    const curMode=p.deltaMode||c.deltaMode;
-   const curCmpMeas=p.compareMeasure!==undefined?p.compareMeasure:c.compareMeasure;
    specific=`<div class="field"><label for="f-dup-cmpmode">Comparar con</label><select id="f-dup-cmpmode" data-dupval="comparison">${comparisons.map(([k,l])=>`<option value="${k}" ${curComp===k?'selected':''}>${l}</option>`).join('')}</select></div>`+
     `<div class="field"><label for="f-dup-dir">¿Qué significa mejorar?</label><select id="f-dup-dir" data-dupval="direction">${[['up','Cuanto más, mejor ↑'],['down','Cuanto menos, mejor ↓'],['neutral','Sin valoración favorable']].map(([k,l])=>`<option value="${k}" ${curDir===k?'selected':''}>${l}</option>`).join('')}</select></div>`+
-    `<div class="field"><label for="f-dup-deltamode">Mostrar diferencia</label><select id="f-dup-deltamode" data-dupval="deltaMode">${[['relative','Porcentaje'],['absolute','Diferencia absoluta'],['pp','Puntos porcentuales']].map(([k,l])=>`<option value="${k}" ${curMode===k?'selected':''}>${l}</option>`).join('')}</select></div>`+
-    `<div class="field"><label for="f-dup-compare">Medida de comparación</label><input id="f-dup-compare" data-dupval="compareMeasure" value="${esc(curCmpMeas)}" placeholder="[Medida de referencia]" list="dl-pbip-measures"></div>`;
+    `<div class="field"><label for="f-dup-deltamode">Mostrar diferencia</label><select id="f-dup-deltamode" data-dupval="deltaMode">${[['relative','Porcentaje'],['absolute','Diferencia absoluta'],['pp','Puntos porcentuales']].map(([k,l])=>`<option value="${k}" ${curMode===k?'selected':''}>${l}</option>`).join('')}</select></div>`;
   }else if(def.baseId==='compareLabel'){
    const curComp=p.comparison||c.comparison;
    const curTxt=p.text!==undefined?p.text:'';
@@ -1359,11 +1348,9 @@ function elementInspector(){
     `<div class="field"><label for="f-dup-sb">Texto desfavorable</label><input id="f-dup-sb" data-dupval="statusBad" value="${esc(curBad)}"></div>`;
   }else if(['referenceLabel','referenceValue'].includes(def.baseId)){
    const curComp=p.comparison||c.comparison;
-   const curCmpMeas=p.compareMeasure!==undefined?p.compareMeasure:c.compareMeasure;
-   specific=`<div class="field"><label for="f-dup-rcmp">Comparar con</label><select id="f-dup-rcmp" data-dupval="comparison">${comparisons.map(([k,l])=>`<option value="${k}" ${curComp===k?'selected':''}>${l}</option>`).join('')}</select></div>`+
-    `<div class="field"><label for="f-dup-rcm">Medida de referencia</label><input id="f-dup-rcm" data-dupval="compareMeasure" value="${esc(curCmpMeas)}" placeholder="[Medida de referencia]" list="dl-pbip-measures"></div>`;
+   specific=`<div class="field"><label for="f-dup-rcmp">Comparar con</label><select id="f-dup-rcmp" data-dupval="comparison">${comparisons.map(([k,l])=>`<option value="${k}" ${curComp===k?'selected':''}>${l}</option>`).join('')}</select></div>`;
   }else if(['goalLabel','progressLabel','progress'].includes(def.baseId)){
-   specific=`<div class="field"><label for="f-dup-target">Medida u objetivo</label><input id="f-dup-target" data-dupval="targetMeasure" value="${esc(p.targetMeasure!==undefined?p.targetMeasure:c.targetMeasure)}" placeholder="ej. [Objetivo] o 100" list="dl-pbip-measures"></div>`;
+   specific='<p class="field-help">La medida objetivo se configura en Conectar datos del modelo.</p>';
   }else{
    const currentVal=p.text!==undefined?p.text:(def.contentKey?c[def.contentKey]:def.label);
    specific=`<div class="field"><label for="f-duptext">Texto</label><input id="f-duptext" data-duptext="${id}" value="${esc(currentVal)}" placeholder="Texto del elemento…"></div>`;
@@ -1372,15 +1359,14 @@ function elementInspector(){
   specific=def.contentKey?field(def.contentKey,def.label):'';
   if(id==='icon')specific=iconPickerField();
   if(id==='value'){
-   specific=`<div class="field"><label for="f-val-measure">Medida del valor</label><input id="f-val-measure" data-key="measure" value="${esc(c.measure||'')}" placeholder="[Nombre de medida]" list="dl-pbip-measures"></div>`+
-    select('format','Formato del valor',formats)+
+   specific=select('format','Formato del valor',formats)+
     (c.format==='currency'?select('currency','Moneda',[['EUR','Euro · €'],['USD','Dólar · $'],['GBP','Libra · £']]):'')+
     `<div class="field-row">${select('unit','Escala',[['auto','Automática'],['none','Sin escalar'],['k','Miles'],['m','Millones']])}${select('decimals','Decimales',[[0,'0'],[1,'1'],[2,'2'],[3,'3']])}</div>`+
     field('suffix','Sufijo del valor');
   }
-  if(['delta','compareLabel','referenceLabel','referenceValue'].includes(id))specific=select('comparison','Comparar con',comparisons)+(id==='delta'?select('deltaMode','Mostrar diferencia',[['relative','Porcentaje'],['absolute','Diferencia absoluta'],['pp','Puntos porcentuales']]):'');
+  if(['delta','compareLabel','referenceLabel','referenceValue'].includes(id))specific=select('comparison','Comparar con',comparisons)+(id==='delta'?select('direction','¿Qué significa mejorar?',[['up','Cuanto más, mejor ↑'],['down','Cuanto menos, mejor ↓'],['neutral','Sin valoración favorable']])+select('deltaMode','Mostrar diferencia',[['relative','Porcentaje'],['absolute','Diferencia absoluta'],['pp','Puntos porcentuales']]):'');
   if(id==='trend')specific=chartPanel();
-  if(['goalLabel','progress','progressLabel'].includes(id))specific=field('targetMeasure','Medida objetivo');
+  if(['goalLabel','progress','progressLabel'].includes(id))specific='<p class="field-help">La medida objetivo se configura en Conectar datos del modelo.</p>';
   if(id==='status')specific=field('statusGood','Texto favorable')+field('statusWarn','Texto de alerta')+field('statusBad','Texto desfavorable')+`<div class="field-row">${field('goodThreshold','Umbral favorable','number')}${field('warnThreshold','Umbral alerta','number')}</div>`;
   if(id==='period')specific='<p class="field-help">El período se calcula a partir de las fechas seleccionadas en el informe.</p>';
  }
@@ -2357,6 +2343,8 @@ function applyBindingFieldValue(key,val){
  if(input)input.value=val;
  const clearBtn=document.querySelector(`[data-action="clear-bind-field"][data-field="${key}"]`);
  if(clearBtn)clearBtn.classList.toggle('is-visible',Boolean(val));
+ const clearDupBtn=document.querySelector(`[data-action="clear-bind-dup"][data-dup="${key}"]`);
+ if(clearDupBtn)clearDupBtn.classList.toggle('is-visible',Boolean(val));
  const inner=document.getElementById('binding-card-inner');
  if(inner){
   inner.innerHTML=cardHTML(c,undefined,true);
@@ -2622,7 +2610,7 @@ function openDataBindingModal(focusKey=null){
      <div class="binding-dropdown-wrap ${hasDropdown?'has-dropdown':''}">
       <div class="binding-input-wrap">
        <span class="binding-input-icon">${iconChar}</span>
-       <input id="f-bind-${dupId}" class="binding-input" data-bind-dup="${dupId}" data-bind-dupprop="${prop}" type="text" value="${esc(val)}" placeholder="Ejemplo: ${esc(ph)}" spellcheck="false" autocomplete="off" ${hasDropdown?'list="dl-pbip-measures"':''}>
+       <input id="f-bind-${dupId}" class="binding-input" data-bind-dup="${dupId}" data-bind-dupprop="${prop}" type="text" value="${esc(val)}" placeholder="Ejemplo: ${esc(ph)}" spellcheck="false" autocomplete="off">
        <button type="button" class="binding-clear-btn ${val?'is-visible':''}" data-action="clear-bind-dup" data-dup="${dupId}" data-prop="${prop}" title="Borrar selección" aria-label="Borrar selección">${icon('eraser',13)}</button>
        ${hasDropdown?`<button type="button" class="binding-dropdown-toggle" data-action="toggle-bind-dropdown" data-field="${dupId}" title="Ver todas las opciones" aria-label="Ver todas las opciones" aria-expanded="false">${icon('chevronDown',12)}</button>`:''}
        <span class="binding-input-status ${val?'valid':'optional'}">${icon(val?'check':'info',val?14:13)}</span>
