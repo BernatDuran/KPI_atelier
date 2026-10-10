@@ -478,3 +478,63 @@ test('Independent duplicate configuration across inspector, data binding and DAX
  assert.equal(clampDyDown, 0);
  `);
 });
+
+test('Step-1 size keys (+/-) independent of pixel toggle, and alignment boundary snaps, margin breach and peer collision detection', async () => {
+ const run = await editor();
+ run(`
+ loadDesign(BASE);
+
+ // 1. Keyboard + and - changes size by 1 even when moveStep is 5
+ moveStep = 5;
+ selectedElement = 'value';
+ const initialSize = elementSize(c, 'value');
+ const stageTarget = { closest(s){ return s.includes('#stage') ? this : null; } };
+ fire('document', 'keydown', { key: '+', target: stageTarget, preventDefault(){} });
+ assert.equal(elementSize(c, 'value'), initialSize + 1);
+ fire('document', 'keydown', { key: '-', target: stageTarget, preventDefault(){} });
+ assert.equal(elementSize(c, 'value'), initialSize);
+ fire('document', 'keydown', { key: '-', target: stageTarget, preventDefault(){} });
+ assert.equal(elementSize(c, 'value'), initialSize - 1);
+
+ // 2. Action buttons smaller-element / bigger-element change by 1
+ elementAction('bigger-element');
+ assert.equal(elementSize(c, 'value'), initialSize);
+ elementAction('smaller-element');
+ assert.equal(elementSize(c, 'value'), initialSize - 1);
+
+ // 3. Alignment guides: exact edge snap, margin snap, margin breach, and peer collision
+ const card = { width: 440, height: 320 };
+ const padding = 28;
+
+ // Exact margin snap on left (left = 28)
+ const snapRes = alignmentGuides({ left: 28, top: 40, width: 100, height: 50 }, card, [], padding);
+ assert.equal(snapRes.marginSnaps.left, true);
+ assert.equal(snapRes.marginSnaps.exact, true);
+ assert.equal(snapRes.lines.some(l => l.kind === 'margin' && l.exact), true);
+
+ // Margin breach (left = 10, between 0 and 28)
+ const breachRes = alignmentGuides({ left: 10, top: 40, width: 100, height: 50 }, card, [], padding);
+ assert.equal(breachRes.marginBreach.left, 18);
+ assert.equal(breachRes.marginBreach.active, true);
+ assert.equal(breachRes.outside, false);
+
+ // Outer card edge exact snap (left = 0)
+ const edgeRes = alignmentGuides({ left: 0, top: 40, width: 100, height: 50 }, card, [], padding);
+ assert.equal(edgeRes.edgeSnaps.left, true);
+ assert.equal(edgeRes.edgeSnaps.exact, true);
+
+ // Peer collision / overlap
+ const peerA = { id: 'title', label: 'Título del KPI', left: 28, top: 30, width: 150, height: 25 };
+ const overlappingBox = { left: 50, top: 40, width: 100, height: 50 };
+ const overlapRes = alignmentGuides(overlappingBox, card, [peerA], padding);
+ assert.equal(overlapRes.overlaps.length, 1);
+ assert.equal(overlapRes.overlaps[0].peer.id, 'title');
+ assert.ok(overlapRes.overlaps[0].rect.width > 0);
+ assert.ok(overlapRes.overlaps[0].rect.height > 0);
+
+ // No overlap when peer is outside
+ const nonOverlappingBox = { left: 200, top: 40, width: 100, height: 50 };
+ const noOverlapRes = alignmentGuides(nonOverlappingBox, card, [peerA], padding);
+ assert.equal(noOverlapRes.overlaps.length, 0);
+ `);
+});

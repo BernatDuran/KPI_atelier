@@ -841,19 +841,78 @@ function renderGuides(){
  if(!guidesEnabled||!selected||!elementVisible(c,selectedElement)){overlay.innerHTML='';return;}
  const parent=fit.getBoundingClientRect(),surface=(main.firstElementChild||main).getBoundingClientRect(),scale=surface.width/c.width;
  if(!scale)return;
- const rect=node=>{const r=node.getBoundingClientRect();return {left:(r.left-surface.left)/scale,top:(r.top-surface.top)/scale,width:r.width/scale,height:r.height/scale};};
+ const rect=node=>{
+  const r=node.getBoundingClientRect();
+  const id=node.dataset.element;
+  const def=resolveElementDef(id)||ELEMENTS[id];
+  return {
+   id,
+   label:def?.label||id,
+   left:(r.left-surface.left)/scale,
+   top:(r.top-surface.top)/scale,
+   width:r.width/scale,
+   height:r.height/scale
+  };
+ };
  const box=rect(selected),card={width:surface.width/scale,height:surface.height/scale};
  const peers=[...main.querySelectorAll('[data-element]')].filter(node=>node!==selected&&elementVisible(c,node.dataset.element)).map(rect);
  const result=alignmentGuides(box,card,peers,c.padding+c.borderWidth,3/scale),active=!!gesture||Date.now()<guidePreviewUntil;
- if(!active&&!result.outside){overlay.innerHTML='';return;}
+ if(!active&&!result.outside&&!result.overlaps?.length){overlay.innerHTML='';return;}
  const left=surface.left-parent.left,top=surface.top-parent.top,w=surface.width,h=surface.height,inset=(c.padding+c.borderWidth)*scale;
- let html=`<div class="guide-boundary ${result.outside?'outside':''}" style="left:${left}px;top:${top}px;width:${w}px;height:${h}px;border-radius:${c.radius*scale}px"></div>`;
- if(active){html+=`<div class="guide-safe-area" style="left:${left+inset}px;top:${top+inset}px;width:${Math.max(0,w-2*inset)}px;height:${Math.max(0,h-2*inset)}px"></div>`;
-  html+=result.lines.map(line=>`<span class="smart-guide ${line.axis==='x'?'vertical':'horizontal'} ${line.kind}" style="left:${left+(line.axis==='x'?line.position*scale:-8)}px;top:${top+(line.axis==='y'?line.position*scale:-8)}px;${line.axis==='x'?'height:'+(h+16):'width:'+(w+16)}px"><b>${line.label}</b></span>`).join('');
+
+ const boundaryClasses=['guide-boundary'];
+ if(result.outside)boundaryClasses.push('outside');
+ if(result.edgeSnaps?.left)boundaryClasses.push('snap-left');
+ if(result.edgeSnaps?.right)boundaryClasses.push('snap-right');
+ if(result.edgeSnaps?.top)boundaryClasses.push('snap-top');
+ if(result.edgeSnaps?.bottom)boundaryClasses.push('snap-bottom');
+
+ let html=`<div class="${boundaryClasses.join(' ')}" style="left:${left}px;top:${top}px;width:${w}px;height:${h}px;border-radius:${c.radius*scale}px"></div>`;
+ if(active){
+  const safeClasses=['guide-safe-area'];
+  if(result.marginSnaps?.left)safeClasses.push('snap-left');
+  if(result.marginSnaps?.right)safeClasses.push('snap-right');
+  if(result.marginSnaps?.top)safeClasses.push('snap-top');
+  if(result.marginSnaps?.bottom)safeClasses.push('snap-bottom');
+  if(result.marginBreach?.left)safeClasses.push('breach-left');
+  if(result.marginBreach?.right)safeClasses.push('breach-right');
+  if(result.marginBreach?.top)safeClasses.push('breach-top');
+  if(result.marginBreach?.bottom)safeClasses.push('breach-bottom');
+
+  html+=`<div class="${safeClasses.join(' ')}" style="left:${left+inset}px;top:${top+inset}px;width:${Math.max(0,w-2*inset)}px;height:${Math.max(0,h-2*inset)}px"></div>`;
+  html+=result.lines.map(line=>`<span class="smart-guide ${line.axis==='x'?'vertical':'horizontal'} ${line.kind} ${line.exact?'exact':''}" style="left:${left+(line.axis==='x'?line.position*scale:-8)}px;top:${top+(line.axis==='y'?line.position*scale:-8)}px;${line.axis==='x'?'height:'+(h+16):'width:'+(w+16)}px"><b>${line.label}</b></span>`).join('');
+
+  if(result.overlaps&&result.overlaps.length){
+   for(const ov of result.overlaps){
+    html+=`<div class="guide-overlap-zone" style="left:${left+ov.rect.left*scale}px;top:${top+ov.rect.top*scale}px;width:${ov.rect.width*scale}px;height:${ov.rect.height*scale}px"><span class="guide-overlap-pill">Solapamiento</span></div>`;
+    html+=`<div class="guide-peer-box" style="left:${left+ov.peer.left*scale}px;top:${top+ov.peer.top*scale}px;width:${ov.peer.width*scale}px;height:${ov.peer.height*scale}px"></div>`;
+   }
+  }
  }
+
  const sides={left:'izquierda',right:'derecha',top:'arriba',bottom:'abajo'};
  const outside=Object.entries(result.overflow).filter(([,v])=>v).map(([side,n])=>`${n} px ${sides[side]}`).join(' · ');
- html+=`<span class="guide-readout ${result.outside?'outside':''}" style="left:${left}px;top:${top+h+12}px">${outside?'Fuera del borde: '+outside:`${Math.round(box.width)} × ${Math.round(box.height)} px · Guías de alineación`}</span>`;
+ const breaches=result.marginBreach?Object.entries(result.marginBreach).filter(([k,v])=>k!=='active'&&v>0).map(([side,n])=>`${n} px ${sides[side]}`).join(' · '):'';
+ const snapSides=result.marginSnaps?Object.entries(result.marginSnaps).filter(([k,v])=>k!=='exact'&&v).map(([side])=>sides[side]).join(', '):'';
+ const edgeSnapSides=result.edgeSnaps?Object.entries(result.edgeSnaps).filter(([k,v])=>k!=='exact'&&v).map(([side])=>sides[side]).join(', '):'';
+
+ let readoutText='',readoutClass='';
+ if(result.outside){
+  readoutText='⛔ Fuera del borde: '+outside;readoutClass='outside';
+ }else if(result.overlaps&&result.overlaps.length){
+  const peerNames=result.overlaps.map(o=>o.peer.label).filter(Boolean);
+  readoutText='⚠️ Solapamiento con '+(peerNames.join(', ')||'otro elemento');readoutClass='overlap';
+ }else if(edgeSnapSides){
+  readoutText=`🎯 Borde exacto: ${edgeSnapSides} (0 px)`;readoutClass='snap';
+ }else if(snapSides){
+  readoutText=`🎯 Margen exacto: ${snapSides} (0 px)`;readoutClass='snap';
+ }else if(breaches){
+  readoutText=`⚠️ En margen: ${breaches}`;readoutClass='breach';
+ }else{
+  readoutText=`${Math.round(box.width)} × ${Math.round(box.height)} px · Guías de alineación`;
+ }
+
+ html+=`<span class="guide-readout ${readoutClass}" style="left:${left}px;top:${top+h+12}px">${readoutText}</span>`;
  overlay.innerHTML=html;
 }
 function elementInspector(){
@@ -974,7 +1033,7 @@ function elementAction(action){
  if(action==='delete-element'){next=updateElement(c,id,{deleted:true,hidden:false});toast('Elemento eliminado. Recupéralo desde Capas o Deshacer.');}
  if(action==='restore-element')next=restoreElement(c,id);
  if(action==='release-element')next=releaseElement(c,id);
- if(action==='smaller-element'||action==='bigger-element')next=resizeElement(c,id,(action==='bigger-element'?1:-1)*moveStep);
+ if(action==='smaller-element'||action==='bigger-element')next=resizeElement(c,id,action==='bigger-element'?1:-1);
  if(action==='reset-element'){const template=TEMPLATES.find(t=>t.id===c.id)?.config||BASE;next=restoreElement({...c,elements:{...c.elements,[id]:{...template.elements?.[id],x:0,y:0,width:0}}},id);next[ELEMENTS[id].sizeKey]=elementSize(template,id);}
  directChange(next);app.querySelector(`[data-element="${id}"]`)?.focus({preventScroll:true});
 }
