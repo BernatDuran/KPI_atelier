@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {BASE,TEMPLATES,THEMES,sanitizeConfig,checks,needsDate,needsTrend,isValidMeasureName} from '../dist/model.mjs';
 import {sampleData,cardHTML,renderTrend,formatNumber,icon} from '../dist/cards.mjs';
-import {generateDAX,measureRef,tableRef,validateDAX} from '../dist/dax.mjs';
+import {generateDAX,generateDAXBody,measureRef,tableRef,validateDAX,isNumericLiteral,targetRef} from '../dist/dax.mjs';
 import {ELEMENT_IDS,ELEMENTS,elementState,elementSize,moveElement,resizeElement,updateElement,restoreElement,elementVisible} from '../dist/elements.mjs';
 import {hexToHSV,hsvToHex,contrastRatio,sanitizePalette,paletteFrom} from '../dist/colors.mjs';
 import {ICON_OPTIONS} from '../dist/icons.mjs';
@@ -716,9 +716,9 @@ test('Incomplete DAX exports require explicit opt-in and do not substitute a mai
 test('Duplicate objectives and donut charts calculate with their explicit references, including blank exports',()=>{
  const c=sanitizeConfig({...BASE,elements:{goalLabel_copy1:{targetMeasure:'Plan propio'},progressLabel_copy1:{targetMeasure:'250'},progress_copy1:{targetMeasure:'Plan propio'},trend_copy1:{chartKind:'donut',measure:'Unidades'}}});
  const dax=generateDAX(c);
- assert.match(dax,/VAR __Target_goalLabel_copy1 = \[Plan propio\]/);
+ assert.match(dax,/VAR __Target_goalLabel_copy1 = IF \( __HasDates, CALCULATE \( \[Plan propio\]/);
  assert.match(dax,/VAR __Target_progressLabel_copy1 = 250/);
- assert.match(dax,/VAR __Cur_trend_copy1 = \[Unidades\]/);
+ assert.match(dax,/VAR __Cur_trend_copy1 = IF \( __HasDates, CALCULATE \( \[Unidades\]/);
  assert.match(dax,/__progressWidth_progress_copy1/);
  assert.match(dax,/__progressWidth_trend_copy1/);
  lexDax(dax);
@@ -728,4 +728,73 @@ test('Duplicate objectives and donut charts calculate with their explicit refere
  assert.match(incomplete,/VAR __Cur_trend_copy1 = BLANK \(\)/);
  c.measureName='Plan propio';
  assert.ok(checks(c).some(x=>x.field==='measureName'&&x.text.includes('circular')));
+});
+
+
+test('Each copied trend owns dates, extent and rolling data window for its own calendar',()=>{
+ const c=sanitizeConfig({...BASE,elements:{trend_copy1:{measure:'Coste',dateTable:'Fechas costes',dateColumn:'Dia'},trend_copy2:{measure:'Pedidos',dateTable:'Fechas pedidos',dateColumn:'Fecha'}}});
+ const dax=generateDAX(c);
+ for(const [id,table,col,metric] of [['trend_copy1','Fechas costes','Dia','Coste'],['trend_copy2','Fechas pedidos','Fecha','Pedidos']]){
+  assert.ok(dax.includes(`VAR __HasCalendarFilter_${id} = ISFILTERED ( '${table}' )`));
+  assert.ok(dax.includes(`LASTNONBLANK ( '${table}'[${col}], [${metric}] )`));
+  assert.ok(dax.includes(`VAR __Start_${id} = MINX ( __Dates_${id}, '${table}'[${col}] )`));
+  assert.ok(dax.includes(`FILTER ( __Dates_${id}, __HasDates_${id} && '${table}'[${col}] >= __WindowStart_${id} )`));
+  assert.ok(dax.includes(`SWITCH ( TRUE (), __Span_${id} <= 24`));
+ }
+ lexDax(dax);
+});
+
+test('Copied status exports dynamic measure-driven labels and opacities with BLANK support',()=>{
+ const c=sanitizeConfig({...BASE,type:'status',elements:{status_copy1:{measure:'SLA propio',direction:'down',goodThreshold:.03,warnThreshold:.05,statusGood:'Correcto propio',statusWarn:'Alerta propia',statusBad:'Error propio'}}});
+ const dax=generateDAX(c);
+ assert.match(dax,/VAR __StatusValue_status_copy1 = IF \( __HasDates, CALCULATE \( \[SLA propio\]/);
+ assert.match(dax,/ISBLANK \( __StatusValue_status_copy1 \), 0, __StatusValue_status_copy1 <= 0.03, 3/);
+ assert.match(dax,/VAR __status_status_copy1 = SWITCH \( __StatusCode_status_copy1, 3, "Correcto propio"/);
+ assert.match(dax,/VAR __statusGoodOpacity_status_copy1 = IF \( __StatusCode_status_copy1 = 3/);
+ assert.ok(dax.slice(dax.indexOf('RETURN\n')).includes('__status_status_copy1'));
+ const sample=sampleData({...c,sampleScenario:'empty'});
+ assert.equal(sample.status_status_copy1,'Sin datos');
+ assert.equal(sample.statusGoodOpacity_status_copy1,.2);
+ lexDax(dax);
+});
+
+test('Calendar-bound goals and custom references use the same exact selected dates as current values',()=>{
+ const dax=generateDAX({...BASE,comparison:'custom'});
+ assert.match(dax,/VAR __Target = IF \( __HasDates, CALCULATE \( \[Objetivo Ventas\], REMOVEFILTERS \( 'Calendario' \), TREATAS \( __Dates, 'Calendario'\[Fecha\] \) \) \)/);
+ assert.match(dax,/VAR __Reference = IF \( __HasDates, CALCULATE \( \[Ventas Periodo Anterior\]/);
+ assert.match(generateDAX({...BASE,targetMeasure:'100'}),/VAR __Target = 100\n/);
+ const previous=generateDAX({...BASE,comparison:'previous'});
+ assert.match(previous,/__ComparableDates = __HasDates && NOT __IsDiscontinuous && COUNTROWS \( __PreviousDates \) = __Span/);
+});
+
+test('Only finite decimal DAX numeric literals are emitted as constants',()=>{
+ for(const input of [Infinity,-Infinity,NaN,'Infinity','-Infinity','1e999','0x10','',null])assert.equal(isNumericLiteral(input),false,String(input));
+ for(const input of [0,-12,'0','.5','+10','1e3','-1.2e-3'])assert.equal(isNumericLiteral(input),true,String(input));
+ assert.equal(targetRef('Infinity'),'[Infinity]');
+ assert.equal(targetRef('1e3'),'1000');
+});
+
+test('Exported gradient opacity is applied once, consistently with preview SVG',()=>{
+ const dax=generateDAX({...BASE,areaFill:'gradient',fillOpacity:.2});
+ const area=dax.split('\n').find(line=>line.startsWith('VAR __chartArea ='));
+ assert.ok(area.includes('opacity=""1""'));
+ const solid=generateDAX({...BASE,areaFill:'solid',fillOpacity:.2}).split('\n').find(line=>line.startsWith('VAR __chartArea ='));
+ assert.ok(solid.includes('opacity=""0.2""'));
+});
+
+
+test('Duplicated status rejects invalid or directionless thresholds before DAX export',()=>{
+ for(const state of [{direction:'neutral'},{direction:'down',goodThreshold:10,warnThreshold:5},{goodThreshold:Infinity}]){
+  const c={...BASE,type:'status',elements:{status_copy1:state}};
+  assert.ok(checks(c).some(x=>x.level==='error'&&x.elementId==='status_copy1'));
+  assert.throws(()=>generateDAX(c),/umbrales/);
+ }
+});
+
+
+test('DAX bodies remove bracketed display names and lexical checks reject malformed strings',()=>{
+ const body=generateDAXBody({...BASE,measureName:'KPI Margen (%)'});
+ assert.ok(body.startsWith('//'));assert.doesNotMatch(body,/^\[KPI/);
+ assert.equal(validateDAX('VAR __x = "unterminated').valid,false);
+ assert.equal(validateDAX(') (').valid,false);
 });

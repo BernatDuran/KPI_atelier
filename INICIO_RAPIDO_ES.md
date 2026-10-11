@@ -1,64 +1,57 @@
-# KPI Atelier · Código fuente completo · v1.4.0
+# KPI Atelier · Inicio rápido
 
-Esta copia corresponde al código de la aplicación publicada y republicada el 9 de octubre de 2026. Permite estudiarla, modificarla y ejecutar una réplica local. El código de la aplicación está en `dist/`: a pesar del nombre de esa carpeta, son los archivos fuente originales, sin compilar ni minificar mediante un proceso de build.
+El código del editor está en `dist/`: son módulos JavaScript fuente que se ejecutan directamente, sin compilación. El servidor local de `scripts/` sirve la interfaz y proporciona la conexión con Power BI Desktop.
 
-## 1. Ejecutar en tu ordenador
+## 1. Ejecutar en tu PC
 
-Necesitas Node.js 20 o superior disponible en la terminal. Compruébalo con `node --version`.
-
-1. Extrae **todo el ZIP** en una carpeta.
-2. Abre la carpeta `KPI-Atelier-v1.4.0` en VS Code, o abre una terminal en ella.
-3. Ejecuta:
+Necesitas Node.js 22 o superior. Desde la carpeta principal:
 
 ```bash
-node scripts/serve.mjs
+node --version
+npm start
 ```
 
-4. Abre **http://127.0.0.1:8080** en tu navegador.
-5. Mantén la terminal abierta mientras utilizas la app. Para detenerla, pulsa **Ctrl+C**.
+Abre [http://127.0.0.1:8080](http://127.0.0.1:8080). Mantén la terminal abierta; Ctrl+C detiene el servidor. Para otro puerto, ejecuta `node scripts/serve.mjs 8081`. Conserva la misma dirección y puerto entre sesiones: los diseños locales pertenecen a ese origen del navegador.
 
-No hay dependencias que instalar: no necesitas `npm install`, claves API, base de datos ni una cuenta de Power BI para diseñar y probar los datos de ejemplo. El servidor incluido utiliza únicamente módulos de Node y escucha en tu propio equipo.
+El runtime no necesita paquetes npm de producción, claves API ni una base de datos. Puedes diseñar y exportar con datos de muestra sin Power BI abierto. Las fuentes pueden descargarse de Google Fonts; sin conexión se utilizan las alternativas del sistema.
 
-Si el puerto está ocupado, usa `node scripts/serve.mjs 8081` y abre http://127.0.0.1:8081. Mantén la misma dirección y puerto en sesiones posteriores: el almacenamiento del navegador depende de ellos.
+No abras `dist/index.html` mediante `file://`. Los módulos necesitan HTTP y el bridge rechaza orígenes nulos o distintos al del servidor local. `GET /api/health` permite comprobar identidad, versión y protocolo del servidor.
 
-No abras `dist/index.html` con doble clic: los módulos JavaScript deben servirse por HTTP. Tras editar el código, guarda y recarga el navegador; el servidor de este ZIP no hace recarga automática.
+## 2. Preparar el entorno de desarrollo
 
-## 2. Comprobar las pruebas
-
-Desde la carpeta principal:
+Las herramientas de tipos y navegador requieren dependencias de desarrollo:
 
 ```bash
-node --test tests/core.test.mjs tests/editor.test.mjs
+npm ci
+npm run typecheck
+npm test
+npm run test:browser
 ```
 
-También puedes usar `npm test`. En la preparación de este ZIP se han superado **45 pruebas** sobre la copia extraída. Cubren geometría, generación de HTML/DAX, datos de ejemplo, navegación con cambios y controles con DOM simulado. No equivalen a una prueba visual en navegador ni a ejecutar el DAX dentro de Power BI.
+`npm run check` ejecuta las tres comprobaciones. Las pruebas de navegador usan Microsoft Edge instalado en el PC y arrancan su propio servidor en el puerto 8098. La CI utiliza Chromium, instalado con `npx playwright install --with-deps chromium`, y comprueba Node 22/24 en Windows y Linux.
 
-## 3. Qué incluye
+Los tests cubren código, contratos y flujos del editor. Las escrituras del bridge se prueban con objetos simulados y las del navegador con respuestas HTTP controladas. No evalúan DAX ni modifican un modelo semántico real; verifica los resultados de negocio y la representación visual en Power BI.
 
-- Todo el HTML, CSS y JavaScript de la aplicación, conservado byte a byte.
-- Las 18 plantillas, 10 temas y 47 iconos vectoriales.
-- El editor, capas, tamaños, guías, colores, efectos, gráficos y generador DAX.
-- Las pruebas originales y el README técnico original.
-- `ARQUITECTURA_ES.md`: explicación de los módulos y de los principales flujos.
-- `scripts/serve.mjs`: servidor local añadido a esta exportación.
-- `EXPORTACION.json`: versión, commit e inventario de procedencia.
-- `SHA256SUMS.txt`: huellas de los archivos para comprobar su integridad.
-- `docs/hosting.example.json`: configuración estática de referencia, sin vincular tu réplica al sitio original.
+## 3. Conectar datos
 
-El `package.json` se conserva sin cambios. El ZIP no contiene credenciales, sesiones, historial Git ni el identificador activo de despliegue del sitio original; estos no son necesarios para ejecutar la app.
+**Carpeta PBIP:** selecciona la carpeta de un solo modelo `.SemanticModel`. Se leen tablas, medidas y calendarios de TMDL o `model.bim`, localmente y sin subirlos. El lector admite hasta 10 MB por archivo, 50 MB acumulados, 1.000 archivos de modelo, 10.000 entradas y 16 niveles de profundidad. Si la carpeta contiene varios modelos, selecciona directamente el que necesitas. Una nueva selección cancela la lectura anterior.
 
-## 4. Tus diseños guardados
+**Power BI Desktop:** requiere Windows, PowerShell, un informe abierto y las bibliotecas TOM. `scripts/pbi_connection.ps1` busca estas bibliotecas en las instalaciones compatibles y en la carpeta `bin` del proyecto. Utiliza Conectar para elegir el informe.
 
-Los diseños, borradores y temas personales se guardan en `localStorage`, en tu navegador, y **no forman parte del código fuente**. La réplica local tendrá su propio almacenamiento, separado del sitio publicado.
+La herramienta externa puede registrarse mediante `scripts/install-pbitool.ps1`. Su lanzador `kpi-atelier.cmd` entrega servidor y base a `scripts/launch.ps1` mediante `KPI_LAUNCH_SERVER` y `KPI_LAUNCH_DATABASE`. Comprueba la identidad del servicio, inicia el servidor oculto cuando hace falta y codifica los parámetros antes de abrir la app. Si el puerto está ocupado por otro servicio o versión, informa del problema y no abre ese destino.
 
-Para trasladar un diseño, expórtalo como JSON desde la app original y usa **Importar** en la réplica. Las plantillas y datos de ejemplo sí están incluidos en el código.
+Conectar permite revisar metadatos. La tarjeta del editor sigue mostrando datos de muestra, no el resultado evaluado del modelo.
 
-## 5. Power BI
+## 4. Aplicar una medida con revisión
 
-La app no se conecta a tu modelo ni ejecuta sus medidas. La vista previa usa datos de muestra. La exportación genera una medida DAX de texto con HTML/SVG; los nombres de medidas y calendario deben coincidir con los de tu modelo. Valida la medida y el renderizado en Power BI con el visual de HTML correspondiente.
+Configura las referencias, revisa el destino y aplica la medida. La app vuelve a consultar el catálogo y pide confirmación al sobrescribir. El backend exige base y tabla explícitas y comprueba que la expresión existente coincida con la revisada.
 
-## 6. Publicar tu réplica
+Un conflicto `409` significa que el destino cambió: actualiza y revisa antes de continuar. Si una escritura termina con resultado incierto por desconexión o tiempo agotado, comprueba primero la medida en Power BI. La app no repite esa escritura automáticamente.
 
-Para un alojamiento estático, publica el **contenido de `dist/`**, con `index.html` en la raíz pública. No hay compilación ni backend de la aplicación.
+En tarjetas con calendario, el período corresponde a los filtros de calendario o, sin filtro, a los últimos doce meses móviles hasta la última fecha con datos. Valor actual, objetivo basado en medida y referencia personalizada comparten esas fechas. Las comparaciones temporales requieren cobertura suficiente del calendario. Consulta [la arquitectura](ARQUITECTURA_ES.md) para las reglas de períodos discontinuos y tendencias duplicadas.
 
-La protección de acceso del sitio original pertenece al alojamiento y no es código de autenticación de la app. Si necesitas una réplica privada, configura el acceso en tu propio alojamiento. El servidor incluido es únicamente para desarrollo local.
+## 5. Conservar y trasladar diseños
+
+Diseños, borradores y temas personales se guardan en `localStorage`; no forman parte del repositorio ni se sincronizan entre equipos o puertos. Exporta JSON e impórtalo en el destino para trasladar una configuración.
+
+Puedes alojar estáticamente el contenido de `dist/` para diseñar y exportar. La conexión directa con Power BI requiere el servidor local y su política de mismo origen; publicar solo `dist/` no publica el bridge. La compatibilidad HTML/SVG depende del visual y del entorno de Power BI utilizado.

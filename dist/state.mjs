@@ -6,6 +6,8 @@
 import { BASE, sanitizeConfig, THEMES, FAMILIES, TEMPLATES, familyName } from './model.mjs';
 import { sanitizePalette } from './colors.mjs';
 import { icon, esc, cardHTML } from './cards.mjs';
+import { sanitizeModelCatalog } from './schema.mjs';
+import { ELEMENT_IDS } from './elements.mjs';
 
 // Utilería para lectura segura de LocalStorage y DOM
 export const $ = (s, el) => {
@@ -42,10 +44,14 @@ export function setContext(ctx) {
     }
   }
   c = sanitizeConfig(read('kpi-atelier-draft', BASE));
+  designBindingsLocked = read('kpi-atelier-draft', null) !== null;
   saved = read('kpi-atelier-saved', []);
   if (!Array.isArray(saved)) saved = [];
   saved = saved.filter(x => x && typeof x.id === 'string' && x.config).map(x => ({ ...x, config: sanitizeConfig(x.config) }));
-  pbipModel = read('kpi-atelier-pbip-cache', null);
+  pbipModel = sanitizeModelCatalog(read('kpi-atelier-pbip-cache', null));
+  const restoredEditState = read('kpi-atelier-edit-state', null);
+  baseline = restoredEditState?.baseline ? sanitizeConfig(restoredEditState.baseline) : structuredClone(c);
+  editingSavedId = typeof restoredEditState?.savedId === 'string' ? restoredEditState.savedId : null;
   undo = [];
   redo = [];
   lastEdit = 0;
@@ -56,7 +62,9 @@ export function setContext(ctx) {
   formatPainterSource = null;
   deleteConfirmLayer = null;
   view = 'designer';
-  mode = 'essential';
+  const restoredMode = read('kpi-atelier-mode', 'essential');
+  mode = restoredMode === 'advanced' || restoredMode === 'pro' ? 'advanced' : 'essential';
+  uiTheme = read('kpi-atelier-ui-theme', 'light') === 'dark' ? 'dark' : 'light';
   tab = 'content';
   filter = 'all';
   query = '';
@@ -64,11 +72,14 @@ export function setContext(ctx) {
   railCollapsed = read('kpi-atelier-rail-collapsed', false);
   if (ctx) {
     ctx.c = c;
+    ctx.baseline = baseline;
+    ctx.editingSavedId = editingSavedId;
     ctx.saved = saved;
     ctx.pbipModel = pbipModel;
     ctx.undo = undo;
     ctx.redo = redo;
     ctx.lastEdit = lastEdit;
+    ctx.lastEditKey = null;
     ctx.cardSelected = cardSelected;
     ctx.selectedElement = selectedElement;
     ctx.selectedElements = selectedElements;
@@ -83,6 +94,8 @@ export function setContext(ctx) {
     ctx.filter = filter;
     ctx.query = query;
     ctx.context = context;
+    ctx.inspectorSections = inspectorSections;
+    ctx.inspectorPositions = inspectorPositions;
     if (ctx.document?.documentElement) {
       try { ctx.document.documentElement.setAttribute('data-ui-theme', uiTheme); } catch {}
     }
@@ -97,7 +110,21 @@ export const callCtx = (fnName, ...args) => {
 
 // Helpers de resolución de variables vinculadas al contexto activo
 export function getC() { return (activeCtx && activeCtx.c !== undefined) ? activeCtx.c : c; }
-export function setC(val) { c = val; if (activeCtx) activeCtx.c = val; return c; }
+export function setC(val) {
+  c = val;
+  if (activeCtx) activeCtx.c = val;
+  // Undoing a duplication can remove the selected object. Keep selection tied
+  // to the document, instead of exposing a stale inspector for a missing copy.
+  const exists = id => ELEMENT_IDS.includes(id) || Object.hasOwn(val.elements || {}, id);
+  const selection = getSelectedElements();
+  for (const id of selection) if (!exists(id)) selection.delete(id);
+  const current = getSelectedElement();
+  if (current && !exists(current)) {
+    setSelectedElement(selection.values().next().value || null);
+    if (!getSelectedElement() && getTab() === 'element') setTab('content');
+  }
+  return c;
+}
 export function getBaseline() { return (activeCtx && activeCtx.baseline !== undefined) ? activeCtx.baseline : baseline; }
 export function setBaseline(val) { baseline = val; if (activeCtx) activeCtx.baseline = val; }
 export function getMode() { return (activeCtx && activeCtx.mode !== undefined) ? activeCtx.mode : mode; }
@@ -251,7 +278,7 @@ export let colorRole = 'accent';
 export let colorHSV = null;
 export let colorPointer = null;
 
-export let pbipModel = read('kpi-atelier-pbip-cache', null);
+export let pbipModel = sanitizeModelCatalog(read('kpi-atelier-pbip-cache', null));
 export let contextResolution = read('kpi-atelier-context-res', '1280x720');
 export let pendingRoundtripConf = null;
 export let pendingRoundtripName = '';
@@ -260,6 +287,7 @@ export const editState = read('kpi-atelier-edit-state', null);
 export let baseline = editState?.baseline ? sanitizeConfig(editState.baseline) : structuredClone(c);
 export let editingSavedId = editState?.savedId || null;
 export let pendingNavigation = null;
+let designBindingsLocked = read('kpi-atelier-draft', null) !== null;
 
 // Helpers de Modelo PBIP
 export function getFriendlyReportName(model) {
@@ -273,6 +301,8 @@ export function getFriendlyReportName(model) {
 
 export function applyPbipCalendarDefaults(catalog) {
   if (!catalog || !Array.isArray(catalog.dateTables) || !catalog.dateTables.length) return false;
+  // Connecting metadata must not rewrite the bindings of an existing design.
+  if (designBindingsLocked || getC()._dateCustomized || getC()._measureBound) return false;
   const bestTable = catalog.dateTables[0];
   const bestColumn = bestTable.primaryDateColumn || bestTable.dateColumns?.[0] || '';
   const patch = {};
@@ -315,8 +345,14 @@ export function formatSyncTimestamp(ts) {
 }
 
 export function setPbipModel(model, autoAssign = false) {
-  pbipModel = model;
-  if (activeCtx) activeCtx.pbipModel = model;
+  const safe = model === null ? null : sanitizeModelCatalog(model);
+  if (model !== null && !safe) {
+    toast('El catálogo del modelo no es válido. Vuelve a conectarlo o importa su carpeta PBIP.');
+    return false;
+  }
+  model = safe;
+  pbipModel = safe;
+  if (activeCtx) activeCtx.pbipModel = safe;
   if (model) {
     setLastPbiSyncTime(Date.now());
   }
@@ -327,18 +363,12 @@ export function setPbipModel(model, autoAssign = false) {
       else storage.removeItem('kpi-atelier-pbip-cache');
     }
   } catch {}
-  const DUMMY_TARGETS = ['Objetivo EBITDA', 'Objetivo Pedidos', 'Objetivo Ventas', 'Objetivo'];
-  const curC = getC();
-  if (!curC._targetCustomized && DUMMY_TARGETS.includes(curC.targetMeasure?.trim())) {
-    curC.targetMeasure = '';
-    setC(curC);
-    persist();
-  }
   if (autoAssign && model) {
     applyPbipCalendarDefaults(model);
   }
   callCtx('renderInspector');
   callCtx('renderStatus');
+  return true;
 }
 
 // Persistencia y Detección de Cambios
@@ -374,8 +404,8 @@ export function persist() {
   try {
     const storage = (activeCtx && activeCtx.localStorage) || (typeof localStorage !== 'undefined' ? localStorage : null);
     if (!storage) throw new Error('No storage available');
-    storage.setItem('kpi-atelier-edit-state', JSON.stringify({ baseline: getBaseline(), savedId: editingSavedId }));
     storage.setItem('kpi-atelier-draft', JSON.stringify(getC()));
+    storage.setItem('kpi-atelier-edit-state', JSON.stringify({ baseline: getBaseline(), savedId: editingSavedId }));
     storage.setItem('kpi-atelier-mode', JSON.stringify(getMode()));
     return true;
   } catch {
@@ -388,15 +418,44 @@ export function record() {
   const curUndo = getUndo();
   curUndo.push(structuredClone(getC()));
   if (curUndo.length > 60) curUndo.shift();
-  if (activeCtx && activeCtx.redo) activeCtx.redo = [];
-  else redo = [];
+  getRedo().length = 0;
+  callCtx('updateHistoryButtons');
+}
+
+/** Coalesce continuous input on one control, never changes to different fields. */
+export function recordEdit(key, discrete = false) {
+  const ctx = getActiveContext();
+  const now = Date.now();
+  if (discrete || ctx.lastEditKey !== key || now - (ctx.lastEdit || 0) > 700 || getRedo().length) record();
+  ctx.lastEditKey = key;
+  ctx.lastEdit = now;
+}
+
+/** Restore a cancelled edit without losing the history that preceded it. */
+export function restoreHistory(previousUndo = [], previousRedo = []) {
+  getUndo().splice(0, getUndo().length, ...previousUndo);
+  getRedo().splice(0, getRedo().length, ...previousRedo);
+  const ctx = getActiveContext();
+  ctx.lastEdit = 0;
+  ctx.lastEditKey = null;
+  callCtx('updateHistoryButtons');
+}
+
+export function clearSelection() {
+  setSelectedElement(null);
+  setCardSelected(false);
+  getSelectedElements().clear();
+  setFormatPainterSource(null);
+  setDeleteConfirmLayer(null);
 }
 
 export function setConfig(patch, full = false) {
-  record();
   const nextC = sanitizeConfig(full ? patch : { ...getC(), ...patch });
+  if (JSON.stringify(nextC) === JSON.stringify(getC())) return false;
+  record();
   setC(nextC);
   if (full) {
+    clearSelection();
     if (activeCtx) {
       activeCtx.context = false;
       activeCtx.cardSelected = false;
@@ -411,6 +470,7 @@ export function setConfig(patch, full = false) {
   }
   persist();
   callCtx('render');
+  return true;
 }
 
 export function themeSelect(key) {
@@ -433,13 +493,14 @@ export function thumb(conf, cl = '') {
   return `<div class="mini-viewport ${cl}" data-base-width="${w}" data-base-height="${h}" style="aspect-ratio:${w}/${h};min-height:48px;"><div class="mini-inner" style="width:${w}px">${cardHTML(conf)}</div></div>`;
 }
 
-export function loadDesign(config, savedId = null) {
+export function loadDesign(config, savedId = null, { template = false } = {}) {
+  designBindingsLocked = !template;
   const curC = getC();
   const prevDateTable = curC?.dateTable;
   const prevDateColumn = curC?.dateColumn;
   const prevDateCustomized = curC?._dateCustomized;
   let nextC = sanitizeConfig(config);
-  if (!savedId) {
+  if (template) {
     nextC._measureBound = false;
     nextC.measure = '';
     if (!nextC.measureName || !nextC.measureName.trim()) {
@@ -448,7 +509,7 @@ export function loadDesign(config, savedId = null) {
     }
   }
   const curPbip = getPbipModel();
-  if (curPbip) {
+  if (template && curPbip) {
     const modelDateTables = curPbip.dateTables || [];
     const modelTableNames = (curPbip.tables || []).map(t => t.toLowerCase());
     const prevFound = modelDateTables.find(dt => dt.name.toLowerCase() === (prevDateTable || '').trim().toLowerCase())
@@ -465,14 +526,17 @@ export function loadDesign(config, savedId = null) {
         nextC._dateCustomized = true;
       }
     }
-  } else if (prevDateCustomized && prevDateTable) {
+  } else if (template && prevDateCustomized && prevDateTable) {
     nextC.dateTable = prevDateTable;
     nextC.dateColumn = prevDateColumn || nextC.dateColumn;
     nextC._dateCustomized = true;
   }
   setC(nextC);
+  clearSelection();
+  setGesture(null);
   setBaseline(structuredClone(nextC));
   editingSavedId = savedId;
+  restoreHistory();
   if (activeCtx) {
     activeCtx.editingSavedId = savedId;
     activeCtx.undo = [];
@@ -500,7 +564,7 @@ export function loadDesign(config, savedId = null) {
 }
 
 export function saveCurrent(name) {
-  name = name.trim();
+  name = String(name ?? '').trim().slice(0, 80);
   if (!name) { toast('Añade un nombre para el diseño.'); return false; }
   const curSaved = getSaved();
   const id = curSaved.some(s => s.id === editingSavedId) ? editingSavedId : crypto.randomUUID();
@@ -534,12 +598,10 @@ export function requestNavigation(go) {
     openModalFn(
       'Tienes cambios sin guardar',
       'Decide qué hacer antes de salir de esta tarjeta.',
-      `<p class="field-help">Puedes guardar el diseño, descartar los cambios pendientes o seguir editándolo.</p><label class="save-label" for="guard-name">Nombre del diseño</label><input id="guard-name" class="save-input" maxlength="80" value="${name}">`,
+      `<p class="field-help">Puedes guardar el diseño, descartar los cambios pendientes o seguir editándolo.</p><label class="save-label" for="guard-name">Nombre del diseño</label><input id="guard-name" class="save-input" maxlength="80" value="${esc(name)}">`,
       `<button class="button secondary" data-action="close-modal"><span>Seguir editando</span></button><button class="button quiet" data-action="guard-discard"><span>Descartar y continuar</span></button><button class="button primary" data-action="guard-save"><span>Guardar y continuar</span></button>`,
       'leave-modal'
     );
     $('#modal')?.querySelector('[data-action="close-modal"].button')?.focus();
-  } else {
-    go();
-  }
+  } else toast('Guarda o exporta los cambios antes de continuar.');
 }

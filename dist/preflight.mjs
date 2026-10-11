@@ -18,12 +18,15 @@ export function measureDestination(c, model) {
 // The same catalog checks are used by the review and the write action.
 export function reviewMeasure(c, model) {
   const references = [];
+  const measures = new Map((model?.measures || []).map(m => [normalized(m.name), m]));
+  const dateTables = new Map((model?.dateTables || []).map(t => [normalized(t.name), t]));
+  const tables = new Set((model?.tables || []).map(normalized));
   const fields = {};
   const issues = checks(c).filter(x => x.level === 'error' || x.level === 'warning');
   const addMeasure = (label, value, field, numeric = false) => {
-    const raw = String(value || '').trim();
+    const raw = String(value ?? '').trim();
     const constant = numeric && raw !== '' && isNumericLiteral(raw) && Number.isFinite(Number(raw));
-    const found = model?.measures?.find(m => normalized(m.name) === normalized(bareMeasure(raw)));
+    const found = measures.get(normalized(bareMeasure(raw)));
     const status = !raw ? 'error' : constant ? 'constant' : !model ? 'unknown' : found ? 'ok' : 'error';
     const reference = { label, value: raw || 'Sin configurar', field, table: found?.table || '', status, empty: !raw };
     references.push(reference);
@@ -33,8 +36,8 @@ export function reviewMeasure(c, model) {
     table = String(table || '').trim();
     column = String(column || '').trim();
     const columnField = field === 'dateTable' ? 'dateColumn' : field.replace(/__dateTable$/, '__dateColumn');
-    const dateTable = (model?.dateTables || []).find(dt => normalized(dt.name) === normalized(table));
-    const tableExists = dateTable || model?.tables?.some(t => normalized(t) === normalized(table));
+    const dateTable = dateTables.get(normalized(table));
+    const tableExists = dateTable || tables.has(normalized(table));
     const validColumn = dateTable?.dateColumns?.some(col => normalized(col) === normalized(column));
     const status = !table || !column ? 'error' : !model ? 'unknown' : !tableExists ? 'error' :
       dateTable ? validColumn ? 'ok' : 'error' : 'unknown';
@@ -52,7 +55,7 @@ export function reviewMeasure(c, model) {
     const def = resolveElementDef(id);
     const st = elementState(c, id);
     if (!def?.isDuplicate || st.deleted) continue;
-    if (['value', 'trend', 'delta', 'referenceValue'].includes(def.baseId)) {
+    if (['value', 'trend', 'delta', 'referenceValue'].includes(def.baseId) || def.baseId === 'status' && st.measure?.trim()) {
       addMeasure(def.label, st.measure, ['trend','delta'].includes(def.baseId) ? `${id}__measure` : id);
     }
     if (['goalLabel', 'progressLabel', 'progress'].includes(def.baseId) || def.baseId === 'delta' && (st.comparison || c.comparison) === 'target') {

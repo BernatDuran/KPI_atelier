@@ -1,6 +1,5 @@
 # Dependencies
 node_modules/
-package-lock.json
 
 # Environment & Logs
 *.log
@@ -30,3 +29,7 @@ KPI_Atelier_v1.4.0_Codigo_Fuente.zip
 coverage/
 .system_generated/
 scratch/
+
+# Browser test artifacts
+test-results/
+playwright-report/

@@ -37,6 +37,10 @@ export function sampleData(c){
   for(const [dupId,st] of Object.entries(c.elements)){
    if(dupId.includes('_copy')&&!st.deleted){
     const def=resolveElementDef(dupId);
+    if(def?.baseId==='status'){
+     const copy=sampleData({...c,...st,elements:{}});
+     for(const key of ['status','statusColor','statusGoodOpacity','statusWarnOpacity','statusBadOpacity']) res[`${key}_${dupId}`]=copy[key];
+    }
     if(def?.baseId==='delta'){
      const dupDir=st.direction||c.direction;
      const dupFav=delta===null||delta===0||dupDir==='neutral'?null:dupDir==='down'?delta<0:delta>0;
@@ -145,16 +149,9 @@ export function cardHTML(c,d=sampleData(c),editor=false){
    dupExtra='line-height:0;';
   }
   else if(def.baseId==='status'){
-   const sGood=dupState.statusGood||c.statusGood||'Favorable';
-   const sWarn=dupState.statusWarn||c.statusWarn||'En alerta';
-   const sBad=dupState.statusBad||c.statusBad||'Desfavorable';
-   const val=c.sampleValue;
-   const gTh=dupState.goodThreshold??c.goodThreshold;
-   const wTh=dupState.warnThreshold??c.warnThreshold;
-   const dir=dupState.direction||c.direction;
-   const st=dir==='down'?(val<=gTh?'good':val<=wTh?'warn':'bad'):(val>=gTh?'good':val>=wTh?'warn':'bad');
-   const stText=st==='good'?sGood:st==='warn'?sWarn:sBad;
-   dupContent=`<div style="display:flex;gap:5px">${[['Bad',c.negative],['Warn',c.warning],['Good',c.positive]].map(([key,color])=>`<span style="width:.75em;height:.75em;border-radius:50%;background:${color};opacity:${st===key.toLowerCase()?1:.2}"></span>`).join('')}</div><span style="font-weight:600;color:${color(dupId)}">${esc(stText)}</span>`;
+   const statusData = d[`status_${dupId}`] !== undefined ? d : sampleData({...c, ...dupState, elements:{}});
+   const suffix = d[`status_${dupId}`] !== undefined ? `_${dupId}` : '';
+   dupContent=`<div style="display:flex;gap:5px">${[['Bad',c.negative],['Warn',c.warning],['Good',c.positive]].map(([key,color])=>`<span style="width:.75em;height:.75em;border-radius:50%;background:${color};opacity:${statusData[`status${key}Opacity${suffix}`]}"></span>`).join('')}</div><span style="font-weight:600;color:${appearance(c,dupId).colorMode==='custom'?color(dupId):statusData[`statusColor${suffix}`]}">${statusData[`status${suffix}`]}</span>`;
    dupExtra=`display:flex;align-items:center;gap:10px;padding:14px;border-radius:10px;line-height:1.4;background:${bg(dupId)};`;
   }
   else {
@@ -169,6 +166,7 @@ export function tokenData(c=null){
  const tokens=Object.fromEntries(['value','delta','arrow','deltaColor','previous','target','targettext','progress','progressWidth','goalColor','status','statusColor','statusGoodOpacity','statusWarnOpacity','statusBadOpacity','trend','period','trendLabel','footer'].map(k=>[k,`@@${k}@@`]));
  if(c&&c.elements){
   for(const dupId of Object.keys(c.elements).filter(id=>id.includes('_copy'))){
+   for(const key of ['status','statusColor','statusGoodOpacity','statusWarnOpacity','statusBadOpacity']) tokens[`${key}_${dupId}`]=`@@${key}_${dupId}@@`;
    tokens[`val_${dupId}`]=`@@val_${dupId}@@`;
    tokens[`delta_${dupId}`]=`@@delta_${dupId}@@`;
    tokens[`arrow_${dupId}`]=`@@arrow_${dupId}@@`;

@@ -182,6 +182,7 @@ export function checks(c){
  if(needsDate(c)&&(!c.dateTable.trim()||!c.dateColumn.trim()))issues.push({level:'error',text:'Completa la tabla calendario y su columna de fecha.',field:!c.dateTable.trim()?'dateTable':'dateColumn'});
  if((needsGoal(c)||(needsCompare(c)&&c.comparison==='target'))&&!c.targetMeasure.trim())issues.push({level:'error',text:'Indica una medida u objetivo numérico (ej. 0 o 100).',field:'targetMeasure'});
  if(needsCompare(c)&&c.comparison==='custom'&&!c.compareMeasure.trim())issues.push({level:'error',text:'Indica la medida de comparación.',field:'compareMeasure'});
+ if(rendered(c,'status')&&(!Number.isFinite(c.goodThreshold)||!Number.isFinite(c.warnThreshold)))issues.push({level:'error',text:'Los umbrales deben ser números finitos.',field:'goodThreshold'});
  if(rendered(c,'status')&&((c.direction==='down'&&c.goodThreshold>c.warnThreshold)||(c.direction!=='down'&&c.goodThreshold<c.warnThreshold)))issues.push({level:'error',text:'Revisa los umbrales: favorable y alerta deben seguir la dirección elegida.',field:'goodThreshold'});
  if(rendered(c,'status')&&c.direction==='neutral')issues.push({level:'error',text:'Un semáforo necesita dirección favorable: subir o bajar.',field:'direction'});
  if(c.deltaMode==='pp'&&c.format!=='percent')issues.push({level:'error',text:'Los puntos porcentuales requieren formato porcentaje.',field:'format'});
@@ -189,6 +190,10 @@ export function checks(c){
  for(const dupId of dupKeys){
   const def=resolveElementDef(dupId);
   const st=c.elements[dupId];
+  if(def?.baseId==='status'){
+   const direction=st.direction||c.direction,good=st.goodThreshold??c.goodThreshold,warn=st.warnThreshold??c.warnThreshold;
+   if(!Number.isFinite(good)||!Number.isFinite(warn)||direction==='neutral'||(direction==='down'?good>warn:good<warn))issues.push({level:'error',text:`Elemento '${def.label}': revisa la dirección y los umbrales favorable/alerta.`,field:dupId,elementId:dupId});
+  }
   if(['value','trend','delta','referenceValue'].includes(def?.baseId)&&!st.measure?.trim()){
    issues.push({level:'error',text:`Elemento '${def.label}': asigna su medida propia.`,field:def.baseId==='trend'||def.baseId==='delta'?`${dupId}__measure`:dupId,elementId:dupId});
   }
@@ -208,7 +213,8 @@ export function checks(c){
  }
  if(c.height<240&&['executive','target','status','spark'].includes(c.type))issues.push({level:'warning',text:'Esta composición puede necesitar más altura. Revisa el resultado a tamaño real.'});
  if(c.valueSize>52&&c.width<360)issues.push({level:'warning',text:'El valor podría ocupar varias líneas. Reduce la tipografía o amplía el ancho.'});
- if(needsDate(c))issues.push({level:'info',text:'Usa una tabla calendario relacionada y filtra el período desde esa tabla.'});
+ if(needsDate(c))issues.push({level:'info',text:'Usa una tabla calendario relacionada. Sin filtros se toman los últimos 12 meses con datos; valores, objetivos y referencias comparten ese período.'});
+ if(c.comparison==='previous')issues.push({level:'info',text:'El período anterior exige una selección continua y un calendario con cobertura completa del intervalo anterior; en otro caso se muestra sin datos.'});
  if(needsGoal(c))issues.push({level:'info',text:'El avance muestra valor / objetivo positivo; la dirección determina si cumplir significa subir o bajar.'});
  issues.push({level:'info',text:'Los nombres se revisan aquí; su existencia y el resultado DAX se comprueban en tu modelo de Power BI.'});
  return issues;

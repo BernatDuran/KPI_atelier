@@ -1,0 +1,3 @@
+table Alternativo
+	column Dia
+		dataType: dateTime

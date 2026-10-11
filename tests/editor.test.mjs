@@ -5,6 +5,20 @@ import path from 'node:path';
 import vm from 'node:vm';
 import {webcrypto} from 'node:crypto';
 
+const originalFetch = globalThis.fetch;
+test.before(() => { globalThis.fetch = async () => { throw new Error('Unexpected network request in editor test'); }; });
+test.after(() => { globalThis.fetch = originalFetch; });
+
+async function withCatalogFetch(run, action) {
+ const previous=globalThis.fetch;
+ globalThis.fetch=async (_url,options)=>{
+  assert.notEqual(options?.method,'POST','Invalid configurations must never reach a model write');
+  const model=run('getPbipModel()');
+  return {ok:true,json:async()=>({...model,detectedDateTables:model.dateTables.map(t=>({table:t.name,dateColumns:t.dateColumns,suggestedColumn:t.primaryDateColumn,isOfficialMarked:t.isMarkedDateTable,tier:1}))})};
+ };
+ try { await action(); } finally { globalThis.fetch=previous; }
+}
+
 function readCss(filePath = 'dist/styles.css') {
   let content = fs.readFileSync(filePath, 'utf8');
   return content.replace(/@import\s+['"]\.\/([^'"]+)['"];/g, (_, rel) => {
@@ -14,16 +28,61 @@ function readCss(filePath = 'dist/styles.css') {
 }
 const appURL=new URL('../dist/app.mjs',import.meta.url);
 async function editor(){
- let source=fs.readFileSync(appURL,'utf8');const context={assert},handlers=new Map(),nodes=new Map(),storage=new Map();
+ let source=fs.readFileSync(appURL,'utf8');const context={assert,__imports:{}},handlers=new Map(),nodes=new Map(),storage=new Map();
  const add=(owner,event,fn)=>{const key=owner+':'+event;handlers.set(key,[...(handlers.get(key)||[]),fn]);};
- for(const match of source.matchAll(/^import \{([^}]+)\} from '([^']+)';$/gm)){const mod=await import(new URL(match[2],appURL));for(const name of match[1].split(','))context[name.trim()]=mod[name.trim()];}
+ // Test helpers are explicit lexical imports; production imports can be pruned
+ // without adding artificial callbacks to the application context.
+ for (const file of ['state','canvas','inspector','modals','model','layout','appearance','elements','bindings','dax','cards','colors','icons','pbip','schema','guides']) {
+  const mod = await import(new URL(`./${file}.mjs`, appURL));
+  for (const [name, value] of Object.entries(mod)) {
+   if (typeof value === 'function') context.__imports[name] = value;
+   else context[name] = value;
+  }
+ }
+ for(const match of source.matchAll(/^import \{([^}]+)\} from '([^']+)';$/gm)){const mod=await import(new URL(match[2],appURL));for(const raw of match[1].split(',')){const name=raw.trim();if(typeof mod[name]==='function')context.__imports[name]=mod[name];else context[name]=mod[name];}}
  source=source.replace(/^import .*;$/gm,'');
  const node=id=>{if(!nodes.has(id))nodes.set(id,{innerHTML:'',textContent:'',dataset:{},style:{setProperty(){}},classList:{add(){},remove(){},toggle(){}},get firstElementChild(){return this;},querySelector(s){return node(s);},querySelectorAll(){return [];},contains(){return false;},addEventListener(event,fn){add(id,event,fn);},setAttribute(){},focus(){},getBoundingClientRect(){return {left:0,top:0,width:100,height:100,right:100,bottom:100};},setPointerCapture(){},hasPointerCapture(){return true;},releasePointerCapture(){},closest(s){if(s.includes(id))return this;return null;},showModal(){this.open=true;},close(){this.open=false;}});return nodes.get(id);};
- const fire=(owner,event,e)=>{for(const f of handlers.get(owner+':'+event)||[])f(e);};
+ const fire=(owner,event,e)=>{e.target??=context.document.activeElement;e.preventDefault??=()=>{};for(const f of handlers.get(owner+':'+event)||[])f(e);};
  const button=dataset=>({dataset,closest(selector){if(selector.includes('button'))return this;if(selector==='[data-layout]'&&dataset.layout)return this;return null;}});
  Object.assign(context,{structuredClone,Date,Intl,crypto:webcrypto,setTimeout(){},clearTimeout(){},requestAnimationFrame(){},localStorage:{getItem(k){return storage.get(k)??null;},setItem(k,v){storage.set(k,v);}},document:{querySelector:node,querySelectorAll(){return [];},activeElement:{tagName:'BODY',focus(){}},getElementById(){return null;},addEventListener(event,fn){add('document',event,fn);},documentElement:node('html')},window:{addEventListener(event,fn){add('window',event,fn);}},fire,button});
- vm.createContext(context);vm.runInContext(source,context);return code=>vm.runInContext(code,context);
+ // Imported functions are lexical bindings, as in ESM. Only app.mjs can register
+ // callbacks on globalThis; the harness must not repair missing registrations.
+ const imports=Object.keys(context.__imports).map(name=>`const ${name}=__imports.${name};`).join('\n');
+ vm.createContext(context);vm.runInContext(imports+'\n'+source,context);return code=>vm.runInContext(code,context);
 }
+test('Production callbacks are explicit and imports do not repair missing context registrations', async () => {
+ const run=await editor();
+ run(`
+  assert.equal(typeof handleStudioClick,'function');
+  assert.equal(Object.hasOwn(globalThis,'handleStudioClick'),false);
+  for(const name of ['updateHistoryButtons','syncElementControls','syncCardControls','rememberInspector','renderCanvasBar','positionSelection','renderGuides','deselect','measureElementFrame']) {
+   assert.equal(typeof globalThis[name],'function','Missing production callback: '+name);
+  }
+  loadDesign(BASE);
+  assert.equal($('[data-action="undo"]').disabled,true);
+  const input={tagName:'INPUT',type:'text',dataset:{key:'title'},value:'Título editado',setAttribute(){}};
+  fire('#app','input',{target:input});
+  assert.equal(c.title,'Título editado');
+  assert.equal($('[data-action="undo"]').disabled,false);
+ `);
+});
+
+test('Large catalogs render bounded dropdowns while searching every measure', async () => {
+ const run = await editor();
+ run(`
+  loadDesign(BASE);
+  setPbipModel({modelName:'Grande',tables:['Medidas'],dateTables:[],measures:Array.from({length:10000},(_,i)=>({name:'Medida '+i,table:'Medidas'}))},false);
+  openDataBindingModal();
+  assert.ok(!$('#modal').innerHTML.includes('<datalist'));
+  const initial = renderBindingDropdown('measure');
+  assert.equal((initial.match(/data-action="select-binding-item"/g)||[]).length,100);
+  assert.ok(initial.includes('10000 coincidencias'));
+  const found = renderBindingDropdown('measure','Medida 9999');
+  assert.equal((found.match(/data-action="select-binding-item"/g)||[]).length,1);
+  assert.ok(found.includes('data-value="Medida 9999"'));
+ `);
+});
+
 test('Dirty-navigation gate lets users stay, discard, or save and continue; save failure keeps edits open',async()=>{
  const run=await editor();run(`
  loadDesign(BASE);assert.equal(dirty(),false);let navigated=0;
@@ -99,22 +158,22 @@ test('Bloque 1: Data Binding Studio opens modal, adapts fields dynamically, and 
  const input={value:'Ventas Nuevas',dataset:{bindKey:'measure'},closest(){return null;}};
  fire('document','input',{target:input});
  assert.equal(c.measure,'Ventas Nuevas');
- assert.equal(c.measureName,'KPI_Ventas_Nuevas');
- assert.equal(c.title,'Ventas Nuevas');
+ assert.equal(c.measureName,'KPI_Clientes_HTML');
+ assert.equal(c.title,'Clientes activos');
  assert.equal(dirty(),true);
 
  const nameInput={value:'KPI_Ventas_Custom',dataset:{bindKey:'measureName'},closest(){return null;}};
  fire('document','input',{target:nameInput});
  assert.equal(c.measureName,'KPI_Ventas_Custom');
- assert.equal(c.title,'Ventas Custom');
+ assert.equal(c.title,'Clientes activos');
  const dax=generateDAX(c);
  assert.ok(dax.startsWith('KPI_Ventas_Custom ='));
- assert.ok(dax.includes('Ventas Custom'));
+ assert.ok(dax.includes('Clientes activos'));
  closeModal();
  `);
 });
 
-test('Bloque 2: PBIP connection bar renders, connects model, injects datalists and supports disconnect',async()=>{
+test('Bloque 2: PBIP connection bar renders, connects model, exposes searchable dropdowns and supports disconnect',async()=>{
  const run=await editor();run(`
  loadDesign(BASE);
  openDataBindingModal();
@@ -143,12 +202,13 @@ test('Bloque 2: PBIP connection bar renders, connects model, injects datalists a
  assert.ok(connectedModal.includes('RetailModel'));
  assert.ok(connectedModal.includes('2 medidas detectadas'));
  assert.ok(connectedModal.includes('⭐ Oficial'));
- assert.ok(connectedModal.includes('id="dl-pbip-measures"'));
- assert.ok(connectedModal.includes('id="dl-pbip-date-tables"'));
- assert.ok(connectedModal.includes('id="dl-pbip-date-columns"'));
+ assert.ok(connectedModal.includes('id="dropdown-menu-measure"'));
+ assert.ok(connectedModal.includes('id="dropdown-menu-dateTable"'));
+ assert.ok(connectedModal.includes('id="dropdown-menu-dateColumn"'));
+ assert.ok(!connectedModal.includes('<datalist'), 'Custom dropdowns must not duplicate the full catalog in hidden native options');
  assert.ok(connectedModal.includes('value="Total Ventas"'));
  assert.ok(connectedModal.includes('value="Calendario"'));
- assert.ok(connectedModal.includes('Fecha oficial'));
+ assert.ok(renderBindingDropdown('dateTable').includes('Fecha oficial'));
 
  tab='data';
  renderInspector();
@@ -165,7 +225,7 @@ test('Bloque 2: PBIP connection bar renders, connects model, injects datalists a
  `);
 });
 
-test('PBIP connection recalculates and overwrites dateTable and dateColumn following hierarchy upon connect and reconnect',async()=>{
+test('PBIP connection preserves document calendars and assigns defaults only to fresh templates',async()=>{
  const run=await editor();run(`
  loadDesign(BASE);
  c={...c,dateTable:'TablaAntigua',dateColumn:'FechaAntigua'};
@@ -183,13 +243,13 @@ test('PBIP connection recalculates and overwrites dateTable and dateColumn follo
  };
 
  setPbipModel(mockModel,true);
- assert.equal(c.dateTable,'DimDate');
- assert.equal(c.dateColumn,'Date');
+ assert.equal(c.dateTable,'TablaAntigua');
+ assert.equal(c.dateColumn,'FechaAntigua');
 
  openDataBindingModal();
  const inputTable=$('#modal').innerHTML;
- assert.ok(inputTable.includes('value="DimDate"'));
- assert.ok(inputTable.includes('value="Date"'));
+ assert.ok(inputTable.includes('value="TablaAntigua"'));
+ assert.ok(inputTable.includes('value="FechaAntigua"'));
 
  fire('document','click',{target:button({action:'disconnect-pbip'})});
  assert.equal(pbipModel,null);
@@ -198,6 +258,9 @@ test('PBIP connection recalculates and overwrites dateTable and dateColumn follo
  assert.equal(c.dateTable,'CustomDate');
 
  setPbipModel(mockModel,true);
+ assert.equal(c.dateTable,'CustomDate');
+ assert.equal(c.dateColumn,'CustomCol');
+ loadDesign(BASE,null,{template:true});
  assert.equal(c.dateTable,'DimDate');
  assert.equal(c.dateColumn,'Date');
  closeModal();
@@ -210,9 +273,9 @@ test('User Polish: Dual connection options, searchable dropdowns, clear button, 
  run(`
  loadDesign(BASE);
 
- // 1. Target measure defaults to empty on open if not customized
+ // 1. Opening settings preserves document bindings, including legacy targets.
  openDataBindingModal();
- assert.equal(c.targetMeasure, '');
+ assert.equal(c.targetMeasure, BASE.targetMeasure);
  closeModal();
 
  // 2. Dual connection switcher exposes both localhost and PBIP folder
@@ -280,7 +343,9 @@ test('User Polish: Dual connection options, searchable dropdowns, clear button, 
  // Measure target formatting with measure name
  applyBindingFieldValue('targetMeasure', 'Meta Ventas');
  const daxWithMeasure = generateDAX(c);
- assert.ok(daxWithMeasure.includes('VAR __Target = [Meta Ventas]'));
+ const targetLine=daxWithMeasure.split(String.fromCharCode(10)).find(line=>line.startsWith('VAR __Target ='));
+ assert.ok(targetLine.includes('CALCULATE ( [Meta Ventas]'));
+ assert.ok(targetLine.includes('TREATAS ( __Dates'));
 
  closeModal();
 
@@ -580,20 +645,24 @@ test('Circular dependency pre-check prevents injection and flags self-referencin
  assert.ok(targetConflict);
  assert.equal(targetConflict.type, 'medida objetivo');
 
- // 2. App injection pre-check: when circular conflict exists, inject-live-measure halts and opens circular modal
+ // 2. The write workflow rechecks the model and opens review for a circular reference.
  setConfig(circularConf);
  setPbipModel({
   isLiveConnection: true,
   server: 'localhost:50000',
   database: 'test-db',
-  reportName: 'Report.pbix',
+  modelName: 'Report', reportName: 'Report.pbix',
+  tables: ['Activities', 'Calendario'], dateTables: [{name:'Calendario',dateColumns:['Fecha']}],
   measures: [{ name: 'Horas Absentismo', table: 'Activities' }]
  });
 
- fire('document', 'click', { target: button({ action: 'inject-live-measure' }) });
- assert.ok($('#modal').innerHTML.includes('Dependencia circular detectada'));
-
- // 3. 1-Click fix circular name updates measureName and resolves issue
+ `);
+ await withCatalogFetch(run, async () => {
+  await run('applyLiveMeasure()');
+  run(`assert.equal($('#modal').className,'measure-review-modal');assert.ok($('#modal').innerHTML.includes('Dependencia circular'));`);
+ });
+ run(`
+ // 3. Fixing the output name resolves the circular reference.
  fire('document', 'click', { target: button({ action: 'fix-circular-name' }) });
  assert.equal(c.measureName, 'KPI_Horas_Absentismo');
  assert.equal(getCircularConflict(c), null);
@@ -630,6 +699,7 @@ test('Pixel-perfect alignment guides (diff <= 0.5), live model pre-validation, a
   isLiveConnection: true,
   server: 'localhost:50000',
   database: 'test-db',
+  modelName: 'Finanzas',
   reportName: 'Finanzas.pbix',
   measures: [
    { name: 'Ventas Reales', table: 'FactVentas' },
@@ -643,7 +713,7 @@ test('Pixel-perfect alignment guides (diff <= 0.5), live model pre-validation, a
 
  // Load fresh template
  const tpl = TEMPLATES.find(t => t.id === 'target-mint') || TEMPLATES[0];
- loadDesign(tpl.config);
+ loadDesign(tpl.config,null,{template:true});
 
  // c.measure must be empty by default on new template
  assert.equal(c.measure, '');
@@ -654,13 +724,13 @@ test('Pixel-perfect alignment guides (diff <= 0.5), live model pre-validation, a
  assert.equal(c.dateTable, 'DimCalendar');
  assert.equal(c.dateColumn, 'Date');
 
- // 3. Pre-check before live injection: missing or empty measures block injection
- fire('document', 'click', { target: button({ action: 'inject-live-measure' }) });
- assert.ok($('#modal').innerHTML.includes('Validación de datos con Power BI'));
- assert.ok($('#modal').innerHTML.includes('Medida principal'));
-
- // Click fix action opens data binding modal
- fire('document', 'click', { target: button({ action: 'fix-missing-model-fields' }) });
+ `);
+ await withCatalogFetch(run, async () => {
+  await run('applyLiveMeasure()');
+  run(`assert.equal($('#modal').className,'measure-review-modal');assert.ok($('#modal').innerHTML.includes('Medida principal'));`);
+ });
+ run(`
+ openDataBindingModal();
  assert.ok($('#modal').innerHTML.includes('Conectar datos del modelo'));
 
  // Bind valid model measure
@@ -670,10 +740,12 @@ test('Pixel-perfect alignment guides (diff <= 0.5), live model pre-validation, a
 
  // Missing target measure blocks injection when required
  applyBindingFieldValue('targetMeasure', 'MedidaInexistente');
- fire('document', 'click', { target: button({ action: 'inject-live-measure' }) });
- assert.ok($('#modal').innerHTML.includes('Validación de datos con Power BI'));
- assert.ok($('#modal').innerHTML.includes('MedidaInexistente'));
-
+ `);
+ await withCatalogFetch(run, async () => {
+  await run('applyLiveMeasure()');
+  run(`assert.equal($('#modal').className,'measure-review-modal');assert.ok($('#modal').innerHTML.includes('MedidaInexistente'));`);
+ });
+ run(`
  // Correct target measure
  applyBindingFieldValue('targetMeasure', 'Objetivo 2026');
  `);
@@ -1717,19 +1789,19 @@ test('A late catalog refresh cannot replace the configuration modal after leavin
 test('Clicking a binding field or label opens its dropdown, repeats keep it open and the chevron or outside close it', async () => {
  const run=await editor();
  run(`
-  loadDesign(BASE);setPbipModel({measures:[{name:'Ventas',table:'Medidas'}],dateTables:[],tables:['Medidas']},false);
+  loadDesign(BASE);setPbipModel({modelName:'Modelo',measures:[{name:'Ventas',table:'Medidas'}],dateTables:[],tables:['Medidas']},false);
   const priorId=document.getElementById,priorQuery=document.querySelectorAll;
   const classes=new Set(),attrs={};
-  const toggle={dataset:{action:'toggle-bind-dropdown',field:'measure'},setAttribute(k,v){attrs[k]=v},classList:{add(){},remove(){}},closest(s){return s.includes('button')?this:s==='[data-binding-field]'?field:s==='.binding-dropdown-wrap'?wrap:null}};
+  const toggle={dataset:{action:'toggle-bind-dropdown',field:'measure'},setAttribute(k,v){attrs[k]=v},classList:{add(){},remove(){}},closest(s){return s.includes('button')?this:s==='[data-binding-field]'?bindingField:s==='.binding-dropdown-wrap'?wrap:null}};
   const wrap={querySelector(s){return s==='.binding-dropdown-toggle'?toggle:s==='.binding-input'?input:null}};
-  const field={dataset:{bindingField:'measure'},querySelector(){return wrap}};
-  const input={setAttribute(){},closest(s){return s==='[data-binding-field]'?field:s==='.binding-dropdown-wrap'?wrap:null}};
+  const bindingField={dataset:{bindingField:'measure'},querySelector(){return wrap}};
+  const input={setAttribute(){},closest(s){return s==='[data-binding-field]'?bindingField:s==='.binding-dropdown-wrap'?wrap:null}};
   const menu={parentElement:wrap,innerHTML:'',classList:{contains(c){return classes.has(c)},add(c){classes.add(c)},remove(c){classes.delete(c)}}};
   document.getElementById=id=>id==='dropdown-menu-measure'?menu:null;
   document.querySelectorAll=s=>s==='.binding-dropdown-menu.is-open'&&classes.has('is-open')?[menu]:[];
   fire('document','click',{target:input});assert.ok(classes.has('is-open'));assert.equal(attrs['aria-expanded'],'true');
   fire('document','click',{target:input});assert.ok(classes.has('is-open'));
-  const label={closest(s){return s==='[data-binding-field]'?field:null}};
+  const label={closest(s){return s==='[data-binding-field]'?bindingField:null}};
   fire('document','click',{target:label});assert.ok(classes.has('is-open'));
   fire('document','click',{target:toggle});assert.ok(!classes.has('is-open'));
   fire('document','click',{target:label});assert.ok(classes.has('is-open'));
@@ -1742,7 +1814,7 @@ test('Exports with missing or unverified references require confirmation, preser
  const run=await editor();
  run(`
   loadDesign(BASE);c={...c,measure:'Ventas',measureName:'KPI_Ventas',targetMeasure:'100',_measureBound:true,_targetCustomized:true,elements:{value_copy1:{}}};
-  setPbipModel({measures:[{name:'Ventas',table:'Medidas'}],tables:['Medidas','Calendario'],dateTables:[{name:'Calendario',dateColumns:['Fecha']}]},false);
+  setPbipModel({modelName:'Modelo',measures:[{name:'Ventas',table:'Medidas'}],tables:['Medidas','Calendario'],dateTables:[{name:'Calendario',dateColumns:['Fecha']}]},false);
   exportModal();let exported=0;
   requestExport(()=>exported++);assert.equal(exported,0);assert.equal($('#modal').className,'export-warning-modal');
   assert.ok($('#modal').innerHTML.includes('Sin configurar'));
@@ -1767,7 +1839,7 @@ test('Power BI creation and overwrite block empty copies and recheck references 
    measures:[{name:'Ventas',table:'Medidas'},...(!absent?[{name:'Unidades',table:'Medidas'}]:[]),...(existing?[{name:'KPI_Ventas',table:'Medidas'}]:[])],
    detectedDateTables:[{table:'Calendario',dateColumns:['Fecha'],suggestedColumn:'Fecha',isOfficialMarked:true,tier:1}]})};
  };
- const inject=async()=>{run("fire('document','click',{target:button({action:'inject-live-measure'})});");for(let i=0;i<4;i++)await new Promise(setImmediate);};
+ const inject=async()=>{await run('applyLiveMeasure()');};
  const setup=(hasExisting=false)=>run(`
   loadDesign(BASE);c={...c,measure:'Ventas',measureName:'KPI_Ventas',targetMeasure:'100',_measureBound:true,_targetCustomized:true,elements:{value_copy1:{measure:''}}};
   setPbipModel({modelName:'Modelo',reportName:'Informe',isLiveConnection:true,server:'localhost:1234',database:'db',tables:['Medidas','Calendario'],measures:[{name:'Ventas',table:'Medidas'},{name:'Unidades',table:'Medidas'}${hasExisting?",{name:'KPI_Ventas',table:'Medidas'}":''}],dateTables:[{name:'Calendario',dateColumns:['Fecha']}]},false);
@@ -1776,20 +1848,21 @@ test('Power BI creation and overwrite block empty copies and recheck references 
   setup();
   await inject();
   assert.equal(writes.length,0);
-  run("assert.equal($('#modal').className,'missing-refs-modal');assert.ok($('#modal').innerHTML.includes('Falta configurar')); ");
+  run("assert.equal($('#modal').className,'measure-review-modal');assert.ok($('#modal').innerHTML.includes('Sin configurar')); ");
   setup(true);existing=true;
   await inject();
   assert.equal(writes.length,0);
-  run("assert.equal($('#modal').className,'missing-refs-modal');");
+  run("assert.equal($('#modal').className,'measure-review-modal');");
   setup();existing=false;absent=true;
   run("c.elements.value_copy1.measure='Unidades';");
   await inject();
   assert.equal(writes.length,0);
   run("assert.equal($('#modal').className,'measure-review-modal');assert.ok($('#modal').innerHTML.includes('No encontrada'));assert.ok(/data-action=\"inject-live-measure\" disabled/.test($('#modal').innerHTML));");
-  setup(true);existing=true;
+  setup(true);existing=true;absent=false;
   run("c.elements.value_copy1.measure='Unidades';");
   await inject();
   run("assert.ok($('#modal').innerHTML.includes('Confirmar sobrescritura')); ");
+  absent=true;
   await run('getPendingInjectAction()()');
   assert.equal(writes.length,0);
   run("assert.equal($('#modal').className,'measure-review-modal');");

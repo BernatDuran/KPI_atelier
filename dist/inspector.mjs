@@ -22,7 +22,7 @@ import { COLOR_ROLES } from './colors.mjs';
 import { ICON_OPTIONS } from './icons.mjs';
 import {
   $, btn, ib, getC, setC, getBaseline, setBaseline, dirty,
-  persist, record, toast, getSelectedElement, setSelectedElement,
+  persist, record, recordEdit, toast, getSelectedElement, setSelectedElement,
   getSelectedElements, getCardSelected, setCardSelected,
   getMode, setMode, getTab, setTab, getMoveStep, setMoveStep,
   inspectorSections, inspectorPositions, getPbipModel,
@@ -258,12 +258,10 @@ export function editAppearance(input) {
   if (key === 'backgroundMode' && value === 'custom' && p.backgroundMode !== 'custom') patch.backgroundColor = (p.backgroundMode === 'none' ? (id === 'progress' ? c.muted : elementColor(c, id, data)) : elementBackground(c, id, data).slice(0, 7));
   if (key === 'fillMode' && value === 'custom' && p.fillMode !== 'custom') patch.fillColor = trendFill(c, id);
 
-  const ctx = getActiveContext();
-  const now = Date.now();
-  if (now - (ctx.lastEdit || 0) > 700 || input.tagName === 'SELECT') record();
-  ctx.lastEdit = now;
-
-  setC(sanitizeConfig(updateElement(c, id, patch)));
+  const next = sanitizeConfig(updateElement(c, id, patch));
+  if (JSON.stringify(next) === JSON.stringify(c)) return;
+  recordEdit(`appearance:${id}:${key}`, input.tagName === 'SELECT');
+  setC(next);
   persist();
   callRefreshCard();
   updateHistoryButtons();

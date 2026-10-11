@@ -130,5 +130,16 @@ export function resizeCard(c,width=c.width,height=c.height,adaptive=true){
  if(adaptive)return adaptiveResizeCard(c,width,height);
  return {...freezeLayout(c),width:clamp(Math.round(width),...CARD_LIMITS.width),height:clamp(Math.round(height),...CARD_LIMITS.height)};
 }
-export function applyLayout(c,layout){return {...c,geometryVersion:2,layout,elements:Object.fromEntries(ELEMENT_IDS.map(id=>{const p={...elementState(c,id),x:0,y:0,width:0};delete p.frame;return [id,p]}))};}
+export function applyLayout(c,layout){
+ if(!['stacked','chart-left','chart-right'].includes(layout))return c;
+ const elements={...c.elements};
+ for(const id of ELEMENT_IDS){
+  const state={...elementState(c,id),x:0,y:0,width:0};
+  delete state.frame;
+  elements[id]=state;
+ }
+ // Copies are independent objects: changing the base arrangement must preserve
+ // their geometry, content, bindings and position in the layer stack.
+ return {...c,geometryVersion:2,layout,elements};
+}
 export function chartDimensions(c,elementId='trend'){const p=elementState(c,elementId),f=elementFrame(c,elementId);const w=p.width||f?.width||(c.width-2*c.padding-2*c.borderWidth);const h=p.size||(elementId==='trend'?c.trendHeight:p.trendHeight)||c.trendHeight||75;return {width:Math.max(24,w),height:h};}

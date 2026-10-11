@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  scanFileList, scanDirectoryHandle, PBIP_LIMITS,
   parseTmdl,
   parseBim,
   buildModelCatalog,
@@ -242,4 +243,29 @@ test('buildModelCatalog aggregates multiple TMDL parsed tables into sorted catal
 
   assert.equal(catalog.dateTables[1].name, 'FactVentas');
   assert.equal(catalog.dateTables[1].isMarkedDateTable, false);
+});
+
+
+const modelFile = (path, content, size=content.length) => ({name:path.split('/').pop(),webkitRelativePath:path,size,text:async()=>content});
+test('Folder parser isolates one model and ignores non-table TMDL metadata',async()=>{
+ const files=[modelFile('Project/Ventas.SemanticModel/definition/tables/Medidas.tmdl','table Medidas\n\tmeasure Ingresos = 1'),modelFile('Project/Ventas.SemanticModel/definition/database.tmdl','database Model'),modelFile('Project/Ventas.SemanticModel/definition/model.tmdl','model Model')];
+ const catalog=await scanFileList(files);
+ assert.equal(catalog.modelName,'Ventas');assert.deepEqual(catalog.tables,['Medidas']);assert.equal(catalog.measures[0].name,'Ingresos');
+ await assert.rejects(scanFileList([...files,modelFile('Project/Otro.SemanticModel/definition/tables/Medidas.tmdl','table Otra')]),/varios modelos/);
+});
+
+test('PBIP scans enforce file budgets and respect cancellation before reading',async()=>{
+ let reads=0;
+ const oversized={...modelFile('Ventas.SemanticModel/model.bim','{}',PBIP_LIMITS.maxFileBytes+1),text:async()=>{reads++;return '{}';}};
+ await assert.rejects(scanFileList([oversized]),/10 MB/);assert.equal(reads,0);
+ const controller=new AbortController();controller.abort();
+ await assert.rejects(scanFileList([oversized],{signal:controller.signal}),{name:'AbortError'});
+ await assert.rejects(scanFileList(Array(PBIP_LIMITS.maxEntries+1).fill(oversized)),/demasiados/);
+});
+
+test('Directory picker shares the same isolated catalog parsing as file-list fallback',async()=>{
+ const table=modelFile('Medidas.tmdl','table Medidas\n\tmeasure Ventas = 42');
+ const directory={name:'Ventas.SemanticModel',async *values(){yield {kind:'file',name:table.name,getFile:async()=>table};}};
+ assert.deepEqual((await scanDirectoryHandle(directory)).measures,[{name:'Ventas',table:'Medidas'}]);
+ await assert.rejects(scanFileList([modelFile('model.bim','null')]),/BIM/);
 });

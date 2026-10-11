@@ -46,11 +46,12 @@ test('kpi-atelier.cmd Windows launcher script exists and configures App Mode', (
   const cmdPath = path.join(root, 'kpi-atelier.cmd');
   assert.equal(existsSync(cmdPath), true, 'kpi-atelier.cmd must exist');
 
-  const content = readFileSync(cmdPath, 'utf8');
+  const content = readFileSync(path.join(root, 'scripts/launch.ps1'), 'utf8');
   assert.equal(content.includes('8080'), true, 'launcher must reference default port 8080');
-  assert.equal(content.includes('scripts\\serve.mjs'), true, 'launcher must start serve.mjs if offline');
+  assert.equal(content.includes("'serve.mjs'"), true, 'launcher must start serve.mjs if offline');
   assert.equal(content.includes('--app='), true, 'launcher must invoke msedge with --app for chromeless window');
-  assert.equal(content.includes('%SERVER_ARG%'), true, 'launcher must pass server parameter');
+  assert.equal(content.includes('EscapeDataString($env:KPI_LAUNCH_SERVER)'), true, 'launcher must encode server parameter');
+  assert.equal(content.includes("$health.app -eq 'kpi-atelier'"), true, 'launcher must verify app identity');
 });
 
 test('scripts/install-pbitool.ps1 and uninstall-pbitool.ps1 exist and target External Tools directory', () => {

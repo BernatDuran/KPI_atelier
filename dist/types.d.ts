@@ -31,10 +31,10 @@ export type FillMode = 'linked' | 'custom';
 export type ElementKind = 'text' | 'icon' | 'chart' | 'bar';
 
 export interface ElementFrame {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
 }
 
 export interface ElementAppearance {

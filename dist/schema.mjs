@@ -5,7 +5,7 @@
  */
 
 import {BASE, LIMITS, ENUMS, THEMES} from './model.mjs';
-import {ELEMENTS, ELEMENT_IDS, DEFAULT_LAYER_ORDER, resolveElementDef} from './elements.mjs';
+import {resolveElementDef} from './elements.mjs';
 
 export const HEX_COLOR_REGEX = /^#[0-9a-fA-F]{6}$/;
 
@@ -109,6 +109,14 @@ export const CONFIG_SCHEMA = {
   sampleSeries: { type: 'string', maxLength: 2000 }
 };
 
+// Derive all numeric bounds from the same contract used by the editor sanitizer.
+const integerFields = new Set(['geometryVersion', 'width', 'height', 'decimals', 'maxPoints']);
+for (const [key, bounds] of Object.entries(LIMITS)) CONFIG_SCHEMA[key] = {type:'number', min:bounds[0], max:bounds[1], integer:integerFields.has(key)};
+for (const [key, value] of Object.entries(BASE)) {
+  if (CONFIG_SCHEMA[key] || ['elements', 'layerOrder'].includes(key)) continue;
+  CONFIG_SCHEMA[key] = ENUMS[key] ? {type:'enum', values:ENUMS[key]} : typeof value === 'number' ? {type:'number', min:-1e15, max:1e15} : {type:typeof value};
+}
+
 /**
  * Validates an individual element customization payload against schema contracts.
  * @param {string} id
@@ -132,7 +140,7 @@ export function validateElementCustomization(id, el) {
   for (const coord of ['x', 'y']) {
     if (coord in el) {
       const v = Number(el[coord]);
-      if (!Number.isFinite(v) || v < -1000 || v > 1000) {
+      if (typeof el[coord] !== 'number' || !Number.isFinite(v) || v < -1000 || v > 1000) {
         errors.push(`Element ${id}.${coord} must be a number between -1000 and 1000`);
       }
     }
@@ -140,14 +148,14 @@ export function validateElementCustomization(id, el) {
 
   if ('width' in el) {
     const w = Number(el.width);
-    if (!Number.isFinite(w) || w < 0 || w > 800) {
+    if (typeof el.width !== 'number' || !Number.isFinite(w) || w < 0 || w > 800) {
       errors.push(`Element ${id}.width must be a number between 0 and 800`);
     }
   }
 
   if ('size' in el) {
     const s = Number(el.size);
-    if (!Number.isFinite(s) || s < 6 || s > 240) {
+    if (typeof el.size !== 'number' || !Number.isFinite(s) || s < 6 || s > 240) {
       errors.push(`Element ${id}.size must be a number between 6 and 240`);
     }
   }
@@ -159,18 +167,21 @@ export function validateElementCustomization(id, el) {
     }
   }
 
-  // Frame check
-  if ('frame' in el && el.frame) {
-    if (typeof el.frame !== 'object') {
-      errors.push(`Element ${id}.frame must be an object`);
-    } else {
-      for (const k of ['x', 'y', 'w', 'h']) {
-        if (k in el.frame && !Number.isFinite(Number(el.frame[k]))) {
-          errors.push(`Element ${id}.frame.${k} must be finite`);
-        }
-      }
+  for (const [key, min, max] of [['opacity',0,100],['backgroundOpacity',0,100],['fillOpacity',0,1],['lineWidth',1,6],['decimals',0,3],['donutThickness',4,28]]) {
+    if (key in el && (typeof el[key] !== 'number' || !Number.isFinite(el[key]) || el[key] < Number(min) || el[key] > Number(max) || key === 'decimals' && !Number.isInteger(el[key]))) errors.push(`Element ${id}.${key} is outside its numeric contract`);
+  }
+  for (const key of ['hidden','deleted','showMin','showMax','showDot','showMarkerGuides','zeroBase','donutLabel']) if (key in el && typeof el[key] !== 'boolean') errors.push(`Element ${id}.${key} must be boolean`);
+  // Geometry uses left/top/width/height, including fractional pixel positions.
+  if ('frame' in el && el.frame !== null) {
+    if (!el.frame || typeof el.frame !== 'object' || Array.isArray(el.frame)) errors.push(`Element ${id}.frame must be an object`);
+    else for (const k of ['left', 'top', 'width', 'height']) {
+      const v = el.frame[k];
+      if (typeof v !== 'number' || !Number.isFinite(v) || (['width','height'].includes(k) && v < 0)) errors.push(`Element ${id}.frame.${k} must be a finite ${['width','height'].includes(k)?'non-negative ':''}number`);
     }
   }
+  for (const key of ['measure','dateTable','dateColumn','targetMeasure','compareMeasure','statusGood','statusWarn','statusBad','text']) if (key in el && typeof el[key] !== 'string') errors.push(`Element ${id}.${key} must be a string`);
+  for (const key of ['goodThreshold','warnThreshold']) if (key in el && (typeof el[key] !== 'number' || !Number.isFinite(el[key]))) errors.push(`Element ${id}.${key} must be finite`);
+  for (const key of ['comparison','direction','format','unit','currency','deltaMode','chartKind','trendStyle','trendCurve','areaFill','granularity']) if (key in el && !ENUMS[key].includes(el[key])) errors.push(`Element ${id}.${key} is invalid`);
 
   return { valid: errors.length === 0, errors, warnings };
 }
@@ -197,7 +208,7 @@ export function validateCardConfig(raw, options = {}) {
   // Check defined properties
   for (const [key, rule] of Object.entries(CONFIG_SCHEMA)) {
     const val = raw[key];
-    if (val === undefined || val === null) {
+    if (val === undefined) {
       if (options.requireAll && rule.required) {
         errors.push(`Missing required field: '${key}'`);
       }
@@ -219,9 +230,10 @@ export function validateCardConfig(raw, options = {}) {
 
       case 'number': {
         const num = Number(val);
-        if (!Number.isFinite(num)) {
+        if (typeof val !== 'number' || !Number.isFinite(num)) {
           errors.push(`Field '${key}' must be a finite number: received '${val}'`);
         } else {
+          if (rule.integer && !Number.isInteger(num)) errors.push(`Field '${key}' must be an integer`);
           if (rule.min !== undefined && num < rule.min) {
             errors.push(`Field '${key}' is below minimum ${rule.min}: received ${num}`);
           }
@@ -234,7 +246,7 @@ export function validateCardConfig(raw, options = {}) {
 
       case 'boolean':
         if (typeof val !== 'boolean') {
-          warnings.push(`Field '${key}' expected boolean, received ${typeof val}`);
+          errors.push(`Field '${key}' expected boolean, received ${typeof val}`);
         }
         break;
 
@@ -296,7 +308,7 @@ export function validateCardConfig(raw, options = {}) {
 
 /**
  * Validates and safely parses an imported JSON configuration string or object payload.
- * Serves as an impenetrable contract barrier against malformed or malicious imported files.
+ * Validates configuration shape before the editor normalizes legacy values.
  * @param {string | object} rawInput
  * @param {{ strictUnknown?: boolean }} [options]
  * @returns {{ valid: boolean, errors: string[], warnings: string[], config?: import('./types.d.ts').CardConfig, metadata?: object }}
@@ -323,6 +335,8 @@ export function validateImportedJSON(rawInput, options = {}) {
     };
   }
 
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {valid:false, errors:['Configuration must be an object'], warnings:[]};
+  if ('config' in parsed && (!parsed.config || typeof parsed.config !== 'object' || Array.isArray(parsed.config))) return {valid:false, errors:['Configuration envelope must contain an object config'], warnings:[]};
   // Inspect payload wrapper structure (supports either raw CardConfig or { version, config, ... } envelope)
   let targetConfig = parsed;
   let metadata = {};
@@ -337,6 +351,7 @@ export function validateImportedJSON(rawInput, options = {}) {
     };
   }
 
+  if (!Object.keys(targetConfig).some(key => Object.hasOwn(BASE, key))) return {valid:false, errors:['Payload does not contain card configuration fields'], warnings:[]};
   const result = validateCardConfig(targetConfig, options);
 
   return {
@@ -361,4 +376,32 @@ export function isCardConfig(value) {
     typeof value.type === 'string' &&
     typeof value.width === 'number' &&
     typeof value.height === 'number';
+}
+
+/** Validate catalogs before using local cache or external bridge responses. */
+export function validateModelCatalog(value) {
+  const errors = [];
+  const name = v => typeof v === 'string' && v.trim().length > 0 && v.length <= 512;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {valid:false, errors:['Model catalog must be an object']};
+  if (!name(value.modelName)) errors.push('modelName must be a non-empty string');
+  if (!Array.isArray(value.tables) || !value.tables.every(name)) errors.push('tables must contain table names');
+  if (!Array.isArray(value.measures) || !value.measures.every(m => m && name(m.name) && name(m.table))) errors.push('measures must contain name and table');
+  if (!Array.isArray(value.dateTables) || !value.dateTables.every(t => t && name(t.name) && Array.isArray(t.dateColumns) && t.dateColumns.every(name))) errors.push('dateTables must contain named date columns');
+  return {valid:errors.length === 0, errors};
+}
+
+/** Return an isolated catalog with known metadata only; invalid caches are discarded. */
+export function sanitizeModelCatalog(raw) {
+  if (!validateModelCatalog(raw).valid) return null;
+  return {
+    modelName: raw.modelName,
+    reportName: typeof raw.reportName === 'string' ? raw.reportName : '',
+    server: typeof raw.server === 'string' ? raw.server : '',
+    database: typeof raw.database === 'string' ? raw.database : '',
+    databaseId: typeof raw.databaseId === 'string' ? raw.databaseId : '',
+    isLiveConnection: raw.isLiveConnection === true,
+    tables: [...raw.tables],
+    measures: raw.measures.map(m => ({name:m.name, table:m.table, expression:typeof m.expression === 'string' ? m.expression : '', formatString:typeof m.formatString === 'string' ? m.formatString : '', configAnnotation:m.configAnnotation && validateImportedJSON(m.configAnnotation).valid ? structuredClone(validateImportedJSON(m.configAnnotation).config) : null})),
+    dateTables: raw.dateTables.map(t => ({name:t.name, dateColumns:[...t.dateColumns], isMarkedDateTable:t.isMarkedDateTable === true, primaryDateColumn:t.dateColumns.includes(t.primaryDateColumn) ? t.primaryDateColumn : t.dateColumns[0] || null, isLikelyCalendar:t.isLikelyCalendar === true}))
+  };
 }

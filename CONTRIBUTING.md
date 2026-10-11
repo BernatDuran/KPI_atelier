@@ -7,7 +7,9 @@ Gracias por tu interés en contribuir a **KPI Atelier**. Para mantener la calida
 ## 1. Arquitectura de Software y Principios
 
 - **Vanilla ES Modules (Sin bundler ni build step)**: El código en `dist/` se ejecuta directamente en navegadores modernos y se sirve con Node.js estándar. No introduzcas bundlers invasivos ni dependencias externas pesadas innecesarias.
-- **Privacidad y Aislamiento**: KPI Atelier no envía telemetría ni datos del modelo a servicios externos. Todo el cálculo de medidas DAX y generación de tarjetas SVG/HTML se realiza localmente.
+- **Privacidad y aislamiento**: la lectura de metadatos, el diseño y la generación DAX se realizan localmente. La aplicación no evalúa medidas del modelo; Power BI lo hace al utilizar la medida generada. No hay telemetría del modelo. La tipografía puede solicitar recursos de Google Fonts.
+- **Módulos con responsabilidades concretas**: `app.mjs` coordina; estado, interfaz general, inspector, vínculos, estudio de color, conexión y escritura tienen módulos propios. Mantén las dependencias explícitas y evita añadir otra responsabilidad grande al coordinador. Consulta `ARQUITECTURA_ES.md`.
+- **Frontera del backend**: conserva las comprobaciones de Host/origen, límites de solicitudes y destinos explícitos. Una escritura de resultado incierto nunca debe repetirse automáticamente. Los conflictos requieren refrescar y revisar el destino.
 - **Pruebas Automatizadas Obligatorias**: Todo cambio en generadores DAX, esquemas JSON, parseo TMDL/TMSL o geometría de tarjetas debe incluir o actualizar pruebas en `tests/`.
 
 ---
@@ -16,12 +18,11 @@ Gracias por tu interés en contribuir a **KPI Atelier**. Para mantener la calida
 
 1. **Ramas Principales**:
    - `main`: Código en producción, siempre estable y probado. Cada versión desplegada se marca con un tag semántico (ej. `v1.4.0`).
-   - `develop`: Rama de integración donde convergen las nuevas funcionalidades antes de pasar a `main`.
+   - `dev`: Rama de integración de este trabajo. Los cambios actuales se mantienen aquí; no se fusionan en `main` sin una decisión explícita.
 
 2. **Ramas de Trabajo**:
-   - Funcionalidades: `feature/nombre-descriptivo` (desde `develop`)
-   - Correcciones de errores: `fix/descripcion-del-bug` (desde `develop` o `hotfix/` si es crítico sobre `main`)
-   - Documentación o tareas de soporte: `docs/tema`, `chore/tarea`
+   - Respeta la rama solicitada para la tarea. Si se autoriza una rama adicional, usa un nombre descriptivo y parte de `dev`; los agentes Codex utilizan el prefijo `codex/` por defecto.
+   - No incluyas cambios ajenos ni promociones automáticamente una rama a producción.
 
 ---
 
@@ -59,11 +60,17 @@ test(pbip): add edge-case test for unquoted TMDL table names
 
 ## 4. Verificación y Calidad antes de Enviar Cambios
 
-Antes de hacer commit o abrir una Pull Request:
+Utiliza Node.js 22 o superior. El runtime no necesita dependencias de producción, pero las herramientas de desarrollo sí requieren instalación:
 
-1. Ejecuta la suite de pruebas completa:
-   ```bash
-   node --test tests/*.test.mjs
-   ```
-2. Asegúrate de que los 73 tests (o más) pasen sin fallos.
-3. Comprueba que no se hayan añadido archivos temporales, logs o claves secretas.
+```bash
+npm ci
+npm run typecheck
+npm test
+npm run test:browser
+```
+
+`npm run check` agrupa estas comprobaciones. Playwright utiliza Microsoft Edge en local y Chromium en CI; en CI se instala con `npx playwright install --with-deps chromium`. El servidor de pruebas ocupa el puerto 8098 y tiene almacenamiento separado del puerto habitual de la aplicación.
+
+La CI ejecuta comprobación de tipos y tests con Node 22/24 en Windows y Linux, además de regresiones reales del editor en navegador. Las pruebas específicas de PowerShell se omiten cuando no están en Windows. Añade regresiones que reproduzcan la conducta pública, especialmente para eventos, historial, importación, contratos HTTP y escrituras inciertas; evita depender solo de un DOM simulado.
+
+Los tests comprueban código y contratos, no ejecutan DAX ni evalúan relaciones en un modelo semántico real. Indica en la descripción del cambio qué se comprobó y qué requiere Power BI Desktop. Comprueba también `git diff --check` y que no se incluyan archivos temporales, trazas, secretos ni cambios fuera del alcance.

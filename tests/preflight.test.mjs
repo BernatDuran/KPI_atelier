@@ -88,3 +88,24 @@ test('Each duplicate field verifies its own catalog entry, including its date co
   result = reviewMeasure(c, model);
   assert.equal(result.valid, true);
 });
+
+
+test('Review checks an explicit copied status measure and accepts inherited main values',()=>{
+ const custom=config({type:'status',elements:{status_copy1:{measure:'No existe'}}});
+ assert.equal(reviewMeasure(custom,model).valid,false);
+ assert.ok(reviewMeasure(custom,model).missing.some(x=>x.field==='status_copy1'));
+ assert.equal(reviewMeasure(config({type:'status',elements:{status_copy1:{}}}),model).valid,true);
+});
+
+
+test('Large catalogs resolve every copied binding with a single indexed review', t => {
+  const catalog={modelName:'Large model',tables:['Medidas','Calendario'],measures:Array.from({length:10000},(_,i)=>({name:`Metric ${i}`,table:'Medidas'})),dateTables:[{name:'Calendario',dateColumns:['Fecha']}]};
+  const elements=Object.fromEntries(Array.from({length:100},(_,i)=>[`value_copy${i+1}`,{measure:`Metric ${9900+i}`}]));
+  const card=config({measure:'Metric 9999',targetMeasure:'100',comparison:'none',elements});
+  const start=performance.now();
+  const review=reviewMeasure(card,catalog);
+  const elapsed=performance.now()-start;
+  assert.equal(review.valid,true);assert.equal(review.missing.length,0);
+  for(let i=1;i<=100;i++)assert.equal(review.fields[`value_copy${i}`].status,'ok');
+  t.diagnostic(`10,000 measures + 100 copies reviewed in ${elapsed.toFixed(1)} ms (observed; no machine-dependent timing assertion).`);
+});

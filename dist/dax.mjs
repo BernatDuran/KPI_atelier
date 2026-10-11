@@ -11,16 +11,16 @@ export const measureRef = s => {
  return '[' + v.replaceAll(']', ']]') + ']';
 };
 export const isNumericLiteral = s => {
- if (typeof s === 'number') return true;
+ if (typeof s === 'number') return Number.isFinite(s);
  if (typeof s !== 'string') return false;
  const t = s.trim();
- return t !== '' && !isNaN(Number(t)) && !/^[\[\]]/.test(t);
+ return /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(t) && Number.isFinite(Number(t));
 };
 
 export const targetRef = s => {
  if (!s && s !== 0) return 'BLANK ()';
  const trimmed = String(s).trim();
- if (isNumericLiteral(trimmed)) return trimmed;
+ if (isNumericLiteral(trimmed)) return String(Number(trimmed));
  return measureRef(trimmed);
 };
 
@@ -43,6 +43,51 @@ function formatted(v, c) {
   : `SWITCH ( TRUE (), ABS ( ${v} ) >= 1000000, " M", ABS ( ${v} ) >= 1000, " mil", "" )`;
  const suffix = esc((c.format === 'currency' ? ' ' + ({EUR: '€', USD: '$', GBP: '£'}[c.currency]) : '') + (c.suffix ? ' ' + c.suffix : ''));
  return `IF ( ISBLANK ( ${v} ), "—", FORMAT ( DIVIDE ( ${v}, ${divisor} ), ${quote(pattern)}, __Cfg_Locale ) & ${unit} & ${quote(suffix)} )`;
+}
+
+
+function periodDAX(table, date, m, suffix = '') {
+ let code = `// ============================================================================\n` +
+   `// 2. PERÍODO: FILTROS DE CALENDARIO O ÚLTIMOS 12 MESES MÓVILES CON DATOS (FASE A)\n` +
+   `// ============================================================================\n` +
+   `VAR __HasCalendarFilter${suffix} = ISFILTERED ( ${table} )\n` +
+   `VAR __LastDataDate${suffix} = IF (\n` +
+   `    NOT __HasCalendarFilter${suffix},\n` +
+   `    MAXX (\n` +
+   `        CALCULATETABLE (\n` +
+   `            LASTNONBLANK ( ${date}, ${m} ),\n` +
+   `            REMOVEFILTERS ( ${table} )\n` +
+   `        ),\n` +
+   `        ${date}\n` +
+   `    )\n` +
+   `)\n` +
+   `VAR __DefaultStart${suffix} = IF ( NOT ISBLANK ( __LastDataDate${suffix} ), EDATE ( __LastDataDate${suffix}, -12 ) + 1 )\n` +
+   `VAR __Dates${suffix} = CALCULATETABLE (\n` +
+   `    VALUES ( ${date} ),\n` +
+   `    KEEPFILTERS (\n` +
+   `        FILTER (\n` +
+   `            ALL ( ${date} ),\n` +
+   `            NOT ISBLANK ( ${date} )\n` +
+   `                && (\n` +
+   `                    __HasCalendarFilter${suffix}\n` +
+   `                        || (\n` +
+   `                            NOT ISBLANK ( __LastDataDate${suffix} )\n` +
+   `                                && ${date} >= __DefaultStart${suffix}\n` +
+   `                                && ${date} <= __LastDataDate${suffix}\n` +
+   `                        )\n` +
+   `                )\n` +
+   `        )\n` +
+   `    )\n` +
+   `)\n` +
+   `VAR __DateCount${suffix} = COUNTROWS ( __Dates${suffix} )\n` +
+   `VAR __HasDates${suffix} = __DateCount${suffix} > 0\n` +
+   `VAR __Start${suffix} = MINX ( __Dates${suffix}, ${date} )\n` +
+   `VAR __End${suffix} = MAXX ( __Dates${suffix}, ${date} )\n` +
+   `VAR __Span${suffix} = IF ( __HasDates${suffix}, INT ( __End${suffix} - __Start${suffix} ) + 1 )\n` +
+   `VAR __IsDiscontinuous${suffix} = __HasDates${suffix} && __DateCount${suffix} <> __Span${suffix}\n` +
+   `// El valor actual se evalúa sobre el mismo conjunto de fechas exactas que la tendencia.\n` +
+   `VAR __Current${suffix} = IF ( __HasDates${suffix}, CALCULATE ( ${m}, REMOVEFILTERS ( ${table} ), TREATAS ( __Dates${suffix}, ${date} ) ) )\n`;
+ return code;
 }
 
 export function generateDAX(c, { allowIncomplete = false } = {}) {
@@ -92,53 +137,16 @@ export function generateDAX(c, { allowIncomplete = false } = {}) {
   }).join('') + `\n`;
 
  if (dateNeeded) {
-  code += `// ============================================================================\n` +
-   `// 2. PERÍODO: FILTROS DE CALENDARIO O ÚLTIMOS 12 MESES MÓVILES CON DATOS (FASE A)\n` +
-   `// ============================================================================\n` +
-   `VAR __HasCalendarFilter = ISFILTERED ( ${table} )\n` +
-   `VAR __LastDataDate = IF (\n` +
-   `    NOT __HasCalendarFilter,\n` +
-   `    MAXX (\n` +
-   `        CALCULATETABLE (\n` +
-   `            LASTNONBLANK ( ${date}, ${m} ),\n` +
-   `            REMOVEFILTERS ( ${table} )\n` +
-   `        ),\n` +
-   `        ${date}\n` +
-   `    )\n` +
-   `)\n` +
-   `VAR __DefaultStart = IF ( NOT ISBLANK ( __LastDataDate ), EDATE ( __LastDataDate, -12 ) + 1 )\n` +
-   `VAR __Dates = CALCULATETABLE (\n` +
-   `    VALUES ( ${date} ),\n` +
-   `    KEEPFILTERS (\n` +
-   `        FILTER (\n` +
-   `            ALL ( ${date} ),\n` +
-   `            NOT ISBLANK ( ${date} )\n` +
-   `                && (\n` +
-   `                    __HasCalendarFilter\n` +
-   `                        || (\n` +
-   `                            NOT ISBLANK ( __LastDataDate )\n` +
-   `                                && ${date} >= __DefaultStart\n` +
-   `                                && ${date} <= __LastDataDate\n` +
-   `                        )\n` +
-   `                )\n` +
-   `        )\n` +
-   `    )\n` +
-   `)\n` +
-   `VAR __DateCount = COUNTROWS ( __Dates )\n` +
-   `VAR __HasDates = __DateCount > 0\n` +
-   `VAR __Start = MINX ( __Dates, ${date} )\n` +
-   `VAR __End = MAXX ( __Dates, ${date} )\n` +
-   `VAR __Span = IF ( __HasDates, INT ( __End - __Start ) + 1 )\n` +
-   `VAR __IsDiscontinuous = __HasDates && __DateCount <> __Span\n` +
-   `// El valor actual se evalúa sobre el mismo conjunto de fechas exactas que la tendencia.\n` +
-   `VAR __Current = IF ( __HasDates, CALCULATE ( ${m}, REMOVEFILTERS ( ${table} ), TREATAS ( __Dates, ${date} ) ) )\n`;
+  code += periodDAX(table, date, m);
  } else {
   code += `VAR __Current = ${m}\n` +
    `VAR __HasDates = FALSE ()\n` +
    `VAR __IsDiscontinuous = FALSE ()\n`;
  }
 
- code += `VAR __Target = ${target ? targetRef(c.targetMeasure) : 'BLANK ()'}\n`;
+ // Measures share the exact calendar window; literal objectives remain constants.
+ const inPeriod = expr => dateNeeded && expr !== 'BLANK ()' && !isNumericLiteral(expr) ? `IF ( __HasDates, CALCULATE ( ${expr}, REMOVEFILTERS ( ${table} ), TREATAS ( __Dates, ${date} ) ) )` : expr;
+ code += `VAR __Target = ${target ? inPeriod(targetRef(c.targetMeasure)) : 'BLANK ()'}\n`;
 
  if (needsCompare(c) && ['yoy', 'mom'].includes(c.comparison)) {
   code += `// ============================================================================\n` +
@@ -157,10 +165,10 @@ export function generateDAX(c, { allowIncomplete = false } = {}) {
    `// ============================================================================\n` +
    `VAR __CalendarDates = CALCULATETABLE ( VALUES ( ${date} ), REMOVEFILTERS ( ${table} ) )\n` +
    `VAR __PreviousDates = FILTER ( __CalendarDates, ${date} >= __Start - __Span && ${date} < __Start )\n` +
-   `VAR __ComparableDates = __HasDates && COUNTROWS ( __PreviousDates ) > 0\n` +
+   `VAR __ComparableDates = __HasDates && NOT __IsDiscontinuous && COUNTROWS ( __PreviousDates ) = __Span\n` +
    `VAR __Reference = IF ( __ComparableDates, CALCULATE ( ${m}, REMOVEFILTERS ( ${table} ), TREATAS ( __PreviousDates, ${date} ) ) )\n`;
  } else {
-  code += `VAR __Reference = ${needsCompare(c) ? c.comparison === 'target' ? '__Target' : c.comparison === 'custom' ? measureRef(c.compareMeasure) : 'BLANK ()' : 'BLANK ()'}\n`;
+  code += `VAR __Reference = ${needsCompare(c) ? c.comparison === 'target' ? '__Target' : c.comparison === 'custom' ? inPeriod(measureRef(c.compareMeasure)) : 'BLANK ()' : 'BLANK ()'}\n`;
  }
 
  code += `VAR __Difference = IF ( NOT ISBLANK ( __Current ) && NOT ISBLANK ( __Reference ), __Current - __Reference )\n` +
@@ -212,10 +220,19 @@ export function generateDAX(c, { allowIncomplete = false } = {}) {
     code += trendDAX(c, dupId);
    } else {
     const metric = dupState.measure?.trim() ? measureRef(dupState.measure) : 'BLANK ()';
-    code += `VAR __Cur_${dupId} = ${metric}\n`;
-    code += duplicateGoal(dupId, `__Cur_${dupId}`, c.targetMeasure?.trim() ? targetRef(c.targetMeasure) : 'BLANK ()', c);
+    code += `VAR __Cur_${dupId} = ${inPeriod(metric)}\n`;
+    code += duplicateGoal(dupId, `__Cur_${dupId}`, c.targetMeasure?.trim() ? inPeriod(targetRef(c.targetMeasure)) : 'BLANK ()', c);
     code += `VAR __trend_${dupId} = ""\n`;
    }
+  } else if (def.baseId === 'status') {
+   const current = dupState.measure?.trim() ? inPeriod(measureRef(dupState.measure)) : '__Current';
+   const direction = dupState.direction || c.direction;
+   const op = direction === 'down' ? '<=' : '>=';
+   code += `VAR __StatusValue_${dupId} = ${current}\n` +
+    `VAR __StatusCode_${dupId} = SWITCH ( TRUE (), ISBLANK ( __StatusValue_${dupId} ), 0, __StatusValue_${dupId} ${op} ${dupState.goodThreshold ?? c.goodThreshold}, 3, __StatusValue_${dupId} ${op} ${dupState.warnThreshold ?? c.warnThreshold}, 2, 1 )\n` +
+    `VAR __status_${dupId} = SWITCH ( __StatusCode_${dupId}, 3, ${quote(esc(dupState.statusGood ?? c.statusGood))}, 2, ${quote(esc(dupState.statusWarn ?? c.statusWarn))}, 1, ${quote(esc(dupState.statusBad ?? c.statusBad))}, "Sin datos" )\n` +
+    `VAR __statusColor_${dupId} = SWITCH ( __StatusCode_${dupId}, 3, __Cfg_ColorGood, 2, __Cfg_ColorWarn, 1, __Cfg_ColorBad, __Cfg_ColorMuted )\n`;
+   for (const [name, value] of [['Good', 3], ['Warn', 2], ['Bad', 1]]) code += `VAR __status${name}Opacity_${dupId} = IF ( __StatusCode_${dupId} = ${value}, "1", "0.2" )\n`;
   } else if (def.baseId === 'value') {
    const dupMeasure = dupState.measure?.trim() ? measureRef(dupState.measure) : 'BLANK ()';
    const isSameAsMainMeasure = Boolean(dupState.measure?.trim()) && dupState.measure.trim().toLowerCase() === c.measure.trim().toLowerCase();
@@ -239,7 +256,7 @@ export function generateDAX(c, { allowIncomplete = false } = {}) {
     code += `VAR __val_${dupId} = ${formatted('__Current', dupConf)}\n`;
    } else {
     if (dateNeeded) {
-     code += `VAR __Cur_${dupId} = IF ( __HasDates, CALCULATE ( ${dupMeasure}, REMOVEFILTERS ( ${table} ), TREATAS ( __Dates, ${date} ) ), ${dupMeasure} )\n`;
+     code += `VAR __Cur_${dupId} = IF ( __HasDates, CALCULATE ( ${dupMeasure}, REMOVEFILTERS ( ${table} ), TREATAS ( __Dates, ${date} ) ) )\n`;
      code += `VAR __val_${dupId} = ${formatted(`__Cur_${dupId}`, dupConf)}\n`;
     } else {
      code += `VAR __val_${dupId} = ${formatted(dupMeasure, dupConf)}\n`;
@@ -258,7 +275,7 @@ export function generateDAX(c, { allowIncomplete = false } = {}) {
     curExpr = '__Current';
    } else {
     if (dateNeeded) {
-     code += `VAR __Cur_${dupId} = IF ( __HasDates, CALCULATE ( ${dupMetricRef}, REMOVEFILTERS ( ${table} ), TREATAS ( __Dates, ${date} ) ), ${dupMetricRef} )\n`;
+     code += `VAR __Cur_${dupId} = IF ( __HasDates, CALCULATE ( ${dupMetricRef}, REMOVEFILTERS ( ${table} ), TREATAS ( __Dates, ${date} ) ) )\n`;
     } else {
      code += `VAR __Cur_${dupId} = ${dupMetricRef}\n`;
     }
@@ -291,19 +308,19 @@ export function generateDAX(c, { allowIncomplete = false } = {}) {
     } else if (dateNeeded) {
      code += `VAR __CalendarDates_${dupId} = CALCULATETABLE ( VALUES ( ${date} ), REMOVEFILTERS ( ${table} ) )\n` +
       `VAR __PreviousDates_${dupId} = FILTER ( __CalendarDates_${dupId}, ${date} >= __Start - __Span && ${date} < __Start )\n` +
-      `VAR __ComparableDates_${dupId} = __HasDates && COUNTROWS ( __PreviousDates_${dupId} ) > 0\n` +
+      `VAR __ComparableDates_${dupId} = __HasDates && NOT __IsDiscontinuous && COUNTROWS ( __PreviousDates_${dupId} ) = __Span\n` +
       `VAR __Ref_${dupId} = IF ( __ComparableDates_${dupId}, CALCULATE ( ${dupMetricRef}, REMOVEFILTERS ( ${table} ), TREATAS ( __PreviousDates_${dupId}, ${date} ) ) )\n`;
      refExpr = `__Ref_${dupId}`;
     }
    } else if (dupComp === 'target') {
     if (dupState.targetMeasure && dupState.targetMeasure.trim()) {
-     refExpr = targetRef(dupState.targetMeasure.trim());
+     refExpr = inPeriod(targetRef(dupState.targetMeasure.trim()));
     } else {
      refExpr = 'BLANK ()';
     }
    } else if (dupComp === 'custom') {
     if (dupState.compareMeasure && dupState.compareMeasure.trim()) {
-     refExpr = measureRef(dupState.compareMeasure.trim());
+     refExpr = inPeriod(measureRef(dupState.compareMeasure.trim()));
     } else {
      refExpr = 'BLANK ()';
     }
@@ -353,9 +370,9 @@ export function generateDAX(c, { allowIncomplete = false } = {}) {
    }
   } else if (def.baseId === 'referenceValue') {
    const dupRef = dupState.measure?.trim() ? measureRef(dupState.measure) : 'BLANK ()';
-   code += `VAR __val_${dupId} = ${formatted(dupRef, c)}\n`;
+   code += `VAR __val_${dupId} = ${formatted(inPeriod(dupRef), c)}\n`;
   } else if (['goalLabel','progressLabel','progress'].includes(def.baseId)) {
-   code += duplicateGoal(dupId, '__Current', dupState.targetMeasure?.trim() ? targetRef(dupState.targetMeasure) : 'BLANK ()', { ...c, ...dupState });
+   code += duplicateGoal(dupId, '__Current', dupState.targetMeasure?.trim() ? inPeriod(targetRef(dupState.targetMeasure)) : 'BLANK ()', { ...c, ...dupState });
   } else if (dupState.measure && dupState.measure.trim()) {
    code += `VAR __val_${dupId} = ${formatted(measureRef(dupState.measure), c)}\n`;
   }
@@ -393,17 +410,17 @@ function trendDAX(c, elementId = 'trend') {
  const bucket = d => `SWITCH ( __Granularity${pfx}, 1, ${d}, 2, ${d} - WEEKDAY ( ${d}, 2 ) + 1, DATE ( YEAR ( ${d} ), MONTH ( ${d} ), 1 ) )`;
  const maxPts = effC.maxPoints || 24;
 
- let code = `// ============================================================================\n` +
+ let code = (isOrig ? '' : periodDAX(table, date, m, pfx)) + `// ============================================================================\n` +
   `// ${isOrig ? '4. SERIE TEMPORAL Y COORDENADAS SVG (FASE B)' : `SERIE TEMPORAL: ${elementId.toUpperCase()}`}\n` +
   `// ============================================================================\n` +
   `// Granularidad: diaria (<=24 días), semanal (<=161 días), mensual (>161 días).\n` +
   `// Ventana acotada a un máximo de ${maxPts} períodos antes de evaluar la medida.\n` +
-  `VAR __Granularity${pfx} = ${effC.granularity === 'auto' ? `SWITCH ( TRUE (), __Span <= 24, 1, __Span <= 161, 2, 3 )` : effC.granularity === 'day' ? '1' : effC.granularity === 'week' ? '2' : '3'}\n` +
-  `VAR __LastBucket${pfx} = IF ( __HasDates, SWITCH ( __Granularity${pfx}, 1, __End, 2, __End - WEEKDAY ( __End, 2 ) + 1, DATE ( YEAR ( __End ), MONTH ( __End ), 1 ) ) )\n` +
-  `VAR __WindowStart${pfx} = IF ( __HasDates, SWITCH ( __Granularity${pfx}, 1, __LastBucket${pfx} - ${maxPts - 1}, 2, __LastBucket${pfx} - ${maxPts - 1} * 7, EDATE ( __LastBucket${pfx}, -${maxPts - 1} ) ) )\n` +
-  `VAR __TrendClipped${pfx} = __HasDates && __Start < __WindowStart${pfx}\n` +
+  `VAR __Granularity${pfx} = ${effC.granularity === 'auto' ? `SWITCH ( TRUE (), __Span${pfx} <= 24, 1, __Span${pfx} <= 161, 2, 3 )` : effC.granularity === 'day' ? '1' : effC.granularity === 'week' ? '2' : '3'}\n` +
+  `VAR __LastBucket${pfx} = IF ( __HasDates${pfx}, SWITCH ( __Granularity${pfx}, 1, __End${pfx}, 2, __End${pfx} - WEEKDAY ( __End${pfx}, 2 ) + 1, DATE ( YEAR ( __End${pfx} ), MONTH ( __End${pfx} ), 1 ) ) )\n` +
+  `VAR __WindowStart${pfx} = IF ( __HasDates${pfx}, SWITCH ( __Granularity${pfx}, 1, __LastBucket${pfx} - ${maxPts - 1}, 2, __LastBucket${pfx} - ${maxPts - 1} * 7, EDATE ( __LastBucket${pfx}, -${maxPts - 1} ) ) )\n` +
+  `VAR __TrendClipped${pfx} = __HasDates${pfx} && __Start${pfx} < __WindowStart${pfx}\n` +
   `VAR __DateGroups${pfx} = SELECTCOLUMNS (\n` +
-  `    FILTER ( __Dates, __HasDates && ${date} >= __WindowStart${pfx} ),\n` +
+  `    FILTER ( __Dates${pfx}, __HasDates${pfx} && ${date} >= __WindowStart${pfx} ),\n` +
   `    "__Date", ${date},\n` +
   `    "__Bucket", ${bucket(date)}\n` +
   `)\n` +
@@ -488,7 +505,7 @@ function trendDAX(c, elementId = 'trend') {
 
  const areaId = 'kpi-area-' + hash(JSON.stringify([trendFill(effC, elementId), effC.fillOpacity, g, elementId]));
  const areaFillSvg = effC.areaFill === 'gradient' ? `url(#${areaId})` : trendFill(effC, elementId);
- code += `VAR __chartArea${pfx} = ${effC.trendStyle === 'area' ? `IF ( __N${pfx} > 1 && NOT ( __HasGaps${pfx} ) && __Min${pfx} >= 0, "<path d=""" & __chartPath${pfx} & " L" & __chartLast${pfx} & ",${g.bottom} L" & __chartFirst${pfx} & ",${g.bottom} Z"" fill=""${areaFillSvg}"" opacity=""${effC.fillOpacity}""/>", "" )` : '""'}\n`;
+ code += `VAR __chartArea${pfx} = ${effC.trendStyle === 'area' ? `IF ( __N${pfx} > 1 && NOT ( __HasGaps${pfx} ) && __Min${pfx} >= 0, "<path d=""" & __chartPath${pfx} & " L" & __chartLast${pfx} & ",${g.bottom} L" & __chartFirst${pfx} & ",${g.bottom} Z"" fill=""${areaFillSvg}"" opacity=""${effC.areaFill === 'gradient' ? 1 : effC.fillOpacity}""/>", "" )` : '""'}\n`;
 
  const svg = trendSVG(effC, {path: `@@chartPath${pfx}@@`, first: `@@chartFirst${pfx}@@`, last: `@@chartLast${pfx}@@`, bars: `@@chartBars${pfx}@@`, annotations: `@@chartAnnotations${pfx}@@`, area: `@@chartArea${pfx}@@`}, elementId);
  const compiledSvg = compileHTML(svg)
@@ -518,11 +535,12 @@ function trendDAX(c, elementId = 'trend') {
 
 export function generateDAXBody(c) {
  const dax = generateDAX(c);
- return dax.replace(/^\s*[\p{L}\p{N}_ ]+\s*=\s*/u, '').trim();
+ // generateDAX always emits the complete (possibly bracketed) name on its first line.
+ return dax.slice(dax.indexOf('\n') + 1).trim();
 }
 
 export function validateDAX(daxCode) {
- let clean = '', paren = 0;
+ let clean = '', paren = 0, malformed = false;
  for (let i = 0; i < daxCode.length; i++) {
   const ch = daxCode[i];
   if (ch === '/' && daxCode[i + 1] === '/') {
@@ -545,11 +563,12 @@ export function validateDAX(daxCode) {
      break;
     }
    }
+   if (!closed) malformed = true;
    clean += ' ';
    continue;
   }
   if (ch === '(') paren++;
-  if (ch === ')') paren--;
+  if (ch === ')') { paren--; if (paren < 0) malformed = true; }
   clean += ch;
  }
 
@@ -564,7 +583,7 @@ export function validateDAX(daxCode) {
  const hasBackticks = /`/.test(daxCode);
 
  return {
-  valid: undeclared.length === 0 && paren === 0 && !hasMarkdownEscapes && !hasBackticks,
+  valid: !malformed && undeclared.length === 0 && paren === 0 && !hasMarkdownEscapes && !hasBackticks,
   declared: Array.from(declared),
   referenced: Array.from(new Set(refs)),
   undeclared,

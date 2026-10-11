@@ -1,0 +1,4 @@
+table Medidas
+	measure 'Total Ventas' = 100
+	measure 'Objetivo Ventas' = 120
+	measure 'Ventas Periodo Anterior' = 90

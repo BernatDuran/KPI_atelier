@@ -6,6 +6,7 @@
 
 import { resizeCard, applyLayout } from './layout.mjs';
 import { appearance } from './appearance.mjs';
+import { copyElementData, pasteElementData } from './editor-clipboard.mjs';
 import { alignmentGuides } from './guides.mjs';
 import {
   ELEMENTS, ELEMENT_IDS, SIZE_LIMITS, elementState, elementSize,
@@ -18,7 +19,7 @@ import { icon, esc, cardHTML } from './cards.mjs';
 import { TEMPLATES, BASE, sanitizeConfig } from './model.mjs';
 import {
   $, btn, ib, getC, setC, getBaseline, setBaseline, dirty,
-  persist, record, toast, getSelectedElement, setSelectedElement,
+  persist, record, restoreHistory, toast, getSelectedElement, setSelectedElement,
   getSelectedElements, getCardSelected, setCardSelected,
   getZoom, setZoom, getCanvasDark, setCanvasDark,
   getContextPreview, setContextPreview, getMoveStep, setMoveStep,
@@ -622,6 +623,7 @@ export function selectCard() {
   if (getContextPreview()) return;
   callRememberInspector();
   setSelectedElement(null);
+  getSelectedElements().clear();
   setCardSelected(true);
   const ctx = getActiveContext();
   ctx.tab = 'card';
@@ -656,8 +658,10 @@ export function deselect() {
 }
 
 export function directChange(next, saveHistory = true, structural = false) {
+  const safe = sanitizeConfig(next);
+  if (JSON.stringify(safe) === JSON.stringify(getC())) return;
   if (saveHistory) record();
-  setC(sanitizeConfig(next));
+  setC(safe);
   persist();
   refreshCard();
   if (structural) {
@@ -747,54 +751,8 @@ export function copySelectedElements() {
   const targets = selectedElements.size > 0 ? [...selectedElements] : (selectedElement ? [selectedElement] : []);
   if (!targets.length) return;
 
-  const elements = targets.map(id => {
-    const p = elementState(c, id);
-    const def = resolveElementDef(id) || ELEMENTS[id];
-    const isVal = def?.baseId === 'value' || id === 'value';
-    const isDel = def?.baseId === 'delta' || id === 'delta';
-    const isTrend = def?.baseId === 'trend' || id === 'trend';
-    return {
-      id,
-      baseId: def?.baseId || id,
-      state: structuredClone(p),
-      text: (p.text && p.text.trim()) ? p.text : (def?.contentKey && c[def.contentKey] ? c[def.contentKey] : undefined),
-      icon: p.icon || c.icon,
-      valProps: isVal ? {
-        format: p.format || c.format,
-        currency: p.currency || c.currency,
-        unit: p.unit || c.unit,
-        decimals: p.decimals ?? c.decimals,
-        suffix: p.suffix !== undefined ? p.suffix : (c.suffix || ''),
-        measure: p.measure !== undefined ? p.measure : (c.measure || '')
-      } : {},
-      deltaProps: isDel ? {
-        deltaMode: p.deltaMode || c.deltaMode,
-        compareMeasure: p.compareMeasure !== undefined ? p.compareMeasure : (c.compareMeasure || ''),
-        comparison: p.comparison || c.comparison || 'prev_year',
-        direction: p.direction || c.direction || 'higher'
-      } : {},
-      trendProps: isTrend ? {
-        chartKind: p.chartKind || c.chartKind,
-        trendStyle: p.trendStyle || c.trendStyle,
-        trendCurve: p.trendCurve || c.trendCurve,
-        areaFill: p.areaFill || c.areaFill,
-        fillOpacity: p.fillOpacity ?? c.fillOpacity,
-        lineWidth: p.lineWidth ?? c.lineWidth,
-        showMax: p.showMax !== undefined ? p.showMax : c.showMax,
-        showMin: p.showMin !== undefined ? p.showMin : c.showMin,
-        showDot: p.showDot !== undefined ? p.showDot : c.showDot,
-        showMarkerGuides: p.showMarkerGuides !== undefined ? p.showMarkerGuides : c.showMarkerGuides,
-        zeroBase: p.zeroBase !== undefined ? p.zeroBase : c.zeroBase,
-        trendGrid: p.trendGrid || c.trendGrid,
-        donutThickness: p.donutThickness ?? c.donutThickness,
-        donutLabel: p.donutLabel !== undefined ? p.donutLabel : c.donutLabel,
-        measure: p.measure !== undefined ? p.measure : (c.measure || ''),
-        dateTable: p.dateTable || c.dateTable || 'Calendario',
-        dateColumn: p.dateColumn || c.dateColumn || 'Fecha'
-      } : {},
-      label: def?.label || id
-    };
-  });
+  const elements = targets.map(id => copyElementData(c, id, measureElementFrame(id))).filter(Boolean);
+  if (!elements.length) return;
 
   setClipboardElements(elements);
   setClipboardElement(elements[0]);
@@ -813,59 +771,10 @@ export function pasteElements() {
   const context = getContextPreview();
   if (!clipboardElements.length || $('#modal')?.open || context) return;
   const c = getC();
-  const allKeys = Object.keys(c.elements || {});
-  const dupCountTotal = allKeys.filter(k => k.includes('_copy') && !c.elements[k].deleted).length;
-
-  if (dupCountTotal + clipboardElements.length > 8) {
-    toast('Límite de duplicados alcanzado (máximo 8 copias en la tarjeta).');
-    return;
-  }
-
-  let nextConf = c;
-  const newIds = [];
-
-  for (const item of clipboardElements) {
-    const baseId = item.baseId;
-    const def = resolveElementDef(baseId) || ELEMENTS[baseId];
-    if (!def) continue;
-    const curKeys = Object.keys(nextConf.elements || {});
-    const baseDups = curKeys.filter(k => k.startsWith(baseId + '_copy') && !nextConf.elements[k]?.deleted).length;
-    if (baseDups >= 2) {
-      toast(`Límite alcanzado: máximo 2 copias para ${def.label}.`);
-      continue;
-    }
-    let nextIdx = 1;
-    while (nextConf.elements?.[`${baseId}_copy${nextIdx}`] && !nextConf.elements[`${baseId}_copy${nextIdx}`].deleted) {
-      nextIdx++;
-    }
-    const newId = `${baseId}_copy${nextIdx}`;
-    resolveElementDef(newId);
-    const origFrame = nextConf.elements?.[item.id]?.frame || item.state?.frame || measureElementFrame(item.id) || { left: 24, top: 24, width: 120, height: 24 };
-    const newFrame = {
-      ...origFrame,
-      left: Math.min(nextConf.width - 60, origFrame.left + 16),
-      top: Math.min(nextConf.height - 40, origFrame.top + 16)
-    };
-    const newElState = {
-      ...item.state,
-      ...item.valProps,
-      ...item.deltaProps,
-      ...item.trendProps,
-      x: 0,
-      y: 0,
-      hidden: false,
-      deleted: false,
-      frame: newFrame,
-      ...(item.text !== undefined ? { text: item.text } : {}),
-      ...(item.icon ? { icon: item.icon } : {})
-    };
-    nextConf = {
-      ...nextConf,
-      elements: { ...nextConf.elements, [newId]: newElState },
-      layerOrder: [newId, ...layerOrder(nextConf).filter(k => k !== newId)]
-    };
-    newIds.push(newId);
-  }
+  const result = pasteElementData(c, clipboardElements, measureElementFrame);
+  result.notices.forEach(toast);
+  const nextConf = result.config;
+  const newIds = result.ids;
 
   if (newIds.length === 1) {
     directChange(nextConf);
@@ -997,8 +906,9 @@ export function finishGesture(cancel = false) {
     app.releasePointerCapture(g.pointer);
   }
 
-  if (cancel && g.changed) {
+  if (g.changed && (cancel || JSON.stringify(getC()) === JSON.stringify(g.start))) {
     setC(g.start);
+    restoreHistory(g.undoSnapshot, g.redo);
     refreshCard();
   }
 

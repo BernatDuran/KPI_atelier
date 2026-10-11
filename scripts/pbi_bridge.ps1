@@ -1,4 +1,4 @@
-# scripts/pbi_bridge.ps1
+﻿# scripts/pbi_bridge.ps1
 # Bridge between KPI Atelier and local Power BI Desktop (Analysis Services Tabular)
 [CmdletBinding()]
 param(
@@ -16,151 +16,32 @@ param(
     [string]$ExpressionBase64 = "",
     [string]$FormatString = "",
     [string]$ConfigJson = "",
-    [string]$ConfigBase64 = ""
+    [string]$ConfigBase64 = "",
+    [string]$ExpectedState = "",
+    [string]$ExpectedExpressionBase64 = ""
 )
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 $ErrorActionPreference = "Stop"
 
-function Find-TabularDll {
-    $paths = @(
-        "C:\Program Files\Microsoft SQL Server Management Studio 22\Release\Common7\IDE\Microsoft.AnalysisServices.Tabular.dll",
-        "C:\Program Files\Microsoft SQL Server Management Studio 21\Release\Common7\IDE\Microsoft.AnalysisServices.Tabular.dll",
-        "C:\Program Files\Microsoft SQL Server Management Studio 20\Release\Common7\IDE\Microsoft.AnalysisServices.Tabular.dll",
-        "C:\Program Files\Microsoft SQL Server Management Studio 19\Release\Common7\IDE\Microsoft.AnalysisServices.Tabular.dll",
-        "C:\Program Files\Microsoft SQL Server Management Studio 18\Release\Common7\IDE\Microsoft.AnalysisServices.Tabular.dll",
-        "C:\Program Files\Microsoft SQL Server\170\DTS\Binn\Microsoft.AnalysisServices.Tabular.dll",
-        "C:\Program Files\Microsoft SQL Server\160\DTS\Binn\Microsoft.AnalysisServices.Tabular.dll",
-        "C:\Program Files\Microsoft SQL Server\150\DTS\Binn\Microsoft.AnalysisServices.Tabular.dll"
-    )
-    foreach ($p in $paths) {
-        if (Test-Path $p) { return $p }
-    }
+. (Join-Path $PSScriptRoot "pbi_connection.ps1")
 
-    $scriptBin = Join-Path (Split-Path -Parent $PSScriptRoot) "bin\Microsoft.AnalysisServices.Tabular.dll"
-    if (Test-Path $scriptBin) { return $scriptBin }
-
-    return $null
+function Throw-Conflict([string]$message) {
+    $error = New-Object System.InvalidOperationException($message)
+    $error.Data['code'] = 'CONFLICT'
+    throw $error
 }
 
-function Connect-Server([string]$targetServer) {
-    $dll = Find-TabularDll
-    if (-not $dll) {
-        throw "No se encontró Microsoft.AnalysisServices.Tabular.dll."
-    }
-
-    $binDir = Split-Path -Parent $dll
-    [System.AppDomain]::CurrentDomain.add_AssemblyResolve({
-        param($sender, $args)
-        $assemblyName = ($args.Name -split ',')[0]
-        $candidate = Join-Path $binDir "$assemblyName.dll"
-        if (Test-Path $candidate) {
-            return [System.Reflection.Assembly]::LoadFrom($candidate)
-        }
-        return $null
-    })
-
-    Add-Type -Path $dll -ErrorAction SilentlyContinue
-
-    $srv = New-Object Microsoft.AnalysisServices.Tabular.Server
-    $srv.Connect($targetServer)
-    return $srv
-}
-
-function Get-PbiReportName($msmdsrvPid) {
-    try {
-        $msmdsrvProc = Get-CimInstance Win32_Process -Filter "ProcessId = $msmdsrvPid" -ErrorAction SilentlyContinue
-        if (-not $msmdsrvProc) {
-            $msmdsrvProc = Get-WmiObject Win32_Process -Filter "ProcessId = $msmdsrvPid" -ErrorAction SilentlyContinue
-        }
-        if (-not $msmdsrvProc -or -not $msmdsrvProc.ParentProcessId) { return $null }
-        $parent = Get-CimInstance Win32_Process -Filter "ProcessId = $($msmdsrvProc.ParentProcessId)" -ErrorAction SilentlyContinue
-        if (-not $parent) {
-            $parent = Get-WmiObject Win32_Process -Filter "ProcessId = $($msmdsrvProc.ParentProcessId)" -ErrorAction SilentlyContinue
-        }
-        if (-not $parent) { return $null }
-
-        # Check CommandLine argument of parent process first (preserves .pbix / .pbip extension)
-        if ($parent.CommandLine) {
-            $regex = '"([^"]+\.(?:pbix|pbip|pbit))"'
-            if ($parent.CommandLine -match $regex) {
-                return [System.IO.Path]::GetFileName($Matches[1])
-            }
-            $regex2 = '(?:\s|^)([^\s"]+\.(?:pbix|pbip|pbit))'
-            if ($parent.CommandLine -match $regex2) {
-                return [System.IO.Path]::GetFileName($Matches[1])
-            }
-        }
-
-        # Check MainWindowTitle of parent process
-        $p = Get-Process -Id $parent.ProcessId -ErrorAction SilentlyContinue
-        if ($p -and $p.MainWindowTitle) {
-            $t = $p.MainWindowTitle -replace '\s*-\s*Power BI Desktop.*$', ''
-            if ($t.Trim() -and $t.Trim() -ne "Power BI Desktop") {
-                $trimmed = $t.Trim()
-                if ($trimmed -match '\.(?:pbix|pbip|pbit)$') {
-                    return $trimmed
-                }
-                return "$trimmed.pbix"
-            }
-        }
-    } catch {}
-    return $null
-}
-
-function Discover-Instances {
-    $results = @()
-    $pbiProcesses = Get-Process -Name "msmdsrv" -ErrorAction SilentlyContinue
-    $dll = Find-TabularDll
-    foreach ($proc in $pbiProcesses) {
-        $ports = Get-NetTCPConnection -OwningProcess $proc.Id -State Listen -ErrorAction SilentlyContinue |
-            Where-Object { $_.LocalAddress -eq '127.0.0.1' } |
-            Select-Object -ExpandProperty LocalPort -Unique
-        
-        $reportName = Get-PbiReportName $proc.Id
-
-        foreach ($port in $ports) {
-            $serverStr = "localhost:$port"
-            $dbName = ""
-            $modelName = ""
-            if ($dll) {
-                try {
-                    $srv = Connect-Server $serverStr
-                    if ($srv.Databases.Count -gt 0) {
-                        $firstDb = $srv.Databases[0]
-                        $dbName = $firstDb.Name
-                        if ($firstDb.Model -and $firstDb.Model.Name) {
-                            $modelName = $firstDb.Model.Name
-                        }
-                    }
-                    $srv.Disconnect()
-                } catch {
-                    # Silently ignore connection errors during discovery
-                }
-            }
-
-            $displayName = if ($reportName) {
-                $reportName
-            } elseif ($modelName -and $modelName -ne "Model") {
-                $modelName
-            } elseif ($dbName) {
-                $dbName
-            } else {
-                "Power BI Desktop (puerto $port)"
-            }
-
-            $results += [PSCustomObject]@{
-                pid = $proc.Id
-                port = $port
-                server = $serverStr
-                database = $dbName
-                reportName = if ($reportName) { $reportName } else { "" }
-                modelName = $displayName
-            }
+function Assert-MeasureVersion($measure, $existingTable, [string]$tableName, [string]$expectedState, [string]$expectedExpressionBase64) {
+    if ($expectedState -notin @('absent', 'present')) { throw 'Revisa el destino antes de guardar.' }
+    if ($expectedState -eq 'absent' -and $measure) { Throw-Conflict 'La medida ya existe. Actualiza la revisión antes de sobrescribirla.' }
+    if ($expectedState -eq 'present') {
+        $expectedExpression = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($expectedExpressionBase64))
+        if (-not $measure -or $existingTable.Name -cne $tableName -or $measure.Expression -cne $expectedExpression) {
+            Throw-Conflict 'La medida cambió desde la revisión. Actualiza el destino antes de guardar.'
         }
     }
-    return $results
 }
 
 function Invoke-BridgeAction {
@@ -176,7 +57,9 @@ function Invoke-BridgeAction {
         [string]$ExpressionBase64 = "",
         [string]$FormatString = "",
         [string]$ConfigJson = "",
-        [string]$ConfigBase64 = ""
+        [string]$ConfigBase64 = "",
+        [string]$ExpectedState = "",
+        [string]$ExpectedExpressionBase64 = ""
     )
 
     switch ($Action) {
@@ -250,16 +133,7 @@ function Invoke-BridgeAction {
                     throw "El servidor no tiene bases de datos cargadas."
                 }
 
-                $db = $null
-                if ($Database) {
-                    $db = $srv.Databases.Find($Database)
-                    if (-not $db) {
-                        $db = $srv.Databases | Where-Object { $_.Name -eq $Database -or $_.ID -eq $Database } | Select-Object -First 1
-                    }
-                }
-                if (-not $db) {
-                    $db = $srv.Databases[0]
-                }
+                $db = Resolve-Database $srv $Database
 
                 $tablesOut = @()
                 $allMeasures = @()
@@ -416,14 +290,9 @@ function Invoke-BridgeAction {
                     throw "El servidor no tiene bases de datos cargadas."
                 }
 
-                $db = $null
-                if ($Database) {
-                    $db = $srv.Databases.Find($Database)
-                    if (-not $db) {
-                        $db = $srv.Databases | Where-Object { $_.Name -eq $Database -or $_.ID -eq $Database } | Select-Object -First 1
-                    }
-                }
-                if (-not $db) { $db = $srv.Databases[0] }
+                $db = Resolve-Database $srv $Database $true
+                if (-not $TableName) { throw "Selecciona una tabla de destino." }
+                if ($ExpectedState -notin @("absent", "present")) { throw "Revisa el destino antes de guardar." }
 
                 # Check if measure already exists in any table in the model (case-insensitive)
                 $existingMeas = $null
@@ -437,39 +306,13 @@ function Invoke-BridgeAction {
                     }
                 }
 
+                $targetTable = $db.Model.Tables | Where-Object { $_.Name -ceq $TableName } | Select-Object -First 1
+                if (-not $targetTable) { throw "La tabla seleccionada ya no existe: $TableName" }
+                Assert-MeasureVersion $existingMeas $existingTable $TableName $ExpectedState $ExpectedExpressionBase64
                 if ($existingMeas) {
                     $meas = $existingMeas
-                    $targetTable = $existingTable
                     $isNew = $false
                 } else {
-                    $targetTable = $null
-                    if ($TableName) {
-                        $targetTable = $db.Model.Tables | Where-Object { $_.Name -ieq $TableName } | Select-Object -First 1
-                    }
-                    if (-not $targetTable) {
-                        $targetTable = $db.Model.Tables | Where-Object { 
-                            $_.Name -match '^_?m(easure|edida)s?$' -or 
-                            $_.Name -match '^_?(kpi|metric)s?$'
-                        } | Select-Object -First 1
-                        if (-not $targetTable) {
-                            $targetTable = $db.Model.Tables | Where-Object {
-                                $_.Measures.Count -gt 0 -and
-                                -not ($_.Name -like "LocalDateTable_*") -and
-                                -not ($_.Name -like "DateTableTemplate_*")
-                            } | Select-Object -First 1
-                        }
-                        if (-not $targetTable) {
-                            $targetTable = $db.Model.Tables | Where-Object {
-                                -not ($_.Name -like "LocalDateTable_*") -and
-                                -not ($_.Name -like "DateTableTemplate_*") -and
-                                -not $_.IsHidden
-                            } | Select-Object -First 1
-                        }
-                    }
-                    if (-not $targetTable) {
-                        throw "No se encontró una tabla válida donde ubicar la medida."
-                    }
-
                     $meas = New-Object Microsoft.AnalysisServices.Tabular.Measure
                     $meas.Name = $MeasureName
                     $targetTable.Measures.Add($meas)
@@ -495,7 +338,7 @@ function Invoke-BridgeAction {
                     $anno.Value = $ConfigJson
                 }
 
-                $db.Model.SaveChanges() | Out-Null
+                try { $db.Model.SaveChanges() | Out-Null } catch { $_.Exception.Data["outcomeUnknown"] = $true; throw }
 
                 return @{
                     success = $true
@@ -525,14 +368,7 @@ function Invoke-BridgeAction {
                     throw "El servidor no tiene bases de datos cargadas."
                 }
 
-                $db = $null
-                if ($Database) {
-                    $db = $srv.Databases.Find($Database)
-                    if (-not $db) {
-                        $db = $srv.Databases | Where-Object { $_.Name -eq $Database -or $_.ID -eq $Database } | Select-Object -First 1
-                    }
-                }
-                if (-not $db) { $db = $srv.Databases[0] }
+                $db = Resolve-Database $srv $Database $true
 
                 $deleted = $false
                 $fromTable = ""
@@ -547,7 +383,7 @@ function Invoke-BridgeAction {
                 }
 
                 if ($deleted) {
-                    $db.Model.SaveChanges() | Out-Null
+                    try { $db.Model.SaveChanges() | Out-Null } catch { $_.Exception.Data["outcomeUnknown"] = $true; throw }
                 }
 
                 return @{
@@ -583,15 +419,20 @@ if ($Interactive) {
                 -ExpressionBase64 $req.expressionBase64 `
                 -FormatString $req.formatString `
                 -ConfigJson $req.configJson `
-                -ConfigBase64 $req.configBase64
+                -ConfigBase64 $req.configBase64 `
+                -ExpectedState $req.expectedState `
+                -ExpectedExpressionBase64 $req.expectedExpressionBase64
 
+            $resp.requestId = $req.requestId
             $jsonOut = $resp | ConvertTo-Json -Depth 6 -Compress
             [Console]::Out.WriteLine($jsonOut)
         } catch {
             $errObj = @{
                 success = $false
                 error = $_.Exception.Message
-                details = $_.ScriptStackTrace
+                code = if ($_.Exception.Data["code"]) { $_.Exception.Data["code"] } else { "BRIDGE_REJECTED" }
+                outcomeUnknown = [bool]$_.Exception.Data["outcomeUnknown"]
+                requestId = $req.requestId
             }
             $jsonOut = $errObj | ConvertTo-Json -Depth 5 -Compress
             [Console]::Out.WriteLine($jsonOut)
@@ -614,7 +455,9 @@ if ($Interactive) {
             -ExpressionBase64 $req.expressionBase64 `
             -FormatString $req.formatString `
             -ConfigJson $req.configJson `
-            -ConfigBase64 $req.configBase64
+            -ConfigBase64 $req.configBase64 `
+                -ExpectedState $req.expectedState `
+                -ExpectedExpressionBase64 $req.expectedExpressionBase64
 
         $resp | ConvertTo-Json -Depth 6 -Compress
     } catch {
@@ -641,7 +484,9 @@ if ($Interactive) {
             -ExpressionBase64 $ExpressionBase64 `
             -FormatString $FormatString `
             -ConfigJson $ConfigJson `
-            -ConfigBase64 $ConfigBase64
+            -ConfigBase64 $ConfigBase64 `
+            -ExpectedState $ExpectedState `
+            -ExpectedExpressionBase64 $ExpectedExpressionBase64
 
         $resp | ConvertTo-Json -Depth 6 -Compress
     } catch {

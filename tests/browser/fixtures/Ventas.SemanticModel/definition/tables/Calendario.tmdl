@@ -1,0 +1,5 @@
+table Calendario
+	dataCategory: Time
+	column Fecha
+		dataType: dateTime
+		isKey

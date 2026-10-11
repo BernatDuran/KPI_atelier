@@ -3,16 +3,22 @@
 [![CI](https://github.com/BernatDuran/KPI_atelier/actions/workflows/ci.yml/badge.svg)](https://github.com/BernatDuran/KPI_atelier/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Static, private Power BI KPI card designer. Vanilla ES modules, no build step and no backend data collection.
+Desktop Power BI KPI card designer with a local Node/PowerShell bridge. Vanilla ES modules, no build step, no production npm dependencies and no model telemetry. Preview uses sample data; the bridge reads metadata and can write a reviewed DAX measure to Power BI Desktop.
+
+## Run and develop
+
+Use Node.js 22 or later. Run `npm start` and open [KPI Atelier locally](http://127.0.0.1:8080). Keep the same host and port to retain access to browser-local designs. Power BI integration additionally requires Windows, PowerShell, Power BI Desktop and the TOM assemblies located by `scripts/pbi_connection.ps1`.
+
+Development tooling requires `npm ci`. Run `npm run typecheck`, `npm test` and `npm run test:browser`, or all three with `npm run check`. Local browser tests use installed Microsoft Edge; CI installs Chromium and checks Node 22/24 on Windows and Linux. Tests start a separate local server on port 8098. See [the quick start](INICIO_RAPIDO_ES.md) and [contribution guide](CONTRIBUTING.md).
 
 
 ## Features
 
-18 templates in six families; Essential, Professional and Advanced editing; live sample-data HTML/SVG preview; dashboard context; themes and granular formatting; DAX generation; named local designs; undo/redo; JSON import/export; sample HTML export; clipboard and DAX download.
+Template families; Essential and Advanced editing; sample-data HTML/SVG preview; dashboard context; themes and granular formatting; DAX generation; named local designs; undo/redo; JSON import/export; sample HTML export; clipboard and DAX download. Bind model references from a local PBIP folder or a connected Power BI Desktop report.
 
 Version 1.1 adds 16 individually editable visual elements with selection, pixel-stepped pointer dragging, keyboard nudging, corner resizing, width handles and synchronized element controls. The step is 1 or 5 px; Shift temporarily uses the alternate step. Positions are offsets from the responsive template layout. Font resizing changes the actual shared configuration property; it does not scale a screenshot. Hidden elements keep their layout slot; deleted elements are omitted. Layers and undo can recover either. Element data is validated and round-trips in the existing v1 JSON schema, HTML and DAX.
 
-The icon picker has 47 inline SVG icons. The palette studio contains 10 presets plus browser-local named palettes, keyboard-accessible HSV controls, hex entry and contrast guidance. Inspector sections keep their open state, per-tab scroll and input focus across dynamic updates. These interactions still require browser QA in a supported environment.
+The icon picker contains inline SVG icons. The palette studio contains presets plus browser-local named palettes, keyboard-accessible HSV controls, hex entry and contrast guidance. Inspector sections keep their open state, per-tab scroll and input focus across dynamic updates. Desktop browser regressions exercise the actual module graph and event handlers.
 
 Version 1.2 adds a per-element Appearance section with theme, semantic KPI, linked progress-label and custom HEX color sources. Every element supports opacity; delta/status/icon backgrounds and progress tracks have independent colors and opacity. Sparkline stroke, bars, dots and area follow their dedicated settings. Progress defaults to the theme accent and the label follows the bar. Reset Appearance preserves layout; Restore Element resets layout and appearance.
 
@@ -42,21 +48,44 @@ Pending changes are compared with the opened/saved design, independently of the 
 - `dist/guides.mjs`: zoom-independent alignment and overflow geometry
 - `dist/colors.mjs`: palette schema, HSV conversion and contrast calculation
 - `dist/icons.mjs`: categorized inline vector icon catalog
-- `dist/app.mjs`: editor and browser-local persistence
-- `dist/styles.css`: responsive editor design
+- `dist/app.mjs`: startup, explicit collaborator wiring and event orchestration
+- `dist/shell-ui.mjs`, `dist/canvas.mjs`, `dist/inspector.mjs`: editor shell, canvas and contextual controls
+- `dist/state.mjs`: configuration, history, selection and browser-local persistence
+- `dist/binding-ui.mjs`, `dist/bindings.mjs`, `dist/studio-ui.mjs`: data bindings, icons and color studio
+- `dist/schema.mjs`, `dist/preflight.mjs`: runtime contracts and measure review
+- `dist/pbip.mjs`, `dist/model-import.mjs`: bounded, cancellable local model import
+- `dist/pbi-client.mjs`, `dist/live-connection.mjs`: HTTP/SSE client and connection lifecycle
+- `dist/measure-write.mjs`: fresh review, overwrite approval and single-attempt writes
+- `scripts/serve.mjs`, `scripts/pbi_api.mjs`, `scripts/pbi_http.mjs`: local server, routes and HTTP security/validation
+- `scripts/pbi_transport.mjs`: bounded serialized PowerShell IPC with correlated responses
+- `scripts/pbi_bridge.ps1`, `scripts/pbi_connection.ps1`: TOM actions, discovery and exact target resolution
+- `scripts/launch.ps1`, `kpi-atelier.cmd`: validated startup and External Tool arguments
+- `dist/styles.css`, `dist/css/`: desktop editor styles
 
-Run `npm test` (or `node --test tests/*.test.mjs`) for static generation and numerical edge-case checks. No installation is required for the app or core tests.
+The app runtime and Node test files use standard platform APIs. Type checking and Playwright require the development dependencies installed by `npm ci`.
+
+## Local bridge and model import
+
+The API accepts the exact local HTTP origin and validates Host including the port. `Origin: null`, other browser origins and `file://` bridge access are rejected. `GET /api/health` reports app identity, version and protocol; the launcher verifies it before opening the app. Launcher inputs travel through `KPI_LAUNCH_SERVER` / `KPI_LAUNCH_DATABASE` environment variables and are URL-encoded.
+
+Writes require an explicit local server, database and table. Before writing, the client refreshes the catalog and reviews references; the bridge compares `expectedExpression` with the current measure (`null` means it must not exist). A `409 CONFLICT` requires another review. Targets never silently fall back to another database or table. A connection loss or timeout after submission can mean the write succeeded: `outcomeUnknown` requires checking the model, never an automatic retry. This optimistic comparison does not lock out external editors.
+
+PBIP import reads one semantic model locally, through either folder-selection API. It rejects ambiguous multi-model folders and enforces `PBIP_LIMITS`: 10 MB per file, 50 MB total, 1,000 model files, 10,000 entries and depth 16. A new selection cancels the previous scan. Import provides metadata, not semantic-model evaluation.
 
 ## Deliberate calculation semantics
 
-The main metric evaluates the configured existing measure in current filter context. Temporal comparisons remove filters only from the configured calendar, then apply reference dates; all other dimension filters remain. YoY/MoM shift each selected day with EDATE and deduplicate the date set, including end-of-month clamping. Previous period uses a contiguous date range equal to the selected min/max span. For fiscal calendars or other business definitions, use a custom reference measure.
+When a card requires a calendar, it uses its explicit filters, or the last twelve rolling months ending at the last date with data when no calendar filter exists. Actual, measure-based target and custom reference evaluate over the same dates; constants remain unchanged. Other dimension filters remain. Cards that do not require a calendar keep the current filter context. User measures may implement their own filter behavior internally.
 
-Trend values re-evaluate the measure per selected day/week/month bucket using KEEPFILTERS. The selected calendar must be related to the model and include reference periods. Missing buckets are skipped and remaining points are joined. Maximum 90 points. Preview data is illustrative and is never exported as model data.
+YoY/MoM shift selected days with EDATE, deduplicate dates and require complete calendar coverage of the reference dates. Previous period requires a continuous selection and a complete prior interval of equal span. Discontinuous selections are marked with an asterisk. For fiscal calendars or other business definitions, use appropriate business measures and verify their results in Power BI.
+
+Trend values re-evaluate the measure per day/week/month bucket over its selected dates. Duplicated trends resolve their own calendar and period. The calendar must have the intended model relationships and reference periods. Missing buckets are skipped and remaining points are joined within the configured chart window. Preview data is illustrative and is never exported as model data.
 
 Progress is actual divided by a positive target, with a 0–100% capped bar and uncapped label. Status thresholds use actual metric values. Percent metrics expect decimal ratios. Relative changes divide by the absolute reference and show a dash for a zero or missing reference.
 
 ## Verification boundary
 
-Core and mocked-editor tests verify fixed geometry, limits, dirty-navigation/save failures, conditional controls, chart edge cases, generation, static DAX identifier/parenthesis consistency, formatting guards, thresholds and sanitization; they do not evaluate DAX. Power BI Desktop and HTML Content Secure rendering must be verified with the user's real model. Browser QA was unavailable in the build environment. No browser or Power BI validation is claimed.
+The development review also executed 29 read-only DAX queries in a real Power BI Desktop engine, covering all 18 templates and 11 calculation scenarios. Results, reproduction steps and limitations are recorded in [DAX engine validation](docs/DAX_ENGINE_VALIDATION.md). This manual validation is separate from the automated suite below.
 
-References: https://html-content.com/docs/visual-editions , https://html-content.com/docs/accepted-tags , https://html-content.com/docs/sanitization , https://learn.microsoft.com/en-us/dax/format-function-dax .
+Unit and integration tests cover generation, numeric boundaries, configuration, history, import and HTTP contracts. PowerShell write guards run against simulated model objects. Playwright exercises desktop interactions and write-review flows with controlled API responses. These tests neither write to a real semantic model nor evaluate DAX, relationships or business results. Verify the generated measure and rendering with the intended model and HTML visual in Power BI Desktop; visual edition and host behavior affect supported HTML/CSS.
+
+References: [HTML visual editions](https://html-content.com/docs/visual-editions), [accepted tags](https://html-content.com/docs/accepted-tags), [sanitization](https://html-content.com/docs/sanitization), [DAX FORMAT](https://learn.microsoft.com/en-us/dax/format-function-dax).

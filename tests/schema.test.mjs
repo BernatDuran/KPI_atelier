@@ -7,6 +7,7 @@ import {
   validateElementCustomization,
   isCardConfig,
   isValidHexColor,
+  validateModelCatalog, sanitizeModelCatalog,
   CONFIG_SCHEMA
 } from '../dist/schema.mjs';
 
@@ -97,4 +98,31 @@ test('isCardConfig type guard identifies valid objects and rejects non-configs',
   assert.equal(isCardConfig({}), false);
   assert.equal(isCardConfig(null), false);
   assert.equal(isCardConfig('string'), false);
+});
+
+
+test('Schema shares editor size limits and validates integer fields without rejecting fractional styles',()=>{
+ assert.equal(validateCardConfig({...BASE,valueSize:100,titleSize:70,trendHeight:200,lineWidth:2.4,radius:22.5}).valid,true);
+ for(const key of ['width','height','maxPoints','decimals','geometryVersion'])assert.equal(validateCardConfig({...BASE,[key]:BASE[key]+.5}).valid,false,key);
+ assert.equal(validateCardConfig({...BASE,width:'440'}).valid,false);
+ assert.equal(validateCardConfig({...BASE,showTrend:'true'}).valid,false);
+});
+
+test('Element frame validation uses actual renderer coordinates and rejects invalid frame shapes',()=>{
+ assert.equal(validateElementCustomization('value',{frame:{left:1.25,top:0,width:100,height:20}}).valid,true);
+ for(const frame of [{x:1,y:2,w:100,h:20},{left:Infinity,top:0,width:20,height:10},{left:0,top:0,width:-1,height:10},[],{left:'1',top:0,width:20,height:10}])assert.equal(validateElementCustomization('value',{frame}).valid,false);
+});
+
+test('Malformed model caches fail closed while normalized metadata and references survive',()=>{
+ const raw={modelName:'Ventas',server:'localhost:12345',database:'db',isLiveConnection:true,tables:['Medidas','Calendario'],measures:[{name:'Ventas',table:'Medidas',expression:'SUM ( Ventas[Importe] )'}],dateTables:[{name:'Calendario',dateColumns:['Fecha'],primaryDateColumn:'Fecha'}]};
+ assert.equal(validateModelCatalog(raw).valid,true);
+ const copy=sanitizeModelCatalog(raw);
+ assert.equal(copy.server,raw.server);assert.equal(copy.measures[0].expression,raw.measures[0].expression);
+ copy.dateTables[0].dateColumns.push('Otra');assert.equal(raw.dateTables[0].dateColumns.length,1);
+ for(const bad of [null,[],{}, {...raw,measures:[{name:'Ventas'}]},{...raw,dateTables:[{name:'Calendar',dateColumns:'Fecha'}]}])assert.equal(sanitizeModelCatalog(bad),null);
+});
+
+
+test('Invalid wrappers and unrelated JSON cannot reset the editor as an empty configuration',()=>{
+ for(const bad of ['null','[]','{}','{"config":null}','{"config":"broken"}','{"unrelated":42}'])assert.equal(validateImportedJSON(bad).valid,false,bad);
 });

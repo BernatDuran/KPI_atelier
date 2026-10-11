@@ -208,7 +208,9 @@ export function buildModelCatalog({ modelName = 'PBIP Model', parsedTables = [] 
  */
 export function parseBim(input, defaultModelName = 'SemanticModel') {
   const data = typeof input === 'string' ? JSON.parse(input) : input;
+  if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('El archivo BIM debe contener un objeto de modelo.');
   const model = data.model || data;
+  if (!Array.isArray(model.tables)) throw new Error('El archivo BIM no contiene una colección de tablas válida.');
   const modelName = data.name || model.name || defaultModelName;
   const tables = [];
   const measures = [];
@@ -279,241 +281,78 @@ function cleanModelName(rawName) {
   return rawName.replace(/\.(SemanticModel|pbip|Report)$/i, '');
 }
 
-/**
- * Scans a FileSystemDirectoryHandle (File System Access API) recursively for TMDL or BIM files.
- * 
- * @param {FileSystemDirectoryHandle} dirHandle
- * @returns {Promise<{modelName: string, tables: string[], measures: Array<{name: string, table: string}>, dateTables: Array<{name: string, dateColumns: string[], isMarkedDateTable: boolean, primaryDateColumn: string|null, isLikelyCalendar: boolean}>}>}
- */
-export async function scanDirectoryHandle(dirHandle) {
-  const tmdlFiles = [];
-  let bimContent = null;
-  const modelName = cleanModelName(dirHandle.name);
+// Conservative browser resource budgets; all reads stay local and are cancellable.
+export const PBIP_LIMITS = Object.freeze({ maxEntries: 10000, maxFiles: 1000, maxDepth: 16, maxFileBytes: 10 * 1024 * 1024, maxTotalBytes: 50 * 1024 * 1024 });
+const checkScan = signal => { if (signal?.aborted) throw new DOMException('Lectura cancelada.', 'AbortError'); };
+const modelFile = name => /\.tmdl$/i.test(name) || /^model\.bim$/i.test(name);
+const modelRoot = path => {
+  const parts = path.replaceAll('\\', '/').split('/').filter(Boolean);
+  const semantic = parts.findIndex(p => /\.SemanticModel$/i.test(p));
+  if (semantic >= 0) return parts.slice(0, semantic + 1).join('/');
+  const definition = parts.findIndex(p => p.toLowerCase() === 'definition');
+  return (definition >= 0 ? parts.slice(0, definition) : parts.slice(0, -1)).join('/');
+};
 
-  async function traverse(handle, path = '') {
+async function readModelFiles(files, fallbackName, {signal = undefined} = {}) {
+  checkScan(signal);
+  if (!files.length) throw new Error('No se encontraron archivos de modelo (*.tmdl o model.bim).');
+  if (files.length > PBIP_LIMITS.maxFiles) throw new Error('La carpeta contiene demasiados archivos de modelo. Selecciona una sola carpeta SemanticModel.');
+  const roots = new Set(files.map(f => modelRoot(f.path)));
+  if (roots.size !== 1) throw new Error('La carpeta contiene varios modelos. Selecciona la carpeta SemanticModel del modelo que quieres utilizar.');
+  const root = [...roots][0];
+  const modelName = cleanModelName(root.split('/').pop() || fallbackName);
+  const parsedTables = [];
+  let totalBytes = 0, bimContent = null;
+  for (const entry of files) {
+    checkScan(signal);
+    const file = await entry.getFile();
+    if (file.size > PBIP_LIMITS.maxFileBytes) throw new Error(`El archivo ${entry.name} supera el límite de 10 MB.`);
+    const content = await file.text();
+    checkScan(signal);
+    const bytes = new TextEncoder().encode(content).byteLength;
+    totalBytes += bytes;
+    if (bytes > PBIP_LIMITS.maxFileBytes || totalBytes > PBIP_LIMITS.maxTotalBytes) throw new Error('El modelo supera el límite de lectura local (10 MB por archivo, 50 MB en total).');
+    if (/\.tmdl$/i.test(entry.name)) {
+      // database.tmdl, model.tmdl, relationships and expressions are not tables.
+      if (/^\s*table\s+/m.test(content)) parsedTables.push(parseTmdl(content, entry.name.replace(/\.tmdl$/i, '')));
+    } else bimContent = content;
+  }
+  if (parsedTables.length) return buildModelCatalog({modelName, parsedTables});
+  if (bimContent) return parseBim(bimContent, modelName);
+  throw new Error('El modelo seleccionado no contiene tablas TMDL ni un model.bim válido.');
+}
+
+/** Read one semantic model through the directory picker. */
+export async function scanDirectoryHandle(dirHandle, options = {}) {
+  const files = [];
+  let entries = 0;
+  async function traverse(handle, path, depth) {
+    checkScan(options.signal);
+    if (depth > PBIP_LIMITS.maxDepth) throw new Error('La carpeta es demasiado profunda. Selecciona directamente SemanticModel.');
     for await (const entry of handle.values()) {
-      if (entry.kind === 'file') {
-        if (entry.name.endsWith('.tmdl')) {
-          const file = await entry.getFile();
-          const text = await file.text();
-          tmdlFiles.push({ name: entry.name, path: `${path}/${entry.name}`, content: text });
-        } else if (entry.name.toLowerCase() === 'model.bim' && !bimContent) {
-          const file = await entry.getFile();
-          const text = await file.text();
-          bimContent = text;
-        }
-      } else if (entry.kind === 'directory') {
-        if (!entry.name.startsWith('.') && entry.name !== 'node_modules') {
-          await traverse(entry, `${path}/${entry.name}`);
-        }
-      }
+      checkScan(options.signal);
+      if (++entries > PBIP_LIMITS.maxEntries) throw new Error('La carpeta contiene demasiados archivos. Selecciona directamente SemanticModel.');
+      if (entry.kind === 'file' && modelFile(entry.name)) files.push({name: entry.name, path: `${path}/${entry.name}`, getFile: () => entry.getFile()});
+      else if (entry.kind === 'directory' && !entry.name.startsWith('.') && entry.name !== 'node_modules') await traverse(entry, `${path}/${entry.name}`, depth + 1);
     }
   }
-
-  await traverse(dirHandle);
-
-  if (tmdlFiles.length > 0) {
-    const parsedTables = tmdlFiles.map(f => {
-      const defaultName = f.name.replace(/\.tmdl$/i, '');
-      return parseTmdl(f.content, defaultName);
-    });
-    return buildModelCatalog({ modelName, parsedTables });
-  }
-
-  if (bimContent) {
-    return parseBim(bimContent, modelName);
-  }
-
-  throw new Error('No se encontraron archivos de modelo (*.tmdl o model.bim) en la carpeta seleccionada.');
+  await traverse(dirHandle, dirHandle.name, 0);
+  return readModelFiles(files, dirHandle.name, options);
 }
 
-/**
- * Scans a FileList from <input type="file" webkitdirectory> fallback.
- * 
- * @param {FileList|Array<File>} fileList
- * @returns {Promise<{modelName: string, tables: string[], measures: Array<{name: string, table: string}>, dateTables: Array<{name: string, dateColumns: string[], isMarkedDateTable: boolean, primaryDateColumn: string|null, isLikelyCalendar: boolean}>}>}
- */
-export async function scanFileList(fileList) {
-  const tmdlFiles = [];
-  let bimContent = null;
-  let modelName = 'PBIP Model';
-
-  for (let i = 0; i < fileList.length; i++) {
-    const file = fileList[i];
-    const relPath = file.webkitRelativePath || file.name;
-    const parts = relPath.split('/');
-    if (parts.length > 1 && modelName === 'PBIP Model') {
-      modelName = cleanModelName(parts[0]);
-    }
-
-    if (file.name.endsWith('.tmdl')) {
-      const text = await file.text();
-      tmdlFiles.push({ name: file.name, path: relPath, content: text });
-    } else if (file.name.toLowerCase() === 'model.bim' && !bimContent) {
-      const text = await file.text();
-      bimContent = text;
-    }
+/** Same parser and resource limits for the webkitdirectory fallback. */
+export async function scanFileList(fileList, options = {}) {
+  checkScan(options.signal);
+  if (fileList.length > PBIP_LIMITS.maxEntries) throw new Error('La carpeta contiene demasiados archivos. Selecciona directamente SemanticModel.');
+  const files = [];
+  for (const file of Array.from(fileList)) {
+    const path = file.webkitRelativePath || file.name;
+    const parts = path.replaceAll('\\', '/').split('/');
+    if (parts.some(p => p.startsWith('.') || p === 'node_modules')) continue;
+    if (parts.length > PBIP_LIMITS.maxDepth + 2) throw new Error('La carpeta es demasiado profunda. Selecciona directamente SemanticModel.');
+    if (modelFile(file.name)) files.push({name:file.name, path, getFile:async () => file});
   }
-
-  if (tmdlFiles.length > 0) {
-    const parsedTables = tmdlFiles.map(f => {
-      const defaultName = f.name.replace(/\.tmdl$/i, '');
-      return parseTmdl(f.content, defaultName);
-    });
-    return buildModelCatalog({ modelName, parsedTables });
-  }
-
-  if (bimContent) {
-    return parseBim(bimContent, modelName);
-  }
-
-  throw new Error('No se encontraron archivos de modelo (*.tmdl o model.bim) en los archivos seleccionados.');
+  return readModelFiles(files, 'PBIP Model', options);
 }
 
-/**
- * Determines API base URL for bridge communication.
- * Allows transparent operation when running from http server or file:// protocol.
- */
-export function getApiBase() {
-  if (typeof window !== 'undefined' && window.location && window.location.protocol && window.location.protocol.startsWith('http')) {
-    return '';
-  }
-  return 'http://127.0.0.1:8080';
-}
-
-/**
- * Discovers active local Power BI Desktop instances via the bridge server.
- * @returns {Promise<Array<{pid: number, port: number, server: string, reportName?: string, database?: string}>>}
- */
-export async function discoverLivePbi() {
-  const res = await fetch(`${getApiBase()}/api/pbi/discover`, { cache: 'no-store' });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const json = await res.json();
-  return json.instances || [];
-}
-
-/**
- * Checks connection status to a local Power BI Desktop instance.
- * @param {string} [server]
- * @returns {Promise<{connected: boolean, server: string, serverName: string, databases: Array<{name: string, id: string}>}>}
- */
-export async function fetchLivePbiStatus(server = '') {
-  const base = getApiBase();
-  const url = server ? `${base}/api/pbi/status?server=${encodeURIComponent(server)}` : `${base}/api/pbi/status`;
-  const res = await fetch(url, { cache: 'no-store' });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || `HTTP ${res.status}`);
-  }
-  return await res.json();
-}
-
-/**
- * Connects to live Power BI Desktop and builds a full model catalog.
- * @param {string} server
- * @param {string} [database]
- * @returns {Promise<{modelName: string, reportName?: string, isLiveConnection: boolean, server: string, database: string, tables: string[], measures: Array<{name: string, table: string, expression?: string, configAnnotation?: any}>, dateTables: Array<{name: string, dateColumns: string[], isMarkedDateTable: boolean, primaryDateColumn: string|null, isLikelyCalendar: boolean}>}>}
- */
-export async function fetchLivePbiModel(server, database = '') {
-  const url = `${getApiBase()}/api/pbi/model?server=${encodeURIComponent(server)}${database ? `&database=${encodeURIComponent(database)}` : ''}`;
-  const res = await fetch(url, { cache: 'no-store' });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || `HTTP ${res.status}`);
-  }
-  const data = await res.json();
-
-  const allTables = (data.tables || []).map(t => (typeof t === 'string' ? t : t.name)).filter(Boolean);
-  const userTables = (data.tables || [])
-    .filter(t => !t.isAutoDate && !t.isHidden && !String(t.name || t).startsWith('LocalDateTable_') && !String(t.name || t).startsWith('DateTableTemplate_'))
-    .map(t => (typeof t === 'string' ? t : t.name))
-    .filter(Boolean);
-  const tables = userTables.length > 0 ? userTables : allTables;
-  const measures = (data.measures || []).map(m => {
-    let cfg = null;
-    if (m.configAnnotation) {
-      try {
-        cfg = typeof m.configAnnotation === 'string' ? JSON.parse(m.configAnnotation) : m.configAnnotation;
-      } catch {}
-    }
-    return {
-      name: m.name,
-      table: m.table,
-      expression: m.expression || '',
-      formatString: m.formatString || '',
-      configAnnotation: cfg
-    };
-  });
-
-  const dateTables = (data.detectedDateTables || []).map(dt => ({
-    name: dt.table,
-    dateColumns: dt.dateColumns || [],
-    isMarkedDateTable: Boolean(dt.isOfficialMarked),
-    primaryDateColumn: dt.suggestedColumn || (dt.dateColumns?.[0] || null),
-    isLikelyCalendar: dt.tier <= 2
-  }));
-
-  return {
-    modelName: data.modelName || data.reportName || data.database || 'Power BI Desktop',
-    reportName: data.reportName || data.modelName || '',
-    isLiveConnection: true,
-    server: data.server,
-    database: data.database,
-    tables,
-    measures,
-    dateTables
-  };
-}
-
-/**
- * Injects or updates a DAX measure directly in Power BI Desktop via the bridge.
- * @param {any} payload
- * @returns {Promise<{success: boolean, measureName: string, tableName: string, isNew: boolean}>}
- */
-export async function injectMeasureToLivePbi({ server, database, tableName = '', measureName, daxExpression, formatString = '', configAnnotation = null }) {
-  const res = await fetch(`${getApiBase()}/api/pbi/measure`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      server,
-      database,
-      tableName,
-      measureName,
-      daxExpression,
-      formatString,
-      configAnnotation
-    })
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || `Error HTTP ${res.status}`);
-  }
-  return await res.json();
-}
-
-/**
- * Connects to the real-time Server-Sent Events stream from the local bridge.
- * Dispatches live updates whenever Power BI Desktop instances appear or disappear.
- * @param {(instances: Array<{pid: number, port: number, server: string, reportName?: string, database?: string}>) => void} onInstancesChange
- * @returns {(() => void) | null} Cleanup function to close the stream
- */
-export function initLivePbiStream(onInstancesChange) {
-  if (typeof window === 'undefined' || typeof window.EventSource === 'undefined') return null;
-  try {
-    const es = new EventSource(`${getApiBase()}/api/pbi/events`);
-    es.onmessage = (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        if (data.type === 'instances' && typeof onInstancesChange === 'function') {
-          onInstancesChange(data.instances || []);
-        }
-      } catch {}
-    };
-    return () => {
-      try { es.close(); } catch {}
-    };
-  } catch {
-    return null;
-  }
-}
-
+export {getApiBase, discoverLivePbi, fetchLivePbiStatus, fetchLivePbiModel, injectMeasureToLivePbi, initLivePbiStream} from './pbi-client.mjs';

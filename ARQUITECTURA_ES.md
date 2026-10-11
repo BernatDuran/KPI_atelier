@@ -2,17 +2,24 @@
 
 ## 1. Tecnología y estructura
 
-Es una aplicación de una sola página con HTML, CSS y JavaScript nativo. Utiliza módulos ES (`.mjs`) y genera las tarjetas con HTML y SVG. No usa React, Vue, TypeScript, un bundler, un backend ni una base de datos. Node se utiliza para las pruebas y, en esta exportación, para servir los archivos localmente.
+Es una aplicación de escritorio en navegador con HTML, CSS y JavaScript nativo. Utiliza módulos ES (`.mjs`) sin compilación y genera tarjetas HTML/SVG. El backend local Node sirve la interfaz y conecta con Power BI Desktop mediante PowerShell y TOM. No hay base de datos de diseños ni dependencias de producción; TypeScript comprueba el JavaScript y los contratos JSDoc sin generar archivos.
 
 La interfaz se monta sobre `#app`, definido en `dist/index.html`. Ese HTML carga `styles.css` y el módulo `app.mjs`. Los iconos y gráficos se dibujan con SVG; no hay un paquete de imágenes que falte por descargar.
 
 | Archivo | Responsabilidad |
 | --- | --- |
 | `dist/index.html` | Página inicial, contenedor de la app, diálogo modal y entrada de archivos. |
-| `dist/app.mjs` | Estado del editor, construcción de pantallas, eventos de ratón/teclado, paneles, guardado, historial, modales y descargas. |
-| `dist/model.mjs` | Configuración base `BASE`, 18 plantillas `TEMPLATES`, temas `THEMES`, límites, enumeraciones, saneamiento y validación. |
+| `dist/app.mjs` | Arranque, registro explícito de colaboradores y coordinación de eventos del editor. |
+| `dist/editor-events.mjs` | Gestos del lienzo, cancelación de interacciones y atajos de teclado. |
+| `dist/shell-ui.mjs` | Biblioteca, cabecera, estructura del editor y actualización de controles compartidos. |
+| `dist/state.mjs` | Configuración activa, borrador, colección guardada, selección, historial y protección de cambios. |
+| `dist/canvas.mjs`, `dist/inspector.mjs` | Lienzo, manipulación de elementos e inspector contextual. |
+| `dist/binding-ui.mjs`, `dist/bindings.mjs` | Edición de referencias a datos y correspondencia entre elementos y campos. |
+| `dist/studio-ui.mjs` | Iconos, paletas y controles del estudio de color. |
+| `dist/modals.mjs` | Infraestructura de diálogos y revisión de operaciones. |
+| `dist/model.mjs`, `dist/schema.mjs` | `BASE`, plantillas, temas, normalización y contratos de configuración y catálogo. |
 | `dist/cards.mjs` | Formato de números, datos de ejemplo, iconos generales y `cardHTML()`, el renderizador compartido. |
-| `dist/elements.mjs` | Catálogo de 16 elementos, tamaños, visibilidad, desplazamiento, marcos y orden de capas. |
+| `dist/elements.mjs` | Catálogo de elementos, tamaños, visibilidad, desplazamiento, marcos y orden de capas. |
 | `dist/layout.mjs` | Posiciones de las distribuciones, límites de tarjeta, congelación de geometría y redimensionado del lienzo. |
 | `dist/charts.mjs` | Geometría y SVG de tendencias, curvas, áreas, degradados, puntos extremos y donut. |
 | `dist/appearance.mjs` | Resolución de colores, opacidad, fondos y efectos de superficie. |
@@ -20,14 +27,24 @@ La interfaz se monta sobre `#app`, definido en `dist/index.html`. Ese HTML carga
 | `dist/colors.mjs` | Paletas, conversión HEX/HSV y contraste. |
 | `dist/icons.mjs` | Catálogo adicional de iconos y sus trazados SVG. |
 | `dist/dax.mjs` | Generación de la medida DAX, referencias a medidas/calendario, formato y composición del HTML dinámico. |
+| `dist/preflight.mjs` | Revisión de referencias, destino y condiciones previas a exportar o escribir. |
+| `dist/pbip.mjs`, `dist/model-import.mjs` | Lectura local TMDL/BIM con límites, cancelación y selección de carpeta. |
+| `dist/pbi-client.mjs` | Cliente HTTP, catálogo Power BI, errores y stream SSE. |
+| `dist/live-connection.mjs` | Conexión inicial desde navegador o herramienta externa y seguimiento de desconexiones. |
+| `dist/measure-write.mjs` | Revisión fresca, confirmación de sobrescritura y escritura sin repetición automática. |
+| `dist/layer-events.mjs`, `dist/editor-clipboard.mjs` | Eventos de capas y operaciones del portapapeles del editor. |
 | `dist/styles.css` | Apariencia y adaptación de la interfaz del editor. |
 | `tests/core.test.mjs` | Pruebas de funciones y generación de HTML/DAX. |
 | `tests/editor.test.mjs` | Pruebas de controles y guardado usando un DOM simulado. |
-| `scripts/serve.mjs` | Servidor local añadido al ZIP, independiente de la app publicada. |
+| `scripts/serve.mjs` | Servidor HTTP local, archivos estáticos, CSP y endpoint de salud. |
+| `scripts/pbi_api.mjs`, `scripts/pbi_http.mjs` | Rutas, SSE, validación HTTP, origen, destino y tamaño de solicitudes. |
+| `scripts/pbi_transport.mjs` | Proceso PowerShell persistente, cola acotada, correlación y tiempos máximos. |
+| `scripts/pbi_bridge.ps1`, `scripts/pbi_connection.ps1` | Acciones TOM, descubrimiento local y resolución exacta de base y tabla. |
+| `scripts/launch.ps1`, `kpi-atelier.cmd` | Arranque local verificado y apertura de la interfaz. |
 
 ## 2. El objeto de configuración es la pieza central
 
-En `app.mjs`, la variable `c` representa la tarjeta que se está editando. Contiene texto, datos de muestra, nombres de medidas, tipo de tarjeta, tema, dimensiones, opciones de gráficos y configuración de cada elemento.
+`state.mjs` conserva la configuración de la tarjeta, accesible mediante `getC()`. Contiene texto, datos de muestra, nombres de medidas, tipo de tarjeta, tema, dimensiones, opciones de gráficos y configuración de cada elemento.
 
 `sanitizeConfig()` normaliza el objeto: valida enumeraciones, limita tamaños, controla colores y descarta claves ajenas al esquema. Si añades una propiedad nueva, revisa `BASE` y, cuando corresponda, `LIMITS` o `ENUMS`; de lo contrario, esa propiedad puede perderse al importar o editar.
 
@@ -39,7 +56,7 @@ Los campos de la interfaz llevan atributos como `data-key`, `data-elprop` o `dat
 
 Antes de una operación relevante se guarda una copia en el historial. Los cambios continuos de ciertos controles se agrupan temporalmente para que Deshacer no tenga un paso por cada pequeño evento. Después se persiste el borrador y se vuelve a generar la tarjeta. El inspector conserva el estado de sus secciones, desplazamiento y foco en las actualizaciones compatibles.
 
-Los niveles Esencial, Profesional y Avanzado muestran distintas cantidades de controles sobre el mismo objeto. No son tres motores de renderizado diferentes.
+Los modos Esencial y Avanzado muestran distintas cantidades de controles sobre el mismo objeto y comparten motor de renderizado.
 
 ## 4. Lienzo, arrastre y tamaños independientes
 
@@ -79,6 +96,10 @@ El trazado de tendencia dinámico se construye con tablas virtuales y `CONCATENA
 
 Esta separación explica por qué verás lógica de tendencia tanto en `charts.mjs` como en `dax.mjs`: una dibuja datos de muestra y la otra genera el programa que calculará y dibujará los datos del modelo.
 
+Cuando la tarjeta requiere calendario, respeta sus filtros explícitos; sin ellos, utiliza los últimos doce meses móviles hasta la última fecha con datos de la medida. Valor actual, objetivo basado en medida y referencia personalizada comparten ese conjunto de fechas. Las constantes no se filtran. Sin calendario requerido, conserva el contexto de filtro original. Una medida del usuario que quite filtros internamente puede modificar esta semántica.
+
+YoY/MoM desplazan las fechas con `EDATE` y requieren que existan todas las fechas de referencia. Período anterior requiere selección continua y cobertura completa del intervalo anterior. Las selecciones discontinuas se indican con un asterisco; las tendencias duplicadas calculan su propio período y calendario. Para reglas fiscales particulares, utiliza medidas de negocio específicas y comprueba el resultado en Power BI.
+
 ## 8. Guardado y protección de cambios
 
 El estado se conserva en el navegador con claves como `kpi-atelier-draft`, `kpi-atelier-saved`, `kpi-atelier-themes` y `kpi-atelier-edit-state`. No hay un servicio remoto de diseños.
@@ -92,7 +113,7 @@ El borrador recuperable y el diseño guardado son conceptos distintos. `baseline
 | Quieres cambiar… | Empieza por… |
 | --- | --- |
 | Un tema o una plantilla | `THEMES` y `TEMPLATES` en `model.mjs`. |
-| La interfaz de un panel | `renderInspector()`, `elementInspector()` o `chartPanel()` en `app.mjs`. |
+| La interfaz de un panel | `inspector.mjs`, `binding-ui.mjs` o `studio-ui.mjs`, según el panel. |
 | Las posiciones iniciales | `presetFrames()` en `layout.mjs`. |
 | Cómo se pinta una tarjeta | `cardHTML()` en `cards.mjs`. |
 | Colores y efectos | `appearance.mjs`. |
@@ -102,6 +123,14 @@ El borrador recuperable y el diseño guardado son conceptos distintos. `baseline
 
 Como primer ejercicio, duplica una plantilla en `TEMPLATES`, dale un `id` único y cambia el título y el tema. Después revisa su vista previa, exporta HTML y DAX y ejecuta las pruebas. La prueba de catálogo contiene un recuento explícito de plantillas; si amplías el catálogo, actualiza también esa expectativa.
 
-## 10. Límites de esta copia
+## 10. Conexión local y límites de validación
 
-Es una exportación del código actual, no una reescritura ni una certificación de ausencia de errores. Las 45 pruebas automáticas pasan, pero no sustituyen la validación interactiva y visual en navegador ni la ejecución de la medida con un modelo real en Power BI. El acceso privado del sitio original y su infraestructura de publicación no forman parte del motor de la aplicación.
+La API exige el mismo origen HTTP exacto y un Host local válido, incluido el puerto. Rechaza `Origin: null`, por lo que abrir desde `file://` no permite utilizar el bridge. `GET /api/health` devuelve identidad, versión y protocolo para que el lanzador detecte un servicio ajeno o incompatible. El lanzador recibe servidor y base por `KPI_LAUNCH_SERVER` y `KPI_LAUNCH_DATABASE`, y los codifica como parámetros de URL.
+
+Antes de guardar se consulta de nuevo el catálogo. El backend exige servidor local, base y tabla explícitos y `expectedExpression`: `null` para una medida nueva, o la expresión revisada para una existente. Si esta cambió, devuelve `409 CONFLICT` y exige nueva revisión. No sustituye un destino inexistente por otro. Esta comparación optimista no constituye un bloqueo transaccional frente a editores externos.
+
+El transporte serializa operaciones con identificadores y tiempos máximos. Un fallo después de enviar una escritura puede devolver `outcomeUnknown`; se debe consultar el estado del modelo antes de decidir cómo continuar. No hay repetición automática de escrituras. SSE comparte un sondeo sin solapes, envía resultados frescos y libera conexiones al cerrar la página.
+
+La lectura PBIP admite un solo modelo semántico por selección: hasta 10 MB por archivo, 50 MB acumulados, 1.000 archivos de modelo, 10.000 entradas y 16 niveles de profundidad. Ambas vías de selección de carpeta usan las mismas reglas; seleccionar otra carpeta cancela el análisis anterior. Se extraen metadatos, no se evalúan medidas ni relaciones.
+
+Desarrollo: Node.js 22 o superior, `npm ci`, `npm run typecheck`, `npm test` y `npm run test:browser`; `npm run check` ejecuta las tres comprobaciones. CI verifica Node 22/24 en Windows y Linux y regresiones de escritorio con Chromium. Las pruebas del bridge real que requieren Windows se omiten en Linux. Los tests PowerShell de escritura usan objetos simulados y los de navegador simulan la API: no modifican ni evalúan un modelo semántico real. DAX, relaciones y compatibilidad del visual HTML/SVG requieren comprobación en Power BI.
