@@ -45,7 +45,7 @@
   text-align:center;
   font-size:9px;
   color:var(--color-text-muted);
-  padding:8px 3px;
+  padding:7px 3px;
   border-radius:5px
 }
 .mode-switch button.active {
@@ -413,7 +413,7 @@
 }
 .filter-pills button {
   font-size:10px;
-  padding:8px 12px;
+  padding:7px 10px;
   border-radius:5px;
   color:var(--color-text-secondary);
   background:var(--color-surface-card);

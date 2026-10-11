@@ -14,6 +14,9 @@ import { COLOR_ROLES, paletteFrom, hexToHSV, hsvToHex, contrastRatio } from './c
 import { clamp } from './elements.mjs';
 import { ICON_OPTIONS } from './icons.mjs';
 import { generateDAX } from './dax.mjs';
+import { fetchLivePbiModel } from './pbip.mjs';
+import { reviewMeasure, measureDestination } from './preflight.mjs';
+import { directBindingFields, directBindingElements, bindingRevealOffset } from './bindings.mjs';
 import {
   $, btn, ib, getC, setC, persist, toast, getPbipModel, setPbipModel,
   getFriendlyReportName, customThemes, getPaletteDraft, setPaletteDraft,
@@ -24,6 +27,9 @@ import {
 
 let lastFocus = null;
 let pendingInjectAction = null;
+let modalDismiss = null;
+let modalRevision = 0;
+let pendingExportAction = null;
 export function setPendingInjectAction(fn) { pendingInjectAction = fn; }
 export function getPendingInjectAction() { return pendingInjectAction; }
 export function clearPendingInjectAction() { pendingInjectAction = null; }
@@ -44,16 +50,23 @@ function callFitThumbs() {
 // ----------------------------------------------------
 // Ciclo de Vida de Modales Genéricos
 // ----------------------------------------------------
-export function openModal(title, subtitle, body, footer = '', cl = '') {
+export function openModal(title, subtitle, body, footer = '', cl = '', onDismiss = null) {
   const modal = $('#modal');
   if (!modal) return;
-  lastFocus = document.activeElement;
+  cancelBindingReveal();
+  modalRevision++;
+  modalDismiss = onDismiss;
+  if (!modal.open) lastFocus = document.activeElement;
   modal.className = cl;
   modal.innerHTML = `<div class="modal-heading"><div><span class="overline">KPI ATELIER</span><h2>${title}</h2>${subtitle ? `<p>${subtitle}</p>` : ''}</div>${ib('close-modal', 'Cerrar', 'close')}</div><div class="modal-body">${body}</div>${footer ? `<div class="modal-footer">${footer}</div>` : ''}`;
   if (!modal.open) modal.showModal();
 }
 
 export function closeModal() {
+  cancelBindingReveal();
+  const returnTo = modalDismiss;
+  modalDismiss = null;
+  modalRevision++;
   const ctx = getActiveContext();
   ctx.pendingNavigation = null;
   const t = $('#toast');
@@ -62,6 +75,7 @@ export function closeModal() {
   }
   const modal = $('#modal');
   if (modal?.close) modal.close();
+  if (returnTo) { returnTo(); return; }
   lastFocus?.focus();
 }
 
@@ -70,7 +84,43 @@ export function closeModal() {
 // ----------------------------------------------------
 export const filename = () => getC().measureName.trim().replace(/[^\p{L}\p{N}_-]/gu, '_') || 'kpi-atelier';
 
-export function download(name, text, type) {
+export function requestExport(action, conf = getC()) {
+  const review = reviewMeasure(conf, getPbipModel());
+  const errors = review.issues.filter(x => x.level === 'error');
+  if (!errors.length && !review.missing.length && !review.unverified.length) return action();
+  const modal = $('#modal');
+  const previous = modal?.open ? { html: modal.innerHTML, className: modal.className, dismiss: modalDismiss } : null;
+  const restore = () => {
+    pendingExportAction = null;
+    if (!previous) return;
+    modalRevision++;
+    modal.className = previous.className;
+    modal.innerHTML = previous.html;
+    modalDismiss = previous.dismiss;
+    if (!modal.open) modal.showModal();
+  };
+  pendingExportAction = action;
+  const pending = review.references.filter(r => r.status === 'error' || r.status === 'unknown');
+  openModal('Exportar con referencias pendientes', 'Revisa estos datos antes de descargar el archivo.',
+    `<p class="export-warning-note">Hay campos vacíos, referencias no encontradas o datos sin comprobar. Puedes exportar igualmente; corrígelos antes de aplicar la medida en Power BI.</p>
+    <div class="measure-review-references">${pending.map(r => `<div class="measure-review-reference ${r.status}"><div><span>${esc(r.label)}</span><strong>${esc(r.value)}</strong></div><span class="measure-review-ref-status">${r.empty ? 'Sin configurar' : r.status === 'error' ? 'No encontrada' : 'Sin comprobar'}</span></div>`).join('')}</div>
+    ${errors.length ? `<div class="measure-review-issues">${errors.map(x => `<p class="error">${icon('info',12)}<span>${esc(x.text)}</span></p>`).join('')}</div>` : ''}`,
+    btn('close-modal', 'Cancelar', null, 'button secondary') + btn('confirm-export-anyway', 'Exportar igualmente', 'download', 'button primary'),
+    'export-warning-modal', restore);
+}
+
+export function confirmExport() {
+  const action = pendingExportAction;
+  if (!action) return;
+  closeModal();
+  return action();
+}
+
+export function download(name, text, type, conf = getC()) {
+  return requestExport(() => downloadFile(name, text, type), conf);
+}
+
+function downloadFile(name, text, type) {
   const url = URL.createObjectURL(new Blob([text], { type }));
   const a = document.createElement('a');
   a.href = url;
@@ -81,12 +131,16 @@ export function download(name, text, type) {
 }
 
 export function downloadJSON(conf = getC(), name = filename()) {
-  download(name + '.json', JSON.stringify({ schema: 'kpi-atelier', version: 1, config: conf }, null, 2), 'application/json');
+  download(name + '.json', JSON.stringify({ schema: 'kpi-atelier', version: 1, config: conf }, null, 2), 'application/json', conf);
 }
 
-export async function copyDax() {
-  const c = getC();
-  const dax = generateDAX(c);
+export function copyDax() {
+  const c = structuredClone(getC());
+  return requestExport(() => copyDaxText(c), c);
+}
+
+async function copyDaxText(c) {
+  const dax = generateDAX(c, { allowIncomplete: true });
   try {
     await navigator.clipboard.writeText(dax);
     toast('DAX copiado. Ya puedes pegarlo en Power BI.');
@@ -104,21 +158,67 @@ export async function copyDax() {
 export function exportModal() {
   const c = getC();
   const pbipModel = getPbipModel();
-  const errors = checks(c).filter(x => x.level === 'error');
-  if (errors.length) { validationModal(); return; }
-  const dax = generateDAX(c);
+  const dax = generateDAX(c, { allowIncomplete: true });
   const isLive = Boolean(pbipModel?.isLiveConnection);
-  const cleanCurrentName = (c.measureName || '').replace(/^\[|\]$/g, '').trim().toLowerCase();
-  const alreadyExists = isLive && (pbipModel?.measures || []).some(m => (m.name || '').toLowerCase() === cleanCurrentName);
-  const injectBtn = isLive ? `<button class="button primary btn-inject" data-action="inject-live-measure">${icon('sparkles', 14)}<span>${alreadyExists ? 'Sobrescribir en Power BI' : 'Crear en Power BI'}</span></button>` : '';
+  const alreadyExists = isLive && Boolean(measureDestination(c, pbipModel).existing);
+  const ready = reviewMeasure(c, pbipModel).valid;
+  const bannerText = !ready ? 'Vista DAX · Hay referencias pendientes de configurar o comprobar' : isLive ? `Conectado a '${getFriendlyReportName(pbipModel)}' · Referencias verificadas` : 'Medida DAX lista · Compatible con HTML Content Secure en Power BI';
+  const injectBtn = isLive ? `<button class="button primary btn-inject" data-action="inject-live-measure" ${ready ? '' : 'disabled title="Corrige las referencias pendientes en Conectar datos"'}>${icon('sparkles', 14)}<span>${alreadyExists ? 'Sobrescribir en Power BI' : 'Crear en Power BI'}</span></button>` : '';
 
   openModal(
     'Tu diseño. Tu medida DAX.',
     'Copia, pega y deja que tus datos hagan el resto.',
-    `<div class="export-banner ${isLive ? 'is-live' : ''}">${icon(isLive ? 'sparkles' : 'code', 15)}<span>${isLive ? `Conectado en vivo a '${esc(getFriendlyReportName(pbipModel))}' · Inyección directa disponible` : 'Medida DAX lista · Compatible con HTML Content Secure en Power BI'}</span></div><div class="code-bar"><span>${icon('code', 15)} ${esc(c.measureName)}.dax</span><span>${dax.split('\n').length} líneas · DAX estándar</span></div><pre class="dax-code" tabindex="0"><code>${esc(dax)}</code></pre><div class="export-notice">${icon('info', 16)}<p>${isLive ? 'La medida se inyectará de forma automática en tu modelo de Power BI Desktop respetando tablas y relaciones existentes. También puedes copiar el código manualmente si lo prefieres.' : 'Copia el código DAX o descárgalo para usarlo en tu modelo. En Power BI Desktop, añade el visual HTML Content Secure y arrastra esta medida al campo de valores.'}</p></div>`,
-    `<div class="export-other">${btn('download-json', 'Configuración JSON', 'download', 'button quiet')}${btn('download-html', 'Vista HTML', 'download', 'button quiet')}${btn('pbi-infographic', '¿Cómo usar en Power BI?', 'sparkles', 'button quiet btn-pbi-guide')}</div><div class="export-main">${injectBtn}${btn('download-dax', 'Descargar .dax', 'download', 'button secondary')}${btn('copy-dax', 'Copiar DAX', 'copy', isLive ? 'button secondary' : 'button primary')}</div>`,
+    `<div class="export-top-actions">${btn('open-data-modal', 'Conectar datos del modelo', 'chevronLeft', 'button quiet export-back')}${btn('pbi-infographic', '¿Cómo usar en Power BI?', 'book', 'button quiet btn-pbi-guide')}</div><div class="export-banner ${isLive ? 'is-live' : ''}">${icon(isLive ? 'sparkles' : 'code', 15)}<span>${esc(bannerText)}</span></div><div class="code-bar"><span>${icon('code', 15)} ${esc(c.measureName)}.dax</span><div class="code-bar-actions"><span>${dax.split('\n').length} líneas</span>${btn('copy-dax', 'Copiar DAX', 'copy', 'code-copy')}</div></div><pre class="dax-code" tabindex="0"><code>${esc(dax)}</code></pre><div class="export-notice">${icon('info', 16)}<p>${isLive ? 'Comprueba los datos y crea la medida en tu informe conectado. También puedes copiar el código o descargarlo.' : 'En Power BI Desktop, añade el visual HTML Content Secure y arrastra esta medida al campo de valores.'}</p></div>`,
+    `<div class="export-other">${btn('download-json', 'Configuración JSON', 'download', 'button quiet export-download')}${btn('download-html', 'Vista HTML', 'download', 'button quiet export-download')}${btn('download-dax', '.dax', 'download', 'button quiet export-download', 'title="Descargar medida DAX"')}</div><div class="export-main">${btn('review-live-measure', 'Comprobar datos', 'check', 'button secondary')}${injectBtn}</div>`,
     'export-modal'
   );
+}
+
+function renderMeasureReview(c, model, connection, error = '') {
+  const review = reviewMeasure(c, model);
+  const isLive = Boolean(model?.isLiveConnection);
+  const connected = connection === 'connected';
+  const ready = connected && review.valid;
+  const status = connection === 'loading' ? 'Comprobando conexión…' : connected ? 'Conexión verificada' :
+    connection === 'error' ? 'Conexión no disponible' : model ? 'Modelo PBIP · Sin conexión en vivo' : 'Sin modelo conectado';
+  const row = (label, value) => `<div class="measure-review-row"><dt>${label}</dt><dd>${esc(value || '—')}</dd></div>`;
+  const labels = { ok: 'Encontrada', error: 'No encontrada', unknown: 'Sin comprobar', constant: 'Valor fijo' };
+  const body = `<div class="measure-review-status ${connected ? 'is-connected' : connection === 'error' ? 'has-error' : ''}" role="status">${connection === 'loading' ? '<span class="loading-spinner"></span>' : icon(connected ? 'check' : 'info', 15)}<span>${status}</span></div>
+    ${error ? `<p class="measure-review-error">${esc(error)}</p>` : ''}
+    <section class="measure-review-section"><h3>Conexión</h3><dl>
+      ${row('Informe', model ? getFriendlyReportName(model) : 'Sin vincular')}
+      ${row('Modelo', model?.modelName)}
+      ${row(isLive ? 'Servidor' : 'Origen', isLive ? model.server : model ? 'Carpeta PBIP' : 'Sin conexión')}
+    </dl></section>
+    <section class="measure-review-section"><h3>Medida y referencias</h3><dl>
+      ${row('Nombre de la medida', c.measureName)}
+      ${row('Acción', review.existing ? 'Sobrescribir medida existente' : 'Crear nueva medida')}
+      ${row('Tabla de destino', model ? review.table : 'Se determinará al conectar')}
+    </dl><div class="measure-review-references">${review.references.map(r => `<div class="measure-review-reference ${r.status}"><div><span>${esc(r.label)}</span><strong>${esc(r.value)}</strong>${r.table ? `<small>Tabla ${esc(r.table)}</small>` : ''}</div><span class="measure-review-ref-status">${icon(r.status === 'ok' || r.status === 'constant' ? 'check' : 'info', 12)}${r.empty ? 'Sin configurar' : labels[r.status]}</span></div>`).join('')}</div></section>
+    <section class="measure-review-section"><h3>Tarjeta</h3><dl>${row('Título', c.title)}${row('Dimensiones', `${c.width} × ${c.height} px`)}</dl></section>
+    ${review.issues.length ? `<div class="measure-review-issues">${review.issues.map(x => `<p class="${x.level}">${icon('info', 12)}<span>${esc(x.text)}</span></p>`).join('')}</div>` : ''}
+    <p class="measure-review-note">Comprueba conexión, configuración y referencias. Los valores y las relaciones se validan al usar la medida en Power BI.</p>`;
+  openModal('Comprobar antes de aplicar', 'Revisa el destino y los datos de tu tarjeta.', body,
+    `<div class="measure-review-back">${btn('back-to-export', 'Volver al DAX', 'chevronLeft', 'button secondary')}${btn('open-data-modal', 'Editar datos', 'sliders', 'button quiet')}</div>${isLive ? btn('inject-live-measure', review.existing ? 'Sobrescribir en Power BI' : 'Crear en Power BI', 'sparkles', 'button primary btn-inject', ready ? '' : 'disabled') : ''}`,
+    'measure-review-modal', exportModal);
+  return modalRevision;
+}
+
+export async function openMeasureReviewModal() {
+  const c = structuredClone(getC());
+  const model = getPbipModel();
+  const isLive = Boolean(model?.isLiveConnection && model.server);
+  const revision = renderMeasureReview(c, model, isLive ? 'loading' : 'offline');
+  if (!isLive) return;
+  try {
+    const catalog = await fetchLivePbiModel(model.server, model.database || '');
+    if (model.database && catalog.database !== model.database) throw new Error('El modelo conectado ha cambiado. Vuelve a conectar el informe.');
+    if (modalRevision !== revision || !$('#modal')?.open) return;
+    setPbipModel(catalog, false);
+    renderMeasureReview(c, catalog, 'connected');
+  } catch (err) {
+    if (modalRevision === revision && $('#modal')?.open) renderMeasureReview(c, model, 'error', err.message || 'No se pudo comprobar el modelo.');
+  }
 }
 
 export function shortcutsModal() {
@@ -246,6 +346,9 @@ export function validationModal() {
 }
 
 export function chooseLiveInstanceModal(instances) {
+  const modal = $('#modal');
+  const returnTo = modal?.className === 'binding-modal' ? openDataBindingModal :
+    modal?.className === 'export-modal' ? exportModal : null;
   const rows = instances.map(inst => {
     const report = inst.reportName || inst.modelName || 'Power BI Desktop';
     return `<div class="pbi-instance-card">
@@ -263,7 +366,8 @@ export function chooseLiveInstanceModal(instances) {
     `Se han detectado ${instances.length} informes abiertos en Power BI Desktop. Elige cuál vincular:`,
     `<div class="pbi-instances-list">${rows}</div>`,
     btn('close-modal', 'Cancelar', null, 'button secondary'),
-    'instance-modal'
+    'instance-modal',
+    returnTo
   );
 }
 
@@ -464,7 +568,7 @@ export function openThemeStudio() {
   openModal(
     'El color también cuenta tu historia.',
     'Explora una paleta, afina los matices y hazla tuya.',
-    `<div class="theme-studio"><aside class="theme-library"><h3>Paletas curadas <span>10</span></h3>${Object.entries(THEMES).map(([id, t]) => themeTile(id, t.name, t)).join('')}<div class="custom-theme-heading"><h3>Tus temas</h3></div><div id="custom-theme-list">${customThemes.length ? customThemes.map(t => `<div class="custom-theme-row">${themeTile(t.id, t.name, t.colors, true)}<button data-delete-theme="${t.id}" title="Eliminar tema guardado" aria-label="Eliminar tema ${esc(t.name)}">${icon('trash', 13)}</button></div>`).join('') : '<p class="geometry-note">Guarda tu primera paleta para reutilizarla.</p>'}</div></aside><section class="color-workbench"><h3>Ajusta un color</h3><div class="color-roles">${COLOR_ROLES.map(([key, label]) => `<button data-color-role="${key}" class="${key === 'accent' ? 'active' : ''}"><i style="background:${draft[key]}"></i><span>${label}</span></button>`).join('')}</div><div class="color-map-label"><strong id="active-color-label">Acento</strong><span>Saturación · luminosidad</span></div><div id="color-map" class="color-map" tabindex="0" role="slider" aria-label="Mapa de color. Flechas izquierda y derecha: saturación. Arriba y abajo: luminosidad." aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(getColorHSV().s * 100)}"><span id="color-map-cursor"></span></div><label class="hue-label" for="color-hue">Matiz <span id="hue-value"></span></label><input id="color-hue" class="hue-slider" type="range" min="0" max="360" step="1" value="${Math.round(getColorHSV().h)}"><div class="color-hex-row"><span id="active-color-preview"></span><label for="color-hex">HEX</label><input id="color-hex" maxlength="7" value="${draft.accent.toUpperCase()}" spellcheck="false" aria-label="Código hexadecimal"><span id="hex-error" role="status"></span></div><div class="quick-colors">${['#ffffff', '#17272b', '#c3ec83', '#477568', '#8771bb', '#bd8144', '#527bdd', '#bd758b', '#3d9596', '#b8664d', '#c0b2ee', '#000000'].map(color => `<button data-quick-color="${color}" style="background:${color}" title="${color}" aria-label="Usar ${color}"></button>`).join('')}</div><p class="geometry-note">Arrastra sobre el mapa o usa las flechas. Mayús ajusta de 5 en 5.</p></section><section class="palette-preview-column"><h3>Así se verá tu tarjeta</h3><div id="palette-preview" class="palette-preview"></div><div id="palette-contrast" class="palette-contrast"></div><label class="save-label" for="theme-name">Nombre para tu paleta</label><input id="theme-name" class="save-input" maxlength="40" value="${esc(c.customThemeName || 'Mi paleta')}"><p class="geometry-note">Tus paletas se guardan en este navegador. Los colores también viajan con el JSON de cada tarjeta.</p></section></div>`,
+    `<div class="theme-studio"><aside class="theme-library"><h3>Paletas curadas <span>${Object.keys(THEMES).length}</span></h3>${Object.entries(THEMES).map(([id, t]) => themeTile(id, t.name, t)).join('')}<div class="custom-theme-heading"><h3>Tus temas</h3></div><div id="custom-theme-list">${customThemes.length ? customThemes.map(t => `<div class="custom-theme-row">${themeTile(t.id, t.name, t.colors, true)}<button data-delete-theme="${t.id}" title="Eliminar tema guardado" aria-label="Eliminar tema ${esc(t.name)}">${icon('trash', 13)}</button></div>`).join('') : '<p class="geometry-note">Guarda tu primera paleta para reutilizarla.</p>'}</div></aside><section class="color-workbench"><h3>Ajusta un color</h3><div class="color-roles">${COLOR_ROLES.map(([key, label]) => `<button data-color-role="${key}" class="${key === 'accent' ? 'active' : ''}"><i style="background:${draft[key]}"></i><span>${label}</span></button>`).join('')}</div><div class="color-map-label"><strong id="active-color-label">Acento</strong><span>Saturación · luminosidad</span></div><div id="color-map" class="color-map" tabindex="0" role="slider" aria-label="Mapa de color. Flechas izquierda y derecha: saturación. Arriba y abajo: luminosidad." aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(getColorHSV().s * 100)}"><span id="color-map-cursor"></span></div><label class="hue-label" for="color-hue">Matiz <span id="hue-value"></span></label><input id="color-hue" class="hue-slider" type="range" min="0" max="360" step="1" value="${Math.round(getColorHSV().h)}"><div class="color-hex-row"><span id="active-color-preview"></span><label for="color-hex">HEX</label><input id="color-hex" maxlength="7" value="${draft.accent.toUpperCase()}" spellcheck="false" aria-label="Código hexadecimal"><span id="hex-error" role="status"></span></div><div class="quick-colors">${['#ffffff', '#17272b', '#c3ec83', '#477568', '#8771bb', '#bd8144', '#527bdd', '#bd758b', '#3d9596', '#b8664d', '#c0b2ee', '#000000'].map(color => `<button data-quick-color="${color}" style="background:${color}" title="${color}" aria-label="Usar ${color}"></button>`).join('')}</div><p class="geometry-note">Arrastra sobre el mapa o usa las flechas. Mayús ajusta de 5 en 5.</p></section><section class="palette-preview-column"><h3>Así se verá tu tarjeta</h3><div id="palette-preview" class="palette-preview"></div><div id="palette-contrast" class="palette-contrast"></div><label class="save-label" for="theme-name">Nombre para tu paleta</label><input id="theme-name" class="save-input" maxlength="40" value="${esc(c.customThemeName || 'Mi paleta')}"><p class="geometry-note">Tus paletas se guardan en este navegador. Los colores también viajan con el JSON de cada tarjeta.</p></section></div>`,
     btn('close-modal', 'Cancelar', null, 'button quiet') + btn('save-theme', 'Guardar y aplicar', 'save', 'button secondary') + btn('apply-theme', 'Aplicar paleta', 'check', 'button primary'),
     'theme-modal'
   );
@@ -562,35 +666,117 @@ export const ELEMENT_TO_FIELD = {
   referenceValue: 'compareMeasure'
 };
 
-export function highlightBindingElements(key, active) {
-  const baseKey = key.includes('__') ? key.split('__')[0] : key;
-  const targets = FIELD_TO_ELEMENTS[key] || FIELD_TO_ELEMENTS[baseKey] || (resolveElementDef(baseKey)?.isDuplicate ? [baseKey] : []);
-  const card = document.getElementById('binding-card-inner');
-  if (!card) return;
-  targets.forEach(id => {
-    const el = card.querySelector(`[data-element="${id}"]`);
-    if (el) el.classList.toggle('binding-highlight', active);
+export function getBindingElements(key) {
+  return directBindingElements(getC(), key);
+}
+
+export function getBindingFieldsForElement(id) {
+  const available = new Set(Array.from(document.querySelectorAll('[data-binding-field]')).map(el => el.dataset.bindingField));
+  return directBindingFields(getC(), id).filter(key => available.has(key));
+}
+
+let bindingHoverContext = null;
+let bindingFocusContext = null;
+let bindingRevealTimer;
+let bindingRevealRevision = 0;
+let bindingRevealSignature = '';
+
+export function cancelBindingReveal() {
+  clearTimeout(bindingRevealTimer);
+  bindingRevealRevision++;
+  bindingRevealSignature = '';
+}
+
+// Hover never transfers focus, and moving through child nodes does not restart it.
+export function revealBindingFields(keys, elementId) {
+  const fields = Array.from(document.querySelectorAll('[data-binding-field]'));
+  const ownKeys = keys.filter(key => key === elementId || key.startsWith(elementId + '__'));
+  const targets = (ownKeys.length ? ownKeys : keys).map(key => fields.find(el => el.dataset.bindingField === key)).filter(Boolean);
+  if (!targets.length) return;
+  const column = targets[0].closest('.binding-fields-column');
+  const body = targets[0].closest('.modal-body');
+  const scroller = column?.scrollHeight > column?.clientHeight + 1 ? column : body;
+  if (!scroller?.getBoundingClientRect || scroller.scrollHeight <= scroller.clientHeight + 1) return;
+  const rect = scroller.getBoundingClientRect();
+  const bodyRect = body?.getBoundingClientRect() || rect;
+  const viewport = { top: Math.max(rect.top, bodyRect.top), bottom: Math.min(rect.bottom, bodyRect.bottom) };
+  const bounds = targets.map(el => el.getBoundingClientRect());
+  let group = { top: Math.min(...bounds.map(b => b.top)), bottom: Math.max(...bounds.map(b => b.bottom)) };
+  if (group.bottom - group.top > viewport.bottom - viewport.top - 20) {
+    group = bounds.find(b => b.top < viewport.top + 10 || b.bottom > viewport.bottom - 10) || bounds[0];
+  }
+  const start = scroller.scrollTop;
+  const end = bindingRevealOffset(group, viewport, start, scroller.scrollHeight - scroller.clientHeight);
+  if (Math.abs(end - start) < 1) return;
+  if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches || typeof requestAnimationFrame !== 'function') {
+    scroller.scrollTop = end;
+    return;
+  }
+  const revision = bindingRevealRevision;
+  let began;
+  const step = now => {
+    if (revision !== bindingRevealRevision || !scroller.isConnected) return;
+    began ??= now;
+    const t = Math.min(1, (now - began) / 180);
+    scroller.scrollTop = start + (end - start) * (1 - (1 - t) ** 3);
+    if (t < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
+function renderBindingHighlight() {
+  const context = bindingHoverContext ?? bindingFocusContext;
+  const activeKeys = context?.element ? getBindingFieldsForElement(context.element) : context?.keys || [];
+  // Visual → fields keeps that visual alone; field → visuals uses direct links.
+  const activeElements = new Set(context?.element ? activeKeys.length ? [context.element] : [] : activeKeys.flatMap(getBindingElements));
+  document.querySelectorAll('#binding-card-inner [data-element]').forEach(el => {
+    el.classList.toggle('binding-highlight', activeElements.has(el.dataset.element));
+  });
+  document.querySelectorAll('[data-binding-field]').forEach(el => {
+    el.classList.toggle('is-binding-highlight', activeKeys.includes(el.dataset.bindingField));
   });
 }
 
-export function updateBindingFieldStatus(key) {
+export function highlightBindingContext(context, source = 'hover') {
+  if (source === 'focus') bindingFocusContext = context;
+  else {
+    bindingHoverContext = context;
+    const signature = context?.element ? context.element + ':' + context.keys.join('|') : '';
+    if (signature !== bindingRevealSignature) {
+      cancelBindingReveal();
+      bindingRevealSignature = signature;
+      if (signature && context.keys.length) {
+        const revision = bindingRevealRevision;
+        bindingRevealTimer = setTimeout(() => {
+          if (revision === bindingRevealRevision) revealBindingFields(getBindingFieldsForElement(context.element), context.element);
+        }, 90);
+      }
+    }
+  }
+  renderBindingHighlight();
+}
+
+export function highlightBindingElements(key, active) {
+  highlightBindingContext(active ? { keys: [key] } : null, 'focus');
+}
+
+export function updateBindingFieldStatus(key, review = reviewMeasure(getC(), getPbipModel())) {
   const c = getC();
   const circ = key === 'measureName' ? getCircularConflict(c) : null;
-  const isErr = Boolean(
-    (key === 'measure' && !c.measure.trim()) ||
-    (key === 'measureName' && (!isValidMeasureName(c.measureName) || circ)) ||
-    (key === 'dateTable' && needsDate(c) && !c.dateTable.trim()) ||
-    (key === 'dateColumn' && needsDate(c) && !c.dateColumn.trim()) ||
-    (key === 'targetMeasure' && (needsGoal(c) || (needsCompare(c) && c.comparison === 'target')) && !c.targetMeasure.trim()) ||
-    (key === 'compareMeasure' && needsCompare(c) && c.comparison === 'custom' && !c.compareMeasure.trim())
-  );
+  const result = review.fields[key];
+  const isErr = result?.status === 'error';
+  const unverified = result?.status === 'unknown';
   const wrap = document.querySelector(`[data-binding-field="${key}"] .binding-input-wrap`);
   const iconEl = document.getElementById(`status-icon-${key}`);
   const helpEl = document.getElementById(`help-${key}`);
-  if (wrap) wrap.classList.toggle('is-invalid', isErr);
+  if (wrap) {
+    wrap.classList.toggle('is-invalid', isErr);
+    wrap.classList.toggle('is-unverified', unverified);
+  }
+  document.getElementById(`f-bind-${key}`)?.setAttribute('aria-invalid', String(isErr));
   if (iconEl) {
-    iconEl.className = 'binding-input-status ' + (isErr ? 'invalid' : c[key] ? 'valid' : 'optional');
-    iconEl.innerHTML = icon(isErr ? 'close' : c[key] ? 'check' : 'info', isErr || c[key] ? 14 : 13);
+    iconEl.className = 'binding-input-status ' + (isErr ? 'invalid' : unverified ? 'unverified' : result ? 'valid' : 'optional');
+    iconEl.innerHTML = icon(isErr ? 'close' : unverified || !result ? 'info' : 'check', 14);
   }
   if (helpEl) {
     helpEl.classList.toggle('error', isErr);
@@ -599,7 +785,11 @@ export function updateBindingFieldStatus(key) {
       helpEl.style.display = '';
       helpEl.classList.remove('is-hidden');
     } else if (isErr) {
-      helpEl.textContent = 'Este campo es obligatorio para la tarjeta actual';
+      helpEl.textContent = key === 'measureName' ? 'Introduce un nombre de medida DAX válido.' : result.empty ? 'Este campo es obligatorio. Selecciona una referencia propia.' : 'No se encuentra en el modelo conectado.';
+      helpEl.style.display = '';
+      helpEl.classList.remove('is-hidden');
+    } else if (unverified) {
+      helpEl.textContent = 'Sin comprobar: conecta el modelo para validar esta referencia.';
       helpEl.style.display = '';
       helpEl.classList.remove('is-hidden');
     } else {
@@ -620,45 +810,36 @@ export function updateBindingFieldStatus(key) {
 export function updateBindingModalStatus() {
   const statusEl = document.getElementById('binding-modal-status');
   if (!statusEl) return;
-  const c = getC();
-  const errors = checks(c).filter(x => x.level === 'error');
-  statusEl.className = 'binding-status-bar ' + (errors.length ? 'has-error' : '');
-  statusEl.innerHTML = `${icon(errors.length ? 'info' : 'check', 15)}<span>${errors.length ? `${errors.length} campo${errors.length > 1 ? 's' : ''} pendiente${errors.length > 1 ? 's' : ''} de configurar` : 'Configuración completa · Lista para exportar DAX'}</span>`;
+  const review = reviewMeasure(getC(), getPbipModel());
+  document.querySelectorAll('[data-binding-field]').forEach(el => updateBindingFieldStatus(el.dataset.bindingField, review));
+  const pending = new Set([...review.missing, ...review.unverified, ...review.issues.filter(x => x.level === 'error')].map(x => x.field || x.text)).size;
+  statusEl.className = 'binding-status-bar ' + (review.missing.length || review.issues.some(x => x.level === 'error') ? 'has-error' : '');
+  statusEl.innerHTML = `${icon(pending ? 'info' : 'check', 15)}<span>${pending ? `${pending} referencia${pending > 1 ? 's' : ''} pendiente${pending > 1 ? 's' : ''} de configurar o comprobar` : 'Referencias verificadas · Lista para generar DAX'}</span>`;
 }
 
 export function updateBindableElements() {
   const inner = document.getElementById('binding-card-inner');
   if (!inner) return;
-  const c = getC();
-  const activeFields = new Set(['measure', 'measureName']);
-  if (needsDate(c)) { activeFields.add('dateTable'); activeFields.add('dateColumn'); }
-  if (needsGoal(c) || c.comparison === 'target') { activeFields.add('targetMeasure'); }
-  if (needsCompare(c) && c.comparison === 'custom') { activeFields.add('compareMeasure'); }
-
   inner.querySelectorAll('[data-element]').forEach(el => {
     const id = el.dataset.element;
-    const def = resolveElementDef(id);
-    const isDuplicate = Boolean(def?.isDuplicate);
-    if (id === 'compareLabel' || (id === 'delta' && c.comparison !== 'custom')) {
-      el.classList.remove('is-bindable', 'binding-highlight');
-      el.removeAttribute('role');
-      el.removeAttribute('tabindex');
-      return;
-    }
-    const fieldKey = ELEMENT_TO_FIELD[id];
-    const isDupBindable = isDuplicate && (def.baseId === 'value' || (def.baseId === 'delta' && (elementState(c, id).comparison || c.comparison) === 'custom') || (['goalLabel', 'progressLabel', 'progress'].includes(def.baseId) && (needsGoal(c) || c.comparison === 'target')) || def.baseId === 'trend');
-    const isBindable = isDupBindable || Boolean(fieldKey && activeFields.has(fieldKey));
+    const isBindable = getBindingFieldsForElement(id).length > 0;
     el.classList.toggle('is-bindable', isBindable);
-    if (!isBindable) {
+    if (isBindable) {
+      el.setAttribute('role', 'button');
+      el.setAttribute('tabindex', '0');
+      el.setAttribute('aria-label', `Configurar ${resolveElementDef(id)?.label || id}`);
+    } else {
       el.classList.remove('binding-highlight');
       el.removeAttribute('role');
       el.removeAttribute('tabindex');
+      el.removeAttribute('aria-label');
     }
   });
 }
 
 export function fitBindingCard() {
   updateBindableElements();
+  renderBindingHighlight();
   if (typeof requestAnimationFrame === 'function') {
     requestAnimationFrame(() => {
       const wrap = document.querySelector('.binding-card-wrap');
@@ -692,7 +873,7 @@ export function getBindingFieldOptions(key) {
   }
   if (key.endsWith('__dateColumn') || key === 'dateColumn') {
     const targetDupId = key.includes('__') ? key.split('__')[0] : null;
-    const targetDateTable = targetDupId ? (elementState(c, targetDupId).dateTable || c.dateTable) : c.dateTable;
+    const targetDateTable = targetDupId ? elementState(c, targetDupId).dateTable : c.dateTable;
     const curDt = (pbipModel.dateTables || []).find(dt => dt.name.toLowerCase() === (targetDateTable || '').trim().toLowerCase());
     const candidateDateCols = curDt ? curDt.dateColumns : Array.from(new Set((pbipModel.dateTables || []).flatMap(dt => dt.dateColumns)));
     return candidateDateCols.map(col => {
@@ -718,9 +899,11 @@ export function renderBindingDropdown(key, filterText = '') {
   let currentVal = '';
 
   if (subProp) {
-    currentVal = (elementState(c, dupId)[subProp] || (subProp === 'dateTable' ? c.dateTable : subProp === 'dateColumn' ? c.dateColumn : '') || '').trim().toLowerCase();
+    currentVal = (elementState(c, dupId)[subProp] || '').trim().toLowerCase();
   } else if (def?.isDuplicate) {
-    currentVal = (elementState(c, dupId)[def.baseId === 'delta' ? 'compareMeasure' : ['goalLabel', 'progressLabel', 'progress'].includes(def.baseId) ? 'targetMeasure' : 'measure'] || '').trim().toLowerCase();
+    const st = elementState(c, dupId);
+    const prop = def.baseId === 'delta' ? (st.comparison || c.comparison) === 'target' ? 'targetMeasure' : 'compareMeasure' : ['goalLabel', 'progressLabel', 'progress'].includes(def.baseId) ? 'targetMeasure' : 'measure';
+    currentVal = (st[prop] || '').trim().toLowerCase();
   } else {
     currentVal = (c[key] || '').trim().toLowerCase();
   }
@@ -748,49 +931,41 @@ export function closeAllBindingDropdowns() {
       toggle.setAttribute('aria-expanded', 'false');
       toggle.classList.remove('is-open');
     }
+    menu.parentElement?.querySelector('.binding-input')?.setAttribute('aria-expanded', 'false');
   });
+}
+
+export function openBindingDropdown(key, toggleOpen = false) {
+  const menu = document.getElementById(`dropdown-menu-${key}`);
+  if (!menu) return;
+  const isOpen = menu.classList.contains('is-open');
+  if (isOpen && !toggleOpen) return;
+  closeAllBindingDropdowns();
+  if (isOpen) return;
+  menu.innerHTML = renderBindingDropdown(key, '');
+  menu.classList.add('is-open');
+  const toggle = menu.parentElement?.querySelector('.binding-dropdown-toggle');
+  toggle?.setAttribute('aria-expanded', 'true');
+  toggle?.classList.add('is-open');
+  menu.parentElement?.querySelector('.binding-input')?.setAttribute('aria-expanded', 'true');
 }
 
 export function applyBindingFieldValue(key, val) {
   let c = getC();
-  const pbipModel = getPbipModel();
 
   if (key.includes('__')) {
     const [dupId, prop] = key.split('__');
-    let patch = {};
-    if (prop === 'dateTable') {
-      patch.dateTable = val;
-      if (pbipModel) {
-        const curDt = (pbipModel.dateTables || []).find(dt => dt.name.toLowerCase() === val.trim().toLowerCase());
-        if (curDt && (curDt.primaryDateColumn || curDt.dateColumns[0])) {
-          patch.dateColumn = curDt.primaryDateColumn || curDt.dateColumns[0];
-          const colInput = document.getElementById(`f-bind-${dupId}__dateColumn`);
-          if (colInput) colInput.value = patch.dateColumn;
-        }
-      }
-    } else {
-      patch[prop] = val;
-    }
-    c = updateElement(c, dupId, patch);
+    c = updateElement(c, dupId, { [prop]: val });
   } else if (key.includes('_copy')) {
     const def = resolveElementDef(key);
-    const prop = def?.baseId === 'delta' ? 'compareMeasure' : ['goalLabel', 'progressLabel', 'progress'].includes(def?.baseId) ? 'targetMeasure' : 'measure';
+    const prop = def?.baseId === 'delta' ? (elementState(c, key).comparison || c.comparison) === 'target' ? 'targetMeasure' : 'compareMeasure' : ['goalLabel', 'progressLabel', 'progress'].includes(def?.baseId) ? 'targetMeasure' : 'measure';
     c = updateElement(c, key, { [prop]: val });
   } else if (key === 'targetMeasure') {
     c._targetCustomized = true;
     c = sanitizeConfig({ ...c, targetMeasure: val });
   } else if (key === 'dateTable') {
     c._dateCustomized = true;
-    const patch = { dateTable: val };
-    if (pbipModel) {
-      const curDt = (pbipModel.dateTables || []).find(dt => dt.name.toLowerCase() === val.trim().toLowerCase());
-      if (curDt && (curDt.primaryDateColumn || curDt.dateColumns[0])) {
-        patch.dateColumn = curDt.primaryDateColumn || curDt.dateColumns[0];
-        const colInput = document.getElementById('f-bind-dateColumn');
-        if (colInput) colInput.value = patch.dateColumn;
-      }
-    }
-    c = sanitizeConfig({ ...c, ...patch });
+    c = sanitizeConfig({ ...c, dateTable: val });
   } else if (key === 'measureName') {
     const stripped = val.replace(/^kpi[_\s]+/i, '').replace(/_+/g, ' ').trim();
     const autoTitle = stripped || val.trim();
@@ -839,6 +1014,9 @@ export function applyBindingFieldValue(key, val) {
 }
 
 export function openDataBindingModal(focusKey = null) {
+  bindingHoverContext = null;
+  bindingFocusContext = null;
+  cancelBindingReveal();
   let c = getC();
   const pbipModel = getPbipModel();
   const DUMMY_TARGETS = ['Objetivo EBITDA', 'Objetivo Pedidos', 'Objetivo Ventas', 'Objetivo'];
@@ -852,33 +1030,11 @@ export function openDataBindingModal(focusKey = null) {
     setC(c);
     persist();
   }
-  if (!c.measureName || !c.measureName.trim()) {
-    const baseTitle = (c.title || 'Medida').replace(/[^\p{L}\p{N}_]/gu, '_').replace(/^_+|_+$/g, '') || 'Medida';
-    c.measureName = baseTitle.startsWith('KPI_') ? baseTitle : `KPI_${baseTitle}`;
-    setC(c);
-    persist();
-  }
-  if (pbipModel) {
-    const modelDateTables = pbipModel.dateTables || [];
-    const modelTableNames = (pbipModel.tables || []).map(t => t.toLowerCase());
-    const curTable = (c.dateTable || '').trim().toLowerCase();
-    const tableExists = modelDateTables.some(dt => dt.name.toLowerCase() === curTable) || modelTableNames.includes(curTable);
-    if (!tableExists && modelDateTables.length) {
-      const bestDt = modelDateTables.find(dt => dt.isMarkedDateTable) || modelDateTables.find(dt => dt.isLikelyCalendar) || modelDateTables[0];
-      if (bestDt) {
-        c.dateTable = bestDt.name;
-        c.dateColumn = bestDt.primaryDateColumn || bestDt.dateColumns?.[0] || c.dateColumn;
-        c._dateCustomized = true;
-        setC(c);
-        persist();
-      }
-    }
-  }
 
   const isLive = Boolean(pbipModel?.isLiveConnection);
   const roundtripMeasures = (pbipModel?.measures || []).filter(m => m.configAnnotation);
   const roundtripHTML = roundtripMeasures.length ? `
-    <details class="binding-saved-subbar" open>
+    <details class="binding-saved-subbar">
       <summary class="binding-saved-title">${icon('sparkles', 13)} <span>Tarjetas guardadas en tu modelo (${roundtripMeasures.length})</span>${icon('chevron', 12)}</summary>
       <div class="binding-saved-grid">
         ${roundtripMeasures.map(rm => `
@@ -999,11 +1155,20 @@ export function openDataBindingModal(focusKey = null) {
     </div>`;
   };
 
-  let fieldsHTML = `<div class="binding-fields-column"><div class="binding-fields-card">`;
+  const nameInvalid = !isValidMeasureName(c.measureName);
+  const nameHTML = `<div class="binding-measure-heading" data-binding-field="measureName">
+    <label for="f-bind-measureName">Nombre de la medida DAX resultante</label>
+    <div class="binding-input-wrap binding-name-input-wrap ${nameInvalid ? 'is-invalid' : ''}">
+      <input id="f-bind-measureName" class="binding-input" data-bind-key="measureName" type="text" value="${esc(c.measureName)}" placeholder="MiMedidaDAX" spellcheck="false" autocomplete="off" aria-describedby="help-measureName">
+      <button type="button" class="binding-clear-btn ${c.measureName ? 'is-visible' : ''}" data-action="clear-bind-field" data-field="measureName" title="Borrar nombre" aria-label="Borrar nombre">${icon('eraser', 13)}</button>
+      <span class="binding-input-status ${nameInvalid ? 'invalid' : 'valid'}" id="status-icon-measureName">${icon(nameInvalid ? 'close' : 'check', 14)}</span>
+    </div>
+    <small class="binding-field-help ${nameInvalid ? 'error' : 'is-hidden'}" id="help-measureName" data-default-help="" ${nameInvalid ? '' : 'style="display:none;"'}>${nameInvalid ? 'Introduce un nombre válido para la medida' : ''}</small>
+  </div>`;
+  let fieldsHTML = `<div class="binding-fields-column">${nameHTML}<div class="binding-fields-card">`;
   fieldsHTML += `
-    <div class="binding-section-head"><span>fx</span>Medida principal y salida<small>Obligatorio</small></div>
-    ${fieldMarkup('measure', 'Medida de negocio (existente)', 'fx', '', 'Valor principal')}
-    ${fieldMarkup('measureName', 'Nombre de la medida DAX resultante', 'T', '', 'Título')}`;
+    <div class="binding-section-head"><span>fx</span>Medida principal<small>Obligatorio</small></div>
+    ${fieldMarkup('measure', 'Medida de negocio (existente)', 'fx', '', 'Valor principal')}`;
 
   if (needsDate(c)) {
     fieldsHTML += `
@@ -1011,7 +1176,7 @@ export function openDataBindingModal(focusKey = null) {
       <div class="binding-section-head"><span>📅</span>Calendario y fechas<small>Requerido por tendencia / comparativa</small></div>
       ${fieldMarkup('dateTable', 'Tabla de fechas / Calendario', '田', '', 'Evolución')}
       ${fieldMarkup('dateColumn', 'Columna de fecha única', '▦', '', 'Período')}
-      <div class="field"><label for="f-bind-granularity">Granularidad de tendencia</label><select id="f-bind-granularity" data-key="granularity"><option value="auto" ${c.granularity === 'auto' ? 'selected' : ''}>Automática</option><option value="day" ${c.granularity === 'day' ? 'selected' : ''}>Diaria</option><option value="week" ${c.granularity === 'week' ? 'selected' : ''}>Semanal</option><option value="month" ${c.granularity === 'month' ? 'selected' : ''}>Mensual</option></select><small>Auto: ≤31 días → diaria; ≤120 → semanal; resto → mensual.</small></div>`;
+      <div class="field" data-binding-field="granularity"><label for="f-bind-granularity">Granularidad de tendencia</label><select id="f-bind-granularity" data-key="granularity"><option value="auto" ${c.granularity === 'auto' ? 'selected' : ''}>Automática</option><option value="day" ${c.granularity === 'day' ? 'selected' : ''}>Diaria</option><option value="week" ${c.granularity === 'week' ? 'selected' : ''}>Semanal</option><option value="month" ${c.granularity === 'month' ? 'selected' : ''}>Mensual</option></select><small>Auto: ≤31 días → diaria; ≤120 → semanal; resto → mensual.</small></div>`;
   }
 
   if (needsGoal(c) || (needsCompare(c) && c.comparison === 'target')) {
@@ -1031,10 +1196,8 @@ export function openDataBindingModal(focusKey = null) {
   const activeDupIds = Object.keys(c.elements || {}).filter(id => {
     const def = resolveElementDef(id);
     const st = elementState(c, id);
-    if (!def?.isDuplicate || st.deleted || st.hidden) return false;
-    if (def.baseId === 'value') return true;
-    if (def.baseId === 'delta') return (st.comparison || c.comparison) === 'custom';
-    if (['goalLabel', 'progressLabel', 'progress'].includes(def.baseId)) return needsGoal(c) || (st.comparison || c.comparison) === 'target';
+    if (!def?.isDuplicate || st.deleted) return false;
+    if (['value', 'referenceValue', 'delta', 'goalLabel', 'progressLabel', 'progress'].includes(def.baseId)) return true;
     if (def.baseId === 'trend') return true;
     return false;
   });
@@ -1048,14 +1211,20 @@ export function openDataBindingModal(focusKey = null) {
       const st = elementState(c, dupId);
       const dupEntries = def.baseId === 'trend' ? [
         { prop: 'measure', label: `Medida de ${def.label}`, ph: pbipModel?.measures?.[0]?.name || 'Medida numérica', val: st.measure || '', iconChar: 'fx', fieldKey: `${dupId}__measure` },
-        { prop: 'dateTable', label: `Tabla de fechas (${def.label})`, ph: 'Calendario', val: st.dateTable || c.dateTable || 'Calendario', iconChar: '田', fieldKey: `${dupId}__dateTable` },
-        { prop: 'dateColumn', label: `Columna de fecha (${def.label})`, ph: 'Fecha', val: st.dateColumn || c.dateColumn || 'Fecha', iconChar: '▦', fieldKey: `${dupId}__dateColumn` }
+        ...((st.chartKind || c.chartKind) !== 'donut' ? [
+          { prop: 'dateTable', label: `Tabla de fechas (${def.label})`, ph: 'Calendario', val: st.dateTable || '', iconChar: '田', fieldKey: `${dupId}__dateTable` },
+          { prop: 'dateColumn', label: `Columna de fecha (${def.label})`, ph: 'Fecha', val: st.dateColumn || '', iconChar: '▦', fieldKey: `${dupId}__dateColumn` }
+        ] : [])
+      ] : def.baseId === 'delta' ? [
+        { prop: 'measure', label: `Medida de ${def.label}`, ph: 'Selecciona su medida propia', val: st.measure || '', iconChar: 'fx', fieldKey: `${dupId}__measure` },
+        ...((st.comparison || c.comparison) === 'custom' ? [{ prop: 'compareMeasure', label: `Comparación de ${def.label}`, ph: 'Medida de comparación', val: st.compareMeasure || '', iconChar: 'fx', fieldKey: dupId }] : []),
+        ...((st.comparison || c.comparison) === 'target' ? [{ prop: 'targetMeasure', label: `Objetivo de ${def.label}`, ph: 'Medida o número', val: st.targetMeasure || '', iconChar: 'fx', fieldKey: dupId }] : [])
       ] : [
         {
-          prop: def.baseId === 'value' ? 'measure' : def.baseId === 'delta' ? 'compareMeasure' : ['goalLabel', 'progressLabel', 'progress'].includes(def.baseId) ? 'targetMeasure' : def.baseId === 'icon' ? 'icon' : 'text',
-          label: def.baseId === 'value' ? `Medida de ${def.label}` : def.baseId === 'delta' ? `Comparación de ${def.label}` : ['goalLabel', 'progressLabel', 'progress'].includes(def.baseId) ? `Objetivo de ${def.label}` : def.baseId === 'icon' ? `Icono de ${def.label}` : `Texto de ${def.label}`,
+          prop: ['value','referenceValue'].includes(def.baseId) ? 'measure' : ['goalLabel', 'progressLabel', 'progress'].includes(def.baseId) ? 'targetMeasure' : 'text',
+          label: ['value','referenceValue'].includes(def.baseId) ? `Medida de ${def.label}` : `Objetivo de ${def.label}`,
           ph: def.baseId === 'value' ? (pbipModel?.measures?.[0]?.name || 'Medida numérica') : def.baseId === 'delta' ? (pbipModel?.measures?.[0]?.name || 'Medida de comparación') : ['goalLabel', 'progressLabel', 'progress'].includes(def.baseId) ? '[Objetivo] o número' : def.baseId === 'icon' ? (st.icon || c.icon || 'icono') : def.label,
-          val: def.baseId === 'value' ? (st.measure || '') : def.baseId === 'delta' ? (st.compareMeasure || '') : ['goalLabel', 'progressLabel', 'progress'].includes(def.baseId) ? (st.targetMeasure || '') : def.baseId === 'icon' ? (st.icon || '') : (st.text !== undefined ? st.text : ''),
+          val: ['value','referenceValue'].includes(def.baseId) ? (st.measure || '') : (st.targetMeasure || ''),
           iconChar: ['value', 'delta'].includes(def.baseId) ? 'fx' : ['goalLabel', 'progressLabel', 'progress'].includes(def.baseId) ? '🎯' : def.baseId === 'icon' ? '★' : 'T',
           fieldKey: dupId
         }
@@ -1078,10 +1247,11 @@ export function openDataBindingModal(focusKey = null) {
                 <input id="f-bind-${entry.fieldKey}" class="binding-input" data-bind-dup="${dupId}" data-bind-dupprop="${entry.prop}" data-bind-field-key="${entry.fieldKey}" type="text" value="${esc(entry.val)}" placeholder="Ejemplo: ${esc(entry.ph)}" spellcheck="false" autocomplete="off">
                 <button type="button" class="binding-clear-btn ${entry.val ? 'is-visible' : ''}" data-action="clear-bind-dup" data-dup="${dupId}" data-prop="${entry.prop}" data-field="${entry.fieldKey}" title="Borrar selección" aria-label="Borrar selección">${icon('eraser', 13)}</button>
                 ${hasDropdown ? `<button type="button" class="binding-dropdown-toggle" data-action="toggle-bind-dropdown" data-field="${entry.fieldKey}" title="Ver todas las opciones" aria-label="Ver todas las opciones" aria-expanded="false">${icon('chevronDown', 12)}</button>` : ''}
-                <span class="binding-input-status ${entry.val ? 'valid' : 'optional'}">${icon(entry.val ? 'check' : 'info', entry.val ? 14 : 13)}</span>
+                <span class="binding-input-status" id="status-icon-${entry.fieldKey}">${icon('info', 13)}</span>
               </div>
               ${hasDropdown ? `<div class="binding-dropdown-menu" id="dropdown-menu-${entry.fieldKey}" role="listbox" aria-label="Opciones para ${esc(entry.label)}"></div>` : ''}
             </div>
+            <small class="binding-field-help is-hidden" id="help-${entry.fieldKey}" data-default-help="" style="display:none;"></small>
           </div>`;
       }
     }
@@ -1100,7 +1270,7 @@ export function openDataBindingModal(focusKey = null) {
     </div>
     <div class="binding-preview-hint">
       ${icon('cursor', 13)}
-      <span>Haz clic en un elemento de la tarjeta para enfocar su campo, o sitúa el cursor sobre un campo para resaltar su elemento visual.</span>
+      <span>Sitúa el cursor sobre un elemento para ver sus campos vinculados. Haz clic para editarlos.</span>
     </div>
   </div>`;
 
@@ -1110,7 +1280,7 @@ export function openDataBindingModal(focusKey = null) {
     ${icon(errors.length ? 'info' : 'check', 15)}
     <span>${errors.length ? `${errors.length} campo${errors.length > 1 ? 's' : ''} pendiente${errors.length > 1 ? 's' : ''} de configurar` : 'Configuración completa · Lista para exportar DAX'}</span>
   </div>`;
-  const actionsFooter = `<div class="binding-modal-actions">${btn('export', 'Generar medida DAX', 'code', 'button secondary', 'title="Exportar DAX"')}${btn('close-modal', 'Listo', 'check', 'button primary')}</div>`;
+  const actionsFooter = `<div class="binding-modal-actions">${btn('close-modal', 'Aceptar', 'check', 'button secondary')}${btn('export', 'Generar medida DAX', 'code', 'button primary', 'title="Exportar DAX"')}</div>`;
 
   const lastSync = getLastPbiSyncTime();
   const syncFormatted = lastSync ? formatSyncTimestamp(lastSync) : '';
@@ -1118,6 +1288,8 @@ export function openDataBindingModal(focusKey = null) {
   openModal('Conectar datos del modelo', syncSubtitle, body, `${statusHTML}${actionsFooter}`, 'binding-modal');
 
   fitBindingCard();
+
+  updateBindingModalStatus();
 
   if (focusKey) {
     const targetInput = document.getElementById(`f-bind-${focusKey}`);

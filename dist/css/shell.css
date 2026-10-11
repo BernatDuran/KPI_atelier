@@ -61,31 +61,35 @@ button:active:not(:disabled) {
   transform:translateY(1px)
 }
 .app-header {
-  height:76px;
+  position:sticky;
+  top:0;
+  z-index:100;
+  height:64px;
   background:var(--color-surface-card);
   display:flex;
   align-items:center;
   justify-content:space-between;
   padding:0 32px;
   border-bottom:1px solid var(--line);
-  gap:24px
+  gap:20px;
+  box-shadow:0 2px 12px #14211906
 }
 .brand {
   display:flex;
   align-items:center;
-  gap:10px
+  gap:8px
 }
 .brand-icon {
-  width:34px;
-  height:34px;
+  width:30px;
+  height:30px;
   background:var(--color-surface-dark);
   color:var(--color-accent-subtle);
-  border-radius:10px;
+  border-radius:9px;
   display:grid;
   place-items:center
 }
 .brand strong {
-  font:750 24px var(--display);
+  font:750 21px var(--display);
   letter-spacing:-1px
 }
 .brand-divider {
@@ -100,29 +104,43 @@ button:active:not(:disabled) {
   display:flex;
   height:100%;
   align-items:center;
-  gap:9px
+  gap:6px
 }
 .top-nav button {
   display:flex;
   align-items:center;
-  gap:8px;
-  padding:11px 15px;
+  gap:6px;
+  padding:8px 12px;
+  border:1px solid transparent;
   border-radius:7px;
-  font-size:12px;
+  font-size:11px;
   color:var(--color-text-muted);
-  white-space:nowrap
+  white-space:nowrap;
+  transition:background .18s,border-color .18s,color .18s,box-shadow .18s
 }
 
 /* ==========================================================================
    3. APP SHELL & HEADER NAVIGATION
    ========================================================================== */
 .top-nav button.selected {
-  background:var(--color-surface-subtle);
+  background:var(--color-surface-active);
+  border-color:var(--color-border-strong);
   color:var(--color-text-primary);
-  font-weight:650
+  font-weight:650;
+  box-shadow:inset 0 1px 0 #ffffff22,0 1px 3px #14211908
 }
 .top-nav button:hover {
-  background:#f5f6f2
+  background:var(--color-surface-hover);
+  border-color:var(--color-border-medium);
+  color:var(--color-text-primary)
+}
+.top-nav button.selected:hover {
+  background:var(--color-surface-active);
+  border-color:var(--color-border-active)
+}
+.top-nav button svg {
+  width:14px;
+  height:14px
 }
 .count {
   font-size:9px;
@@ -167,8 +185,8 @@ button:active:not(:disabled) {
   color:var(--color-brand-sage);
   display:grid;
   place-items:center;
-  width:30px;
-  height:30px;
+  width:28px;
+  height:28px;
   border:3px solid var(--color-surface-card);
   outline:1px solid var(--color-border-subtle);
   border-radius:50%;
@@ -179,8 +197,8 @@ button:active:not(:disabled) {
   display:inline-flex;
   justify-content:center;
   align-items:center;
-  width:30px;
-  height:30px;
+  width:28px;
+  height:28px;
   color:var(--color-brand-sage-light);
   border-radius:6px
 }
@@ -192,8 +210,8 @@ button:active:not(:disabled) {
   display:flex;
   justify-content:space-between;
   align-items:center;
-  padding:32px 34px 29px;
-  gap:20px
+  padding:18px 34px;
+  gap:14px
 }
 .eyebrow,.overline {
   font-size:9px;
@@ -214,6 +232,7 @@ button:active:not(:disabled) {
   font-style:normal;
   color:#7e8d75
 }
+.designer-heading h1 {margin-bottom:0}
 .page-heading p {
   color:var(--color-brand-sage-light);
   font-size:12px
@@ -221,18 +240,22 @@ button:active:not(:disabled) {
 .heading-actions {
   display:flex;
   align-items:center;
-  gap:9px
+  gap:7px
 }
 .button {
   display:inline-flex;
   align-items:center;
   justify-content:center;
-  gap:8px;
+  gap:6px;
   border-radius:7px;
-  padding:11px 16px;
-  font-size:11px;
+  padding:8px 12px;
+  font-size:10px;
   font-weight:550;
   white-space:nowrap
+}
+.button svg {
+  width:14px;
+  height:14px
 }
 .button.primary {
   background:var(--dark);
@@ -256,7 +279,7 @@ button:active:not(:disabled) {
 }
 .button.quiet {
   color:var(--color-text-muted);
-  padding:10px
+  padding:7px 9px
 }
 .button.quiet:hover {
   background:var(--color-border-subtle);
@@ -381,8 +404,8 @@ body.ui-dark .overline {
   align-items:center;
   justify-content:center;
   border-radius:4px;
-  border:1px solid var(--color-border-subtle);
-  background:var(--color-surface-panel);
+  border:0;
+  background:transparent;
   color:var(--color-text-secondary);
   cursor:pointer;
   transition:all 0.15s ease;
@@ -391,7 +414,7 @@ body.ui-dark .overline {
 .rail-toggle-btn:hover {
   background:var(--color-surface-card);
   color:var(--color-text-primary);
-  border-color:var(--color-border-focus)
+  border-color:transparent
 }
 .rail-heading {
   display:flex;

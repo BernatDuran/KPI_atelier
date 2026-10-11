@@ -42,7 +42,7 @@
   border-radius:6px
 }
 .segmented button {
-  padding:6px 9px;
+  padding:5px 8px;
   font-size:9px;
   color:var(--color-brand-sage-light);
   display:flex;
