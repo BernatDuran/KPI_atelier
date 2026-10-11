@@ -1,0 +1,193 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;450;500;550;600;650;700&family=Manrope:wght@400;500;600;650;700;750;800&display=swap');
+
+/* ==========================================================================
+   1. DESIGN TOKENS & SYSTEM VARIABLES
+   Sistema jerárquico de tokens semánticos (Superficies, Textos, Bordes,
+   Acentos, Estados, Espaciados, Radios, Sombras y Tipografía)
+   ========================================================================== */
+:root {
+  /* --- Superficies / Surfaces --- */
+  --color-surface-base: #f6f7f3;
+  --color-surface-card: #ffffff;
+  --color-surface-card-subtle: #fcfdf9;
+  --color-surface-hover: #f1f6e9;
+  --color-surface-active: #e2edd8;
+  --color-surface-dark: #1c2b2c;
+  --color-surface-elevated: #ffffff;
+  --color-surface-modal: #ffffff;
+  --color-surface-popover: #ffffff;
+  --color-surface-panel: #fafbf8;
+  --color-surface-subtle: #eff3e8;
+  --color-surface-muted: #f4f6f1;
+  --color-surface-badge: #eaf1e4;
+  --color-surface-badge-active: #d5edab;
+  --color-surface-backdrop: rgba(20, 33, 25, 0.53);
+
+  /* --- Textos / Typography Colors --- */
+  --color-text-primary: #253235;
+  --color-text-secondary: #536e43;
+  --color-text-muted: #7b8585;
+  --color-text-subtle: #7e9171;
+  --color-text-inverse: #ffffff;
+  --color-text-dark: #111827;
+  --color-text-heading: #1c2b2c;
+  --color-text-link: #3d665a;
+
+  /* --- Bordes y Separadores / Borders --- */
+  --color-border-subtle: #e5e8e4;
+  --color-border-medium: #dfe5d7;
+  --color-border-strong: #c8d2bf;
+  --color-border-active: #7fa45b;
+  --color-border-focus: #557d4d;
+  --color-border-dark: #2c3e24;
+
+  /* --- Acentos y Marca / Accent & Brand --- */
+  --color-accent-primary: #477568;
+  --color-accent-hover: #3d665a;
+  --color-accent-subtle: #d5edab;
+  --color-accent-badge: #7fa45b;
+  --color-accent-focus: rgba(71, 117, 104, 0.2);
+  --color-accent-glow: rgba(107, 147, 75, 0.2);
+  --color-brand-sage: #57664c;
+  --color-brand-sage-light: #88947d;
+  --color-brand-sage-subtle: #eff3e8;
+  --color-brand-forest: #2c3e24;
+  --color-brand-highlight: #6b934b;
+  --color-brand-highlight-subtle: rgba(107, 147, 75, 0.2);
+  --color-brand-highlight-glow: rgba(107, 147, 75, 0.4);
+
+  /* --- Estados Semánticos / Status --- */
+  --color-status-success: #287247;
+  --color-status-success-bg: #eaf5ec;
+  --color-status-success-border: #a4bd87;
+  --color-status-warning: #9b7425;
+  --color-status-warning-bg: #fdf8ea;
+  --color-status-warning-border: #f4c77c;
+  --color-status-error: #b95548;
+  --color-status-error-bg: #fdf0ee;
+  --color-status-error-border: #ebc3bb;
+  --color-status-info: #356885;
+  --color-status-info-bg: #edf6fb;
+  --color-status-info-border: #b9d9f9;
+
+  /* --- Radios / Border Radius --- */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+  --radius-pill: 9999px;
+
+  /* --- Espaciado / Spacing --- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* --- Sombras / Box Shadows --- */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 10px 28px rgba(0, 0, 0, 0.12);
+  --shadow-popover: 0 12px 36px rgba(23, 39, 43, 0.18);
+
+  /* --- Tipografía y Fuentes / Offline-Resilient Font Stacks --- */
+  --font-sans: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-display: 'Manrope', 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+
+  /* --- Compatibilidad con variables previas de KPI Atelier --- */
+  --ink: var(--color-text-primary);
+  --muted: var(--color-text-muted);
+  --line: var(--color-border-subtle);
+  --paper: var(--color-surface-base);
+  --green: var(--color-accent-subtle);
+  --dark: var(--color-surface-dark);
+  --font: var(--font-sans);
+  --display: var(--font-display);
+}
+
+/* ==========================================================================
+   DARK THEME VARIABLES (Full Dark Shell)
+   ========================================================================== */
+html[data-ui-theme="dark"] {
+  color-scheme: dark;
+}
+
+[data-ui-theme="dark"], body.ui-dark {
+  /* --- Superficies / Dark Surfaces --- */
+  --color-surface-base: #12191b;
+  --color-surface-card: #192427;
+  --color-surface-card-subtle: #162023;
+  --color-surface-hover: #223337;
+  --color-surface-active: #2a4045;
+  --color-surface-dark: #0b1113;
+  --color-surface-elevated: #1e2b2e;
+  --color-surface-modal: #1a2629;
+  --color-surface-popover: #1a2629;
+  --color-surface-panel: #162124;
+  --color-surface-subtle: #1e2c30;
+  --color-surface-muted: #1a2528;
+  --color-surface-badge: #233539;
+  --color-surface-badge-active: #3a5c53;
+  --color-surface-backdrop: rgba(7, 12, 14, 0.8);
+
+  /* --- Textos / Dark Typography --- */
+  --color-text-primary: #f5f8f8;
+  --color-text-secondary: #b8e6bb;
+  --color-text-muted: #a4bebe;
+  --color-text-subtle: #8ea9ac;
+  --color-text-inverse: #12191b;
+  --color-text-dark: #ffffff;
+  --color-text-heading: #ffffff;
+  --color-text-link: #8ae0c3;
+
+  /* --- Bordes y Separadores / Dark Borders --- */
+  --color-border-subtle: #243538;
+  --color-border-medium: #2e4347;
+  --color-border-strong: #3d585d;
+  --color-border-active: #82b992;
+  --color-border-focus: #9edcb0;
+  --color-border-dark: #c8d8be;
+
+  /* --- Marca y Acentos / Dark Accents --- */
+  --color-brand-sage: #c2e6d4;
+  --color-brand-sage-light: #a8cfbe;
+  --color-brand-sage-subtle: #1e2c30;
+  --color-brand-forest: #0c1416;
+  --color-brand-highlight: #7fa45b;
+  --color-brand-highlight-subtle: rgba(127, 164, 91, 0.25);
+  --color-brand-highlight-glow: rgba(127, 164, 91, 0.45);
+
+  /* --- Estados Semánticos / Dark Status --- */
+  --color-status-success: #4cd47e;
+  --color-status-success-bg: #142a1d;
+  --color-status-success-border: #2e613f;
+  --color-status-warning: #f5b041;
+  --color-status-warning-bg: #2e2413;
+  --color-status-warning-border: #6d5420;
+  --color-status-error: #f47067;
+  --color-status-error-bg: #2d1816;
+  --color-status-error-border: #6d3330;
+  --color-status-info: #58a6ff;
+  --color-status-info-bg: #142436;
+  --color-status-info-border: #254668;
+
+  /* --- Sombras / Dark Shadows --- */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.45);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 10px 28px rgba(0, 0, 0, 0.65);
+  --shadow-popover: 0 12px 36px rgba(0, 0, 0, 0.75);
+
+  /* --- Compatibilidad con variables previas de KPI Atelier --- */
+  --ink: var(--color-text-primary);
+  --muted: var(--color-text-muted);
+  --line: var(--color-border-subtle);
+  --paper: var(--color-surface-base);
+  --green: var(--color-accent-subtle);
+  --dark: var(--color-surface-dark);
+}
