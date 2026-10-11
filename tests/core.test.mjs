@@ -108,7 +108,8 @@ test('All 47 icon choices have distinct valid SVG and survive the schema',()=>{
  assert.equal(ICON_OPTIONS.length,47);const rendered=new Set();for(const [id]of ICON_OPTIONS){const c=sanitizeConfig({...BASE,icon:id,iconSize:64});assert.equal(c.icon,id);const svg=icon(id,64,c.accent);assert.match(svg,/width="64"/);rendered.add(svg);assert.ok(cardHTML(c).includes(svg));}assert.equal(rendered.size,47);
 });
 test('Color-map conversion, contrast and palette validation cover boundary colors',()=>{
- assert.equal(Object.keys(THEMES).length,10);
+ assert.equal(Object.keys(THEMES).length,11);
+ for(const color of Object.values(paletteFrom(THEMES.marble)))assert.match(color,/^#([0-9a-f]{2})\1\1$/i);
  for(const theme of Object.values(THEMES))for(const color of Object.values(paletteFrom(theme))){const {h,s,v}=hexToHSV(color);assert.equal(hsvToHex(h,s,v),color.toLowerCase());}
  for(const color of ['#000000','#ffffff','#ff0000','#00ff00','#0000ff']){const {h,s,v}=hexToHSV(color);assert.equal(hsvToHex(h,s,v),color);}
  assert.equal(hsvToHex(360,1,1),'#ff0000');assert.equal(contrastRatio('#000000','#ffffff'),21);assert.equal(contrastRatio('#ffffff','#ffffff'),1);assert.equal(sanitizePalette({...THEMES.paper,text:'url(fake)'}),null);
@@ -610,10 +611,10 @@ test('Multi-visual and duplicate DAX generation: isolated trends, independent de
   comparison: 'yoy',
   elements: {
    value_copy1: {
-    deleted: false
+    deleted: false, measure: 'Total Ventas'
    },
    delta_copy1: {
-    deleted: false
+    deleted: false, measure: 'Total Ventas'
    }
   }
  });
@@ -642,7 +643,7 @@ test('Variation delta and comparison label twin synchronization, propagation and
     ...BASE,
     comparison: 'yoy',
     elements: {
-      delta_copy1: { comparison: 'yoy' },
+      delta_copy1: { comparison: 'yoy', measure: BASE.measure },
       compareLabel_copy1: { comparison: 'yoy' }
     }
   });
@@ -688,7 +689,7 @@ test('Variation delta and comparison label twin synchronization, propagation and
     }
   });
   const errCustom = checks(customDup).filter(x => x.level === 'error');
-  assert.ok(errCustom.some(x => x.field === 'dup_delta_copy1_compare'), 'Must flag missing reference measure for custom delta copy');
+  assert.ok(errCustom.some(x => x.field === 'delta_copy1'), 'Must flag missing reference measure for custom delta copy');
 
   // Providing compareMeasure resolves the error
   const fixedCustom = sanitizeConfig({
@@ -698,6 +699,33 @@ test('Variation delta and comparison label twin synchronization, propagation and
       delta_copy1: { ...customDup.elements.delta_copy1, compareMeasure: 'Presupuesto' }
     }
   });
-  const errFixed = checks(fixedCustom).filter(x => x.field === 'dup_delta_copy1_compare');
+  const errFixed = checks(fixedCustom).filter(x => x.field === 'delta_copy1');
   assert.equal(errFixed.length, 0, 'Providing compareMeasure clears error');
+});
+
+test('Incomplete DAX exports require explicit opt-in and do not substitute a main measure for empty copies',()=>{
+ const c=sanitizeConfig({...BASE,elements:{value_copy1:{},delta_copy1:{comparison:'custom'},trend_copy1:{}}});
+ assert.throws(()=>generateDAX(c),/asigna su medida propia/);
+ const dax=generateDAX(c,{allowIncomplete:true});
+ assert.doesNotMatch(dax,/VAR __val_value_copy1 = __value|VAR __Diff_delta_copy1 = __Difference/);
+ assert.match(dax,/VAR __trend_trend_copy1 = ""/);
+ assert.match(dax,/VAR __Cur_value_copy1 = .*BLANK \(\)/);
+ lexDax(dax);
+});
+
+test('Duplicate objectives and donut charts calculate with their explicit references, including blank exports',()=>{
+ const c=sanitizeConfig({...BASE,elements:{goalLabel_copy1:{targetMeasure:'Plan propio'},progressLabel_copy1:{targetMeasure:'250'},progress_copy1:{targetMeasure:'Plan propio'},trend_copy1:{chartKind:'donut',measure:'Unidades'}}});
+ const dax=generateDAX(c);
+ assert.match(dax,/VAR __Target_goalLabel_copy1 = \[Plan propio\]/);
+ assert.match(dax,/VAR __Target_progressLabel_copy1 = 250/);
+ assert.match(dax,/VAR __Cur_trend_copy1 = \[Unidades\]/);
+ assert.match(dax,/__progressWidth_progress_copy1/);
+ assert.match(dax,/__progressWidth_trend_copy1/);
+ lexDax(dax);
+ c.elements.goalLabel_copy1.targetMeasure='';c.elements.trend_copy1.measure='';
+ const incomplete=generateDAX(c,{allowIncomplete:true});
+ assert.match(incomplete,/VAR __Target_goalLabel_copy1 = BLANK \(\)/);
+ assert.match(incomplete,/VAR __Cur_trend_copy1 = BLANK \(\)/);
+ c.measureName='Plan propio';
+ assert.ok(checks(c).some(x=>x.field==='measureName'&&x.text.includes('circular')));
 });

@@ -896,9 +896,9 @@ test('Advanced Duplicates, Hierarchical Content Inspector, Stacking & Dynamic Re
       value_copy2: { deleted: false }
     }
   });
-  const dupWarn = warnChecks.find(c => c.field === 'dup_value_copy2_measure');
-  assert.ok(dupWarn, 'checks(c) must issue warning for duplicate value without measure');
-  assert.equal(dupWarn.level, 'warning');
+  const dupWarn = warnChecks.find(c => c.field === 'value_copy2');
+  assert.ok(dupWarn, 'checks(c) must block a duplicate value without its own measure');
+  assert.equal(dupWarn.level, 'error');
 
   const circConf = {
     ...conf,
@@ -1172,6 +1172,7 @@ test('Duplicate chart SVG rendering, DAX isolation, comparison label tracking, a
   // 1. Resolve and update duplicate trend chart
   resolveElementDef('trend_copy1');
   c = updateElement(c, 'trend_copy1', {
+    measure: BASE.measure, dateTable: BASE.dateTable, dateColumn: BASE.dateColumn,
     chartType: 'area',
     showDots: true,
     showMinMax: true,
@@ -1565,6 +1566,242 @@ test('Power BI Desktop live injection and measure overwrite lifecycle', async ()
   assert.equal(retried, true, 'proceed-inject-measure in error modal must trigger retry action');
   closeModal();
   `);
+});
+
+test('Report picker cancellation, close and Escape return to data binding without losing edits', async () => {
+  const run = await editor();
+  run(`
+    loadDesign(BASE);c={...c,measure:'Ventas',_measureBound:true,targetMeasure:'123',_targetCustomized:true};
+    openDataBindingModal();
+    const instances=[{server:'localhost:1234',database:'ventas',reportName:'Ventas'}];
+    for(const action of ['cancel','close','escape']){
+      chooseLiveInstanceModal(instances);assert.equal($('#modal').className,'instance-modal');
+      if(action==='escape')fire('#modal','cancel',{preventDefault(){}});
+      else if(action==='cancel')fire('document','click',{target:button({action:'close-modal'})});
+      else closeModal();
+      assert.equal($('#modal').open,true);assert.equal($('#modal').className,'binding-modal');
+      assert.equal(c.measure,'Ventas');assert.equal(c.targetMeasure,'123');
+    }
+    fire('document','click',{target:button({action:'close-modal'})});assert.equal($('#modal').open,false);
+  `);
+});
+
+test('Binding highlights follow temporal measures, independent copies and both pointer and focus', async () => {
+  const run = await editor();
+  run(`
+    loadDesign(BASE);c={...c,elements:{...c.elements,trend_copy1:{measure:'Otra medida',dateTable:'Otro calendario',dateColumn:'Día'}}};
+    assert.ok(getBindingElements('dateTable').includes('delta'));
+    assert.ok(!getBindingElements('dateTable').includes('trend_copy1'));
+    assert.equal(getBindingElements('trend_copy1__measure').join(','),'trend_copy1');
+    assert.ok(getBindingElements('measureName').includes('title'));
+    const fields=['measure','measureName','dateTable','dateColumn','trend_copy1__measure'];
+    const elements=['value','title','delta','trend','trend_copy1','icon'];
+    const makeNode=(dataset)=>({dataset,classes:new Set(),classList:{toggle(cls,active){active?this.owner.classes.add(cls):this.owner.classes.delete(cls)}},closest(){return null;}});
+    const fieldNodes=fields.map(bindingField=>makeNode({bindingField}));
+    const elementNodes=elements.map(element=>makeNode({element}));
+    for(const el of [...fieldNodes,...elementNodes])el.classList.owner=el;
+    const originalQuery=document.querySelectorAll;
+    document.querySelectorAll=selector=>selector==='[data-binding-field]'?fieldNodes:selector==='#binding-card-inner [data-element]'?elementNodes:[];
+    const fieldTarget={closest:selector=>selector==='[data-binding-field]'?fieldNodes[2]:null};
+    fire('document','pointerover',{target:fieldTarget});
+    assert.ok(elementNodes.find(el=>el.dataset.element==='delta').classes.has('binding-highlight'));
+    assert.ok(fieldNodes[2].classes.has('is-binding-highlight'));
+    const cardTarget={closest:selector=>selector==='#binding-card-inner [data-element]'?elementNodes[1]:null};
+    fire('document','pointerover',{target:cardTarget});
+    assert.ok(fieldNodes[1].classes.has('is-binding-highlight'));
+    assert.ok(!fieldNodes[2].classes.has('is-binding-highlight'));
+    fire('document','focusin',{target:fieldTarget});
+    const deltaTarget={closest:selector=>selector==='#binding-card-inner [data-element]'?elementNodes[2]:null};
+    fire('document','pointerover',{target:deltaTarget});
+    assert.equal(elementNodes.filter(el=>el.classes.has('binding-highlight')).map(el=>el.dataset.element).join(','),'delta');
+    assert.equal(fieldNodes.filter(el=>el.classes.has('is-binding-highlight')).map(el=>el.dataset.bindingField).join(','),'measure,dateTable,dateColumn');
+    const iconTarget={closest:selector=>selector==='#binding-card-inner [data-element]'?elementNodes[5]:null};
+    fire('document','pointerover',{target:iconTarget});
+    assert.ok(elementNodes.every(el=>!el.classes.has('binding-highlight')));
+    assert.ok(fieldNodes.every(el=>!el.classes.has('is-binding-highlight')));
+    fire('document','pointerout',{relatedTarget:null});
+    assert.ok(fieldNodes[2].classes.has('is-binding-highlight'));
+    assert.ok(!fieldNodes[1].classes.has('is-binding-highlight'));
+    fire('document','focusout',{relatedTarget:null});
+    assert.ok(elementNodes.every(el=>!el.classes.has('binding-highlight')));
+    document.querySelectorAll=originalQuery;
+  `);
+});
+
+test('Visual hover reveals an offscreen copy within the settings column without changing focus', async () => {
+  const run = await editor();
+  run(`
+    loadDesign(BASE);openDataBindingModal();
+    const modalHTML=$('#modal').innerHTML;
+    assert.ok(modalHTML.indexOf('binding-measure-heading')<modalHTML.indexOf('binding-fields-card'));
+    fire('document','input',{target:{id:'f-bind-granularity',value:'month',dataset:{}}});
+    assert.equal(c.granularity,'month');
+    const previousQuery=document.querySelectorAll;
+    const previousMotion=window.matchMedia;
+    const previousFocus=document.activeElement;
+    const scroller={scrollTop:0,scrollHeight:1000,clientHeight:400,isConnected:true,getBoundingClientRect(){return {top:100,bottom:500}}};
+    const body={getBoundingClientRect(){return {top:90,bottom:510}}};
+    const makeField=(key,top,bottom)=>({dataset:{bindingField:key},closest(s){return s==='.binding-fields-column'?scroller:s==='.modal-body'?body:null},getBoundingClientRect(){return {top:top-scroller.scrollTop,bottom:bottom-scroller.scrollTop}}});
+    const fields=[makeField('measure',130,190),makeField('value_copy1',700,770)];
+    document.querySelectorAll=s=>s==='[data-binding-field]'?fields:[];
+    window.matchMedia=()=>({matches:true});
+    revealBindingFields(['measure','value_copy1'],'value_copy1');
+    assert.equal(scroller.scrollTop,280);
+    assert.equal(document.activeElement,previousFocus);
+    revealBindingFields(['measure','value_copy1'],'value_copy1');
+    assert.equal(scroller.scrollTop,280);
+    scroller.scrollTop=0;
+    revealBindingFields(['measure'],'value');
+    assert.equal(scroller.scrollTop,0);
+    document.querySelectorAll=previousQuery;window.matchMedia=previousMotion;
+  `);
+});
+
+test('Measure review refreshes the connected catalog, prevents missing references and avoids writes', async () => {
+  const run = await editor();
+  run(`
+    loadDesign(BASE);c={...c,measure:'Ventas',measureName:'KPI_Ventas',targetMeasure:'100',_measureBound:true,_targetCustomized:true};
+    setPbipModel({modelName:'Modelo',reportName:'Informe',isLiveConnection:true,server:'localhost:1234',database:'db',tables:['Medidas','Calendario'],measures:[{name:'Ventas',table:'Medidas'}],dateTables:[{name:'Calendario',dateColumns:['Fecha']}]},false);
+  `);
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  let missing = false;
+  let disconnected = false;
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url, options });
+    if (disconnected) throw new Error('Conexión perdida');
+    return { ok: true, json: async () => ({ modelName: 'Modelo', reportName: 'Informe', server: 'localhost:1234', database: 'db',
+      tables: [{ name: 'Medidas' }, { name: 'Calendario' }],
+      measures: missing ? [] : [{ name: 'Ventas', table: 'Medidas' }, { name: 'KPI_Ventas', table: 'Medidas' }],
+      detectedDateTables: [{ table: 'Calendario', dateColumns: ['Fecha'], suggestedColumn: 'Fecha', isOfficialMarked: true, tier: 1 }] }) };
+  };
+  try {
+    await run('openMeasureReviewModal()');
+    run(`
+      const reviewHTML=$('#modal').innerHTML;
+      assert.ok(reviewHTML.includes('Conexión verificada'));
+      assert.ok(reviewHTML.includes('Sobrescribir en Power BI'));
+      assert.ok(reviewHTML.includes('440 × 400 px'));
+      assert.ok(!/data-action="inject-live-measure" disabled/.test(reviewHTML));
+    `);
+    missing = true;
+    await run('openMeasureReviewModal()');
+    run(`assert.ok($('#modal').innerHTML.includes('No encontrada'));assert.ok(/data-action="inject-live-measure" disabled/.test($('#modal').innerHTML));`);
+    disconnected = true;
+    await run('openMeasureReviewModal()');
+    run(`assert.ok($('#modal').innerHTML.includes('Conexión perdida'));assert.ok(/data-action="inject-live-measure" disabled/.test($('#modal').innerHTML));closeModal();assert.equal($('#modal').className,'export-modal');`);
+    assert.equal(requests.length, 3);
+    assert.ok(requests.every(r => r.url.includes('/api/pbi/model?') && !r.options?.method));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('A late catalog refresh cannot replace the configuration modal after leaving review', async () => {
+  const run = await editor();
+  run(`loadDesign(BASE);c={...c,measure:'Ventas',targetMeasure:'100',_measureBound:true,_targetCustomized:true};setPbipModel({modelName:'Modelo',isLiveConnection:true,server:'localhost:1234',database:'db',tables:['Medidas'],measures:[],dateTables:[]},false);`);
+  const originalFetch = globalThis.fetch;
+  let finish;
+  globalThis.fetch = () => new Promise(resolve => { finish = resolve; });
+  try {
+    const pending = run('openMeasureReviewModal()');
+    run('openDataBindingModal()');
+    finish({ ok: true, json: async () => ({ server: 'localhost:1234', database: 'db', tables: [], measures: [], detectedDateTables: [] }) });
+    await pending;
+    run(`assert.equal($('#modal').className,'binding-modal');assert.ok($('#modal').innerHTML.includes('Conectar datos del modelo'));`);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('Clicking a binding field or label opens its dropdown, repeats keep it open and the chevron or outside close it', async () => {
+ const run=await editor();
+ run(`
+  loadDesign(BASE);setPbipModel({measures:[{name:'Ventas',table:'Medidas'}],dateTables:[],tables:['Medidas']},false);
+  const priorId=document.getElementById,priorQuery=document.querySelectorAll;
+  const classes=new Set(),attrs={};
+  const toggle={dataset:{action:'toggle-bind-dropdown',field:'measure'},setAttribute(k,v){attrs[k]=v},classList:{add(){},remove(){}},closest(s){return s.includes('button')?this:s==='[data-binding-field]'?field:s==='.binding-dropdown-wrap'?wrap:null}};
+  const wrap={querySelector(s){return s==='.binding-dropdown-toggle'?toggle:s==='.binding-input'?input:null}};
+  const field={dataset:{bindingField:'measure'},querySelector(){return wrap}};
+  const input={setAttribute(){},closest(s){return s==='[data-binding-field]'?field:s==='.binding-dropdown-wrap'?wrap:null}};
+  const menu={parentElement:wrap,innerHTML:'',classList:{contains(c){return classes.has(c)},add(c){classes.add(c)},remove(c){classes.delete(c)}}};
+  document.getElementById=id=>id==='dropdown-menu-measure'?menu:null;
+  document.querySelectorAll=s=>s==='.binding-dropdown-menu.is-open'&&classes.has('is-open')?[menu]:[];
+  fire('document','click',{target:input});assert.ok(classes.has('is-open'));assert.equal(attrs['aria-expanded'],'true');
+  fire('document','click',{target:input});assert.ok(classes.has('is-open'));
+  const label={closest(s){return s==='[data-binding-field]'?field:null}};
+  fire('document','click',{target:label});assert.ok(classes.has('is-open'));
+  fire('document','click',{target:toggle});assert.ok(!classes.has('is-open'));
+  fire('document','click',{target:label});assert.ok(classes.has('is-open'));
+  fire('document','click',{target:{closest(){return null}}});assert.ok(!classes.has('is-open'));assert.equal(attrs['aria-expanded'],'false');
+  document.getElementById=priorId;document.querySelectorAll=priorQuery;
+ `);
+});
+
+test('Exports with missing or unverified references require confirmation, preserve cancellation and never apply the measure', async () => {
+ const run=await editor();
+ run(`
+  loadDesign(BASE);c={...c,measure:'Ventas',measureName:'KPI_Ventas',targetMeasure:'100',_measureBound:true,_targetCustomized:true,elements:{value_copy1:{}}};
+  setPbipModel({measures:[{name:'Ventas',table:'Medidas'}],tables:['Medidas','Calendario'],dateTables:[{name:'Calendario',dateColumns:['Fecha']}]},false);
+  exportModal();let exported=0;
+  requestExport(()=>exported++);assert.equal(exported,0);assert.equal($('#modal').className,'export-warning-modal');
+  assert.ok($('#modal').innerHTML.includes('Sin configurar'));
+  fire('document','click',{target:button({action:'close-modal'})});assert.equal(exported,0);assert.equal($('#modal').className,'export-modal');
+  requestExport(()=>exported++);fire('document','click',{target:button({action:'confirm-export-anyway'})});assert.equal(exported,1);assert.equal($('#modal').className,'export-modal');
+  c.elements.value_copy1.measure='Ventas';requestExport(()=>exported++);assert.equal(exported,2);
+  setPbipModel(null,false);requestExport(()=>exported++);assert.equal(exported,2);assert.ok($('#modal').innerHTML.includes('Sin comprobar'));closeModal();
+ `);
+});
+
+test('Power BI creation and overwrite block empty copies and recheck references immediately before writing', async () => {
+ const run=await editor();
+ const originalFetch=globalThis.fetch;
+ const writes=[];
+ let absent=false, existing=false;
+ globalThis.fetch=async (url,options)=>{
+  if(options?.method==='POST'){
+   writes.push(JSON.parse(options.body));
+   return {ok:true,json:async()=>({measureName:'KPI_Ventas',tableName:'Medidas',isNew:!existing})};
+  }
+  return {ok:true,json:async()=>({server:'localhost:1234',database:'db',modelName:'Modelo',reportName:'Informe',tables:[{name:'Medidas'},{name:'Calendario'}],
+   measures:[{name:'Ventas',table:'Medidas'},...(!absent?[{name:'Unidades',table:'Medidas'}]:[]),...(existing?[{name:'KPI_Ventas',table:'Medidas'}]:[])],
+   detectedDateTables:[{table:'Calendario',dateColumns:['Fecha'],suggestedColumn:'Fecha',isOfficialMarked:true,tier:1}]})};
+ };
+ const inject=async()=>{run("fire('document','click',{target:button({action:'inject-live-measure'})});");for(let i=0;i<4;i++)await new Promise(setImmediate);};
+ const setup=(hasExisting=false)=>run(`
+  loadDesign(BASE);c={...c,measure:'Ventas',measureName:'KPI_Ventas',targetMeasure:'100',_measureBound:true,_targetCustomized:true,elements:{value_copy1:{measure:''}}};
+  setPbipModel({modelName:'Modelo',reportName:'Informe',isLiveConnection:true,server:'localhost:1234',database:'db',tables:['Medidas','Calendario'],measures:[{name:'Ventas',table:'Medidas'},{name:'Unidades',table:'Medidas'}${hasExisting?",{name:'KPI_Ventas',table:'Medidas'}":''}],dateTables:[{name:'Calendario',dateColumns:['Fecha']}]},false);
+ `);
+ try{
+  setup();
+  await inject();
+  assert.equal(writes.length,0);
+  run("assert.equal($('#modal').className,'missing-refs-modal');assert.ok($('#modal').innerHTML.includes('Falta configurar')); ");
+  setup(true);existing=true;
+  await inject();
+  assert.equal(writes.length,0);
+  run("assert.equal($('#modal').className,'missing-refs-modal');");
+  setup();existing=false;absent=true;
+  run("c.elements.value_copy1.measure='Unidades';");
+  await inject();
+  assert.equal(writes.length,0);
+  run("assert.equal($('#modal').className,'measure-review-modal');assert.ok($('#modal').innerHTML.includes('No encontrada'));assert.ok(/data-action=\"inject-live-measure\" disabled/.test($('#modal').innerHTML));");
+  setup(true);existing=true;
+  run("c.elements.value_copy1.measure='Unidades';");
+  await inject();
+  run("assert.ok($('#modal').innerHTML.includes('Confirmar sobrescritura')); ");
+  await run('getPendingInjectAction()()');
+  assert.equal(writes.length,0);
+  run("assert.equal($('#modal').className,'measure-review-modal');");
+  setup();existing=false;absent=false;
+  run("c.elements.value_copy1.measure='Unidades';");
+  await inject();
+  assert.equal(writes.length,1);
+  assert.equal(writes[0].measureName,'KPI_Ventas');
+  assert.match(writes[0].daxExpression,/\[Unidades\]/);
+  assert.equal(writes[0].configAnnotation.elements.value_copy1.measure,'Unidades');
+  run("assert.ok($('#modal').innerHTML.includes('Medida creada')); ");
+ }finally{globalThis.fetch=originalFetch;}
 });
 
 

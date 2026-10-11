@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node scripts/serve.mjs",
     "dev": "node scripts/serve.mjs",
-    "test": "node --test tests/core.test.mjs tests/editor.test.mjs tests/pbip.test.mjs tests/pbitool.test.mjs tests/schema.test.mjs",
+    "test": "node --test tests/core.test.mjs tests/editor.test.mjs tests/pbip.test.mjs tests/pbitool.test.mjs tests/schema.test.mjs tests/preflight.test.mjs tests/bindings.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
