@@ -5,9 +5,9 @@ import {needsGoal,needsTrend,needsCompare} from './model.mjs';
 import {ELEMENTS,elementState,elementEnabled,elementSize,layerZIndex,resolveElementDef} from './elements.mjs';
 import {EXTRA_PATHS} from './icons.mjs';
 export const esc = x=>String(x??'').replace(/[&<>"'@]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;','@':'&#64;'}[c]));
-const PATHS={ruler:'M3 3h18v18H3zM8 3v4m4-4v6m4-6v4M3 8h4m-4 4h6m-6 4h4',trend:'M3 17l6-6 4 4 8-10M15 5h6v6',chart:'M4 20V11m8 9V4m8 16V8',users:'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M16 3a4 4 0 0 1 0 8m6 10v-2a4 4 0 0 0-3-3.87',target:'M22 12a10 10 0 1 1-10-10M22 2l-10 10m10-10v6m0-6h-6',bolt:'M13 2L3 14h8l-1 8L21 10h-8l1-8',box:'M21 8l-9 5-9-5m9 5v9M3 7l9-5 9 5v10l-9 5-9-5z',shield:'M12 22s9-4 9-11V5l-9-3-9 3v6c0 7 9 11 9 11zM8 12l3 3 5-6',heart:'M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8z',clock:'M12 8v5l3 2',layers:'M12 2L2 7l10 5 10-5-10-5zM2 12l10 5 10-5M2 17l10 5 10-5',grid:'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z',square:'M4 4h16v16H4z',card:'M3 4h18v16H3zM3 10h18',compare:'M4 7h16m-4-4 4 4-4 4M20 17H4m4-4-4 4 4 4',signal:'M5 20v-4m7 4V9m7 11V3',sliders:'M4 21v-7m0-4V3m8 18v-9m0-4V3m8 18v-5m0-4V3M1 14h6m2-6h6m2 8h6',code:'M8 6l-6 6 6 6m8-12 6 6-6 6m-3-15-2 18',arrow:'M4 12h16m-6-6 6 6-6 6',chevron:'M9 5l7 7-7 7',chevronDown:'M6 9l6 6 6-6',check:'M5 12l4 4L19 6',plus:'M12 5v14M5 12h14',save:'M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h12l4 4v12a2 2 0 0 1-2 2zM17 21v-8H7v8M7 3v5h9',folder:'M3 7V4h6l2 3h10v13H3z',book:'M12 5v16M3 3c5 0 9 2 9 2s4-2 9-2v16c-5 0-9 2-9 2s-4-2-9-2z',search:'M21 21l-5-5',close:'M6 6l12 12M18 6L6 18',undo:'M3 10h10a7 7 0 0 1 7 7M3 10l6-6m-6 6 6 6',redo:'M21 10H11a7 7 0 0 0-7 7m17-7-6-6m6 6-6 6',download:'M12 3v12m-5-5 5 5 5-5M5 17v4h14v-4',upload:'M12 16V3m-5 5 5-5 5 5M5 17v4h14v-4',copy:'M9 9h12v12H9zM15 9V3H3v12h6',trash:'M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7',eraser:'m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21m9 0H7m-2-7 7 7',info:'M12 11v6m0-10h.01',monitor:'M3 3h18v14H3zM12 17v4m-4 0h8',mobile:'M7 2h10v20H7zM11 18h2',sparkles:'M12 3l2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3z',expand:'M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5',palette:'M12 22a10 10 0 1 1 10-10c0 3-4 1-5 3s2 4-1 6z',reset:'M3 11a9 9 0 1 1 2 7M3 4v7h7'};
+const PATHS={ruler:'M3 3h18v18H3zM8 3v4m4-4v6m4-6v4M3 8h4m-4 4h6m-6 4h4',trend:'M3 17l6-6 4 4 8-10M15 5h6v6',chart:'M4 20V11m8 9V4m8 16V8',users:'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M16 3a4 4 0 0 1 0 8m6 10v-2a4 4 0 0 0-3-3.87',target:'M22 12a10 10 0 1 1-10-10M22 2l-10 10m10-10v6m0-6h-6',bolt:'M13 2L3 14h8l-1 8L21 10h-8l1-8',box:'M21 8l-9 5-9-5m9 5v9M3 7l9-5 9 5v10l-9 5-9-5z',shield:'M12 22s9-4 9-11V5l-9-3-9 3v6c0 7 9 11 9 11zM8 12l3 3 5-6',heart:'M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8z',clock:'M12 8v5l3 2',layers:'M12 2L2 7l10 5 10-5-10-5zM2 12l10 5 10-5M2 17l10 5 10-5',grid:'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z',square:'M4 4h16v16H4z',card:'M3 4h18v16H3zM3 10h18',compare:'M4 7h16m-4-4 4 4-4 4M20 17H4m4-4-4 4 4 4',signal:'M5 20v-4m7 4V9m7 11V3',sliders:'M4 21v-7m0-4V3m8 18v-9m0-4V3m8 18v-5m0-4V3M1 14h6m2-6h6m2 8h6',code:'M8 6l-6 6 6 6m8-12 6 6-6 6m-3-15-2 18',arrow:'M4 12h16m-6-6 6 6-6 6',chevron:'M9 5l7 7-7 7',chevronDown:'M6 9l6 6 6-6',check:'M5 12l4 4L19 6',plus:'M12 5v14M5 12h14',save:'M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h12l4 4v12a2 2 0 0 1-2 2zM17 21v-8H7v8M7 3v5h9',folder:'M3 7V4h6l2 3h10v13H3z',book:'M12 5v16M3 3c5 0 9 2 9 2s4-2 9-2v16c-5 0-9 2-9 2s-4-2-9-2z',search:'M21 21l-5-5',close:'M6 6l12 12M18 6L6 18',undo:'M3 10h10a7 7 0 0 1 7 7M3 10l6-6m-6 6 6 6',redo:'M21 10H11a7 7 0 0 0-7 7m17-7-6-6m6 6-6 6',download:'M12 3v12m-5-5 5 5 5-5M5 17v4h14v-4',upload:'M12 16V3m-5 5 5-5 5 5M5 17v4h14v-4',copy:'M9 9h12v12H9zM15 9V3H3v12h6',trash:'M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7',eraser:'m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21m9 0H7m-2-7 7 7',info:'M12 11v6m0-10h.01',monitor:'M3 3h18v14H3zM12 17v4m-4 0h8',mobile:'M7 2h10v20H7zM11 18h2',sparkles:'M12 3l2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3z',expand:'M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5',palette:'M12 22a10 10 0 1 1 10-10c0 3-4 1-5 3s2 4-1 6z',reset:'M3 11a9 9 0 1 1 2 7M3 4v7h7',moon:'M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z',sun:'M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72 1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42',layout:'M3 3h18v18H3zM9 3v18',chevronLeft:'M15 18l-6-6 6-6',chevronRight:'M9 18l6-6-6-6',keyboard:'M4 6h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2zM6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M18 14h.01M10 14h4',alertTriangle:'M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4m0 4h.01'};
 export function icon(name,size=18,color='currentColor'){
- const circle=['clock','info'].includes(name)?'<circle cx="12" cy="12" r="9"/>':name==='search'?'<circle cx="10" cy="10" r="7"/>':name==='users'?'<circle cx="9" cy="7" r="4"/>':name==='target'?'<circle cx="12" cy="12" r="5"/>':'';
+ const circle=['clock','info'].includes(name)?'<circle cx="12" cy="12" r="9"/>':name==='search'?'<circle cx="10" cy="10" r="7"/>':name==='users'?'<circle cx="9" cy="7" r="4"/>':name==='target'?'<circle cx="12" cy="12" r="5"/>':name==='sun'?'<circle cx="12" cy="12" r="4"/>':'';
  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${circle}<path d="${EXTRA_PATHS[name]||PATHS[name]||PATHS.chart}"/></svg>`;
 }
 export function formatNumber(v,c){
@@ -28,11 +28,26 @@ export function sampleData(c){
  const status=value===null?'empty':c.direction==='down'?(value<=c.goodThreshold?'good':value<=c.warnThreshold?'warn':'bad'):(value>=c.goodThreshold?'good':value>=c.warnThreshold?'warn':'bad');
  const goal=value===null||c.sampleTarget<=0?null:value/c.sampleTarget;
  const goalGood=goal!==null&&(c.direction==='down'?value<=c.sampleTarget:value>=c.sampleTarget);
- return {value:esc(formatNumber(value,c)),delta:esc(deltaDisplay),arrow:delta===null||delta===0?'—':delta>0?'↗':'↘',deltaColor:favorable===null?c.muted:favorable?c.positive:c.negative,
+ const res={value:esc(formatNumber(value,c)),delta:esc(deltaDisplay),arrow:delta===null||delta===0?'—':delta>0?'↗':'↘',deltaColor:favorable===null?c.muted:favorable?c.positive:c.negative,
   previous:esc(formatNumber(previous,c)),target:esc(formatNumber(c.sampleTarget,c)),targettext:esc(formatNumber(c.sampleTarget,c)),progress:goal===null?'—':new Intl.NumberFormat(c.locale,{style:'percent',maximumFractionDigits:0}).format(goal),progressWidth:goal===null?'0':String(Math.max(0,Math.min(100,goal*100))),goalColor:goal===null?c.muted:c.direction==='neutral'?c.accent:goalGood?c.positive:c.warning,
   status:esc(status==='empty'?'Sin datos':c[{good:'statusGood',warn:'statusWarn',bad:'statusBad'}[status]]),statusColor:status==='empty'?c.muted:status==='good'?c.positive:status==='warn'?c.warning:c.negative,
   statusGoodOpacity:status==='good'?1:.2,statusWarnOpacity:status==='warn'?1:.2,statusBadOpacity:status==='bad'?1:.2,
   trend:renderTrend(c,c.sampleScenario==='empty'?[]:seriesValues(c)),period:'Período seleccionado',footer:esc(c.footer||'Rendimiento del período'),trendLabel:'Evolución · datos de muestra'};
+ if(c&&c.elements){
+  for(const [dupId,st] of Object.entries(c.elements)){
+   if(dupId.includes('_copy')&&!st.deleted){
+    const def=resolveElementDef(dupId);
+    if(def?.baseId==='delta'){
+     const dupDir=st.direction||c.direction;
+     const dupFav=delta===null||delta===0||dupDir==='neutral'?null:dupDir==='down'?delta<0:delta>0;
+     res[`arrow_${dupId}`]=res.arrow;
+     res[`delta_${dupId}`]=res.delta;
+     res[`deltaColor_${dupId}`]=dupFav===null?c.muted:dupFav?c.positive:c.negative;
+    }
+   }
+  }
+ }
+ return res;
 }
 export function renderTrend(c,values,elementId='trend'){return renderSeries(c,values,v=>esc(formatNumber(v,c)),elementId);}
 /**
@@ -89,16 +104,20 @@ export function cardHTML(c,d=sampleData(c),editor=false){
   }
   else if(def.baseId==='delta'){
    const dupComparison=dupState.comparison||c.comparison;
-   let dVal=d[`delta_${dupId}`];
-   if(!dVal){
-    if(dupComparison==='none'){
-     dVal='—';
-    }else{
-     dVal=`${d.arrow} ${d.delta}`;
-    }
+   let dVal;
+   if(dupComparison==='none'){
+    dVal='—';
+   }else{
+    const arr=d[`arrow_${dupId}`]!==undefined?d[`arrow_${dupId}`]:d.arrow;
+    const del=d[`delta_${dupId}`]!==undefined?d[`delta_${dupId}`]:d.delta;
+    dVal=`${arr} ${del}`;
    }
    dupContent=dVal;
    dupExtra=`background:${bg(dupId)};padding:5px 8px;border-radius:6px;font-weight:600;line-height:1.4;width:fit-content;`;
+  }
+  else if(def.baseId==='referenceValue'){
+   dupContent=d[`val_${dupId}`]||d.previous;
+   dupExtra='font-weight:600;line-height:1.4;';
   }
   else if(def.baseId==='compareLabel'){
    const dupComp=dupState.comparison||c.comparison;
@@ -140,6 +159,8 @@ export function tokenData(c=null){
   for(const dupId of Object.keys(c.elements).filter(id=>id.includes('_copy'))){
    tokens[`val_${dupId}`]=`@@val_${dupId}@@`;
    tokens[`delta_${dupId}`]=`@@delta_${dupId}@@`;
+   tokens[`arrow_${dupId}`]=`@@arrow_${dupId}@@`;
+   tokens[`deltaColor_${dupId}`]=`@@deltaColor_${dupId}@@`;
    tokens[`trend_${dupId}`]=`@@trend_${dupId}@@`;
   }
  }

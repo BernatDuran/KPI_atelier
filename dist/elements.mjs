@@ -92,11 +92,38 @@ export function elementSize(c,id){
  if(c.elements?.[id]?.size!==undefined)return c.elements[id].size;
  return c[e.sizeKey]??(id==='progress'&&c.type==='target'?8:e.defaultSize);
 }
+export function getComparisonTwinId(id, c) {
+  if (id === 'delta') return 'compareLabel';
+  if (id === 'compareLabel') return 'delta';
+  const def = resolveElementDef(id);
+  if (!def || !def.isDuplicate) return null;
+  if (def.baseId === 'delta') {
+    const candidate = id.replace(/^delta_/, 'compareLabel_');
+    if (c?.elements && c.elements[candidate] && !c.elements[candidate].deleted) return candidate;
+    const others = Object.keys(c?.elements || {}).filter(k => {
+      const d = resolveElementDef(k);
+      return d?.isDuplicate && d.baseId === 'compareLabel' && !c.elements[k].deleted;
+    });
+    if (others.length === 1) return others[0];
+  } else if (def.baseId === 'compareLabel') {
+    const candidate = id.replace(/^compareLabel_/, 'delta_');
+    if (c?.elements && c.elements[candidate] && !c.elements[candidate].deleted) return candidate;
+    const others = Object.keys(c?.elements || {}).filter(k => {
+      const d = resolveElementDef(k);
+      return d?.isDuplicate && d.baseId === 'delta' && !c.elements[k].deleted;
+    });
+    if (others.length === 1) return others[0];
+  }
+  return null;
+}
 export function elementAvailable(c,id){
  resolveElementDef(id);
  const def=ELEMENTS[id];
  if(!def)return false;
- if(def.isDuplicate)return elementAvailable(c,def.baseId);
+ if(def.isDuplicate){
+  if(['delta','compareLabel'].includes(def.baseId))return true;
+  return elementAvailable(c,def.baseId);
+ }
  if(['goalLabel','progressLabel','progress'].includes(id))return ['target','executive'].includes(c.type)&&!(c.chartKind==='donut'&&c.showTrend&&!elementState(c,'trend').deleted&&!elementState(c,'trend').hidden);
  if(['delta','compareLabel'].includes(id))return c.comparison!=='none';
  if(id==='trend')return ['spark','executive','target'].includes(c.type);
@@ -106,7 +133,32 @@ export function elementAvailable(c,id){
 }
 export function elementEnabled(c,id){const key=ELEMENTS[id]?.toggle;return elementAvailable(c,id)&&(!key||c[key]!==false);}
 export function elementVisible(c,id){const state=elementState(c,id);return elementEnabled(c,id)&&!state.hidden&&!state.deleted;}
-export function updateElement(c,id,patch){return {...c,elements:{...c.elements,[id]:{...elementState(c,id),...patch}}};}
+export function updateElement(c,id,patch){
+ let nextElements = { ...c.elements, [id]: { ...elementState(c, id), ...patch } };
+ let nextConfig = { ...c, elements: nextElements };
+ if (patch && 'comparison' in patch) {
+  const newComp = patch.comparison;
+  const twinId = getComparisonTwinId(id, c);
+  if (twinId) {
+   if (twinId === 'delta' || twinId === 'compareLabel') {
+    nextConfig.comparison = newComp;
+    nextConfig.elements = {
+     ...nextConfig.elements,
+     delta: { ...elementState(nextConfig, 'delta'), comparison: newComp },
+     compareLabel: { ...elementState(nextConfig, 'compareLabel'), comparison: newComp }
+    };
+   } else {
+    nextConfig.elements = {
+     ...nextConfig.elements,
+     [twinId]: { ...elementState(nextConfig, twinId), comparison: newComp }
+    };
+   }
+  } else if (id === 'delta' || id === 'compareLabel') {
+   nextConfig.comparison = newComp;
+  }
+ }
+ return nextConfig;
+}
 export function sanitizeFrame(raw){
  if(!raw||typeof raw!=='object'||Array.isArray(raw))return null;
  if(!['left','top','width','height'].every(key=>typeof raw[key]==='number'&&Number.isFinite(raw[key]))||raw.width<0||raw.height<0)return null;

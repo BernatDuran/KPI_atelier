@@ -371,11 +371,22 @@ export async function scanFileList(fileList) {
 }
 
 /**
+ * Determines API base URL for bridge communication.
+ * Allows transparent operation when running from http server or file:// protocol.
+ */
+export function getApiBase() {
+  if (typeof window !== 'undefined' && window.location && window.location.protocol && window.location.protocol.startsWith('http')) {
+    return '';
+  }
+  return 'http://127.0.0.1:8080';
+}
+
+/**
  * Discovers active local Power BI Desktop instances via the bridge server.
- * @returns {Promise<Array<{pid: number, port: number, server: string}>>}
+ * @returns {Promise<Array<{pid: number, port: number, server: string, reportName?: string, database?: string}>>}
  */
 export async function discoverLivePbi() {
-  const res = await fetch('/api/pbi/discover', { cache: 'no-store' });
+  const res = await fetch(`${getApiBase()}/api/pbi/discover`, { cache: 'no-store' });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const json = await res.json();
   return json.instances || [];
@@ -387,7 +398,8 @@ export async function discoverLivePbi() {
  * @returns {Promise<{connected: boolean, server: string, serverName: string, databases: Array<{name: string, id: string}>}>}
  */
 export async function fetchLivePbiStatus(server = '') {
-  const url = server ? `/api/pbi/status?server=${encodeURIComponent(server)}` : '/api/pbi/status';
+  const base = getApiBase();
+  const url = server ? `${base}/api/pbi/status?server=${encodeURIComponent(server)}` : `${base}/api/pbi/status`;
   const res = await fetch(url, { cache: 'no-store' });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -403,7 +415,7 @@ export async function fetchLivePbiStatus(server = '') {
  * @returns {Promise<{modelName: string, reportName?: string, isLiveConnection: boolean, server: string, database: string, tables: string[], measures: Array<{name: string, table: string, expression?: string, configAnnotation?: any}>, dateTables: Array<{name: string, dateColumns: string[], isMarkedDateTable: boolean, primaryDateColumn: string|null, isLikelyCalendar: boolean}>}>}
  */
 export async function fetchLivePbiModel(server, database = '') {
-  const url = `/api/pbi/model?server=${encodeURIComponent(server)}${database ? `&database=${encodeURIComponent(database)}` : ''}`;
+  const url = `${getApiBase()}/api/pbi/model?server=${encodeURIComponent(server)}${database ? `&database=${encodeURIComponent(database)}` : ''}`;
   const res = await fetch(url, { cache: 'no-store' });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -411,7 +423,12 @@ export async function fetchLivePbiModel(server, database = '') {
   }
   const data = await res.json();
 
-  const tables = (data.tables || []).map(t => t.name).filter(Boolean);
+  const allTables = (data.tables || []).map(t => (typeof t === 'string' ? t : t.name)).filter(Boolean);
+  const userTables = (data.tables || [])
+    .filter(t => !t.isAutoDate && !t.isHidden && !String(t.name || t).startsWith('LocalDateTable_') && !String(t.name || t).startsWith('DateTableTemplate_'))
+    .map(t => (typeof t === 'string' ? t : t.name))
+    .filter(Boolean);
+  const tables = userTables.length > 0 ? userTables : allTables;
   const measures = (data.measures || []).map(m => {
     let cfg = null;
     if (m.configAnnotation) {
@@ -453,8 +470,8 @@ export async function fetchLivePbiModel(server, database = '') {
  * @param {any} payload
  * @returns {Promise<{success: boolean, measureName: string, tableName: string, isNew: boolean}>}
  */
-export async function injectMeasureToLivePbi({ server, database, tableName = '_Measures', measureName, daxExpression, formatString = '', configAnnotation = null }) {
-  const res = await fetch('/api/pbi/measure', {
+export async function injectMeasureToLivePbi({ server, database, tableName = '', measureName, daxExpression, formatString = '', configAnnotation = null }) {
+  const res = await fetch(`${getApiBase()}/api/pbi/measure`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -472,5 +489,31 @@ export async function injectMeasureToLivePbi({ server, database, tableName = '_M
     throw new Error(err.error || `Error HTTP ${res.status}`);
   }
   return await res.json();
+}
+
+/**
+ * Connects to the real-time Server-Sent Events stream from the local bridge.
+ * Dispatches live updates whenever Power BI Desktop instances appear or disappear.
+ * @param {(instances: Array<{pid: number, port: number, server: string, reportName?: string, database?: string}>) => void} onInstancesChange
+ * @returns {(() => void) | null} Cleanup function to close the stream
+ */
+export function initLivePbiStream(onInstancesChange) {
+  if (typeof window === 'undefined' || typeof window.EventSource === 'undefined') return null;
+  try {
+    const es = new EventSource(`${getApiBase()}/api/pbi/events`);
+    es.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.type === 'instances' && typeof onInstancesChange === 'function') {
+          onInstancesChange(data.instances || []);
+        }
+      } catch {}
+    };
+    return () => {
+      try { es.close(); } catch {}
+    };
+  } catch {
+    return null;
+  }
 }
 

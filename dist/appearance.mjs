@@ -35,7 +35,7 @@ export function elementColor(c,id,data={}){
  const p=appearance(c,id),spec=COLOR_SPEC[id]||COLOR_SPEC[baseId];
  if(p.colorMode==='custom')return p.color;
  if(p.colorMode==='linked'&&(id==='progressLabel'||baseId==='progressLabel'))return elementColor(c,'progress',data);
- if(p.colorMode==='semantic'&&spec?.semantic)return data[spec.semantic]||c.accent;
+ if(p.colorMode==='semantic'&&spec?.semantic){const dupKey=(id&&id.includes('_copy'))?`${spec.semantic}_${id}`:spec.semantic;return data[dupKey]||data[spec.semantic]||c.accent;}
  return c[spec?.role||'text'];
 }
 // Retains a dynamic @@color@@ token so DAX concatenates its alpha suffix.

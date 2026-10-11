@@ -85,9 +85,9 @@ export function generateDAX(c) {
   Object.keys(c.elements || {}).filter(k => k.includes('_copy') && !c.elements[k].deleted).map(dupId => {
    const def = resolveElementDef(dupId);
    const st = elementState(c, dupId);
-   if (def?.baseId === 'value' || st.measure?.trim()) return `// - Medida en ${def?.label || dupId}: ${st.measure && st.measure.trim() ? measureRef(st.measure) : m}\n`;
-   if (def?.baseId === 'delta' && st.compareMeasure?.trim()) return `// - Medida de referencia en ${def?.label || dupId}: ${measureRef(st.compareMeasure)}\n`;
    if (def?.baseId === 'trend') return `// - Gráfico en ${def?.label || dupId}: medida ${st.measure && st.measure.trim() ? measureRef(st.measure) : m}, calendario ${tableRef(st.dateTable || c.dateTable)}[${st.dateColumn || c.dateColumn}]\n`;
+   if (def?.baseId === 'value' || (st.measure && st.measure.trim())) return `// - Medida en ${def?.label || dupId}: ${st.measure && st.measure.trim() ? measureRef(st.measure) : m}\n`;
+   if (def?.baseId === 'delta' && st.compareMeasure?.trim()) return `// - Medida de referencia en ${def?.label || dupId}: ${measureRef(st.compareMeasure)}\n`;
    return '';
   }).join('') + `\n`;
 
@@ -200,8 +200,16 @@ export function generateDAX(c) {
   const def = resolveElementDef(dupId);
   if (!def) continue;
   const dupState = elementState(c, dupId);
-  if (def.baseId === 'value') {
+  if (def.baseId === 'trend') {
+   const dupKind = dupState.chartKind || c.chartKind;
+   if (dupKind !== 'donut' && needsDate(c)) {
+    code += trendDAX(c, dupId);
+   } else {
+    code += `VAR __trend_${dupId} = ""\n`;
+   }
+  } else if (def.baseId === 'value') {
    const dupMeasure = dupState.measure && dupState.measure.trim() ? measureRef(dupState.measure) : m;
+   const isSameAsMainMeasure = !dupState.measure || dupState.measure.trim().toLowerCase() === c.measure.trim().toLowerCase();
    const dupConf = {
     ...c,
     format: dupState.format || c.format,
@@ -210,29 +218,168 @@ export function generateDAX(c) {
     currency: dupState.currency || c.currency,
     suffix: dupState.suffix !== undefined ? dupState.suffix : c.suffix
    };
-   code += `VAR __val_${dupId} = ${formatted(dupMeasure, dupConf)}\n`;
+   const isSameFormat = (dupState.format || c.format) === c.format &&
+    (dupState.decimals ?? c.decimals) === c.decimals &&
+    (dupState.unit || c.unit) === c.unit &&
+    (dupState.currency || c.currency) === c.currency &&
+    (dupState.suffix !== undefined ? dupState.suffix : c.suffix) === c.suffix;
+
+   if (isSameAsMainMeasure && isSameFormat) {
+    code += `VAR __val_${dupId} = __value\n`;
+   } else if (isSameAsMainMeasure) {
+    code += `VAR __val_${dupId} = ${formatted('__Current', dupConf)}\n`;
+   } else {
+    if (dateNeeded) {
+     code += `VAR __Cur_${dupId} = IF ( __HasDates, CALCULATE ( ${dupMeasure}, REMOVEFILTERS ( ${table} ), TREATAS ( __Dates, ${date} ) ), ${dupMeasure} )\n`;
+     code += `VAR __val_${dupId} = ${formatted(`__Cur_${dupId}`, dupConf)}\n`;
+    } else {
+     code += `VAR __val_${dupId} = ${formatted(dupMeasure, dupConf)}\n`;
+    }
+   }
   } else if (def.baseId === 'delta') {
-   const dupCompare = dupState.compareMeasure && dupState.compareMeasure.trim() ? measureRef(dupState.compareMeasure) : '__Reference';
+   let targetMetric = null;
+   if (dupState.measure && dupState.measure.trim()) {
+    targetMetric = dupState.measure.trim();
+   } else {
+    const pairedValId = dupId.replace(/^delta_/, 'value_');
+    if (c.elements?.[pairedValId]?.measure?.trim()) {
+     targetMetric = c.elements[pairedValId].measure.trim();
+    } else {
+     const otherValDups = Object.keys(c.elements || {}).filter(k => resolveElementDef(k)?.baseId === 'value' && !c.elements[k].deleted && c.elements[k].measure?.trim());
+     if (otherValDups.length === 1) {
+      targetMetric = c.elements[otherValDups[0]].measure.trim();
+     } else {
+      targetMetric = c.measure;
+     }
+    }
+   }
+   const dupMetricRef = measureRef(targetMetric);
+   const isSameMetricAsMain = targetMetric.toLowerCase() === c.measure.trim().toLowerCase();
+   const dupComp = dupState.comparison || c.comparison;
    const dupMode = dupState.deltaMode || c.deltaMode;
-   code += `VAR __Diff_${dupId} = IF ( NOT ISBLANK ( __Current ) && NOT ISBLANK ( ${dupCompare} ), __Current - ${dupCompare} )\n` +
-    `VAR __Rel_${dupId} = DIVIDE ( __Diff_${dupId}, ABS ( ${dupCompare} ) )\n` +
-    `VAR __delta_${dupId} = ${dupMode === 'absolute' ? `IF ( ISBLANK ( __Diff_${dupId} ), "—", IF ( __Diff_${dupId} > 0, "+", "" ) & ${formatted(`__Diff_${dupId}`, c)} )` : dupMode === 'pp' ? `IF ( ISBLANK ( __Diff_${dupId} ), "—", FORMAT ( __Diff_${dupId} * 100, "+0.0;-0.0;0.0", __Cfg_Locale ) & " pp" )` : `IF ( ISBLANK ( __Rel_${dupId} ), "—", FORMAT ( __Rel_${dupId}, "+0.0%;-0.0%;0.0%", __Cfg_Locale ) )`}\n`;
+   const dupDir = dupState.direction || c.direction;
+
+   let curExpr;
+   if (isSameMetricAsMain) {
+    curExpr = '__Current';
+   } else {
+    if (dateNeeded) {
+     code += `VAR __Cur_${dupId} = IF ( __HasDates, CALCULATE ( ${dupMetricRef}, REMOVEFILTERS ( ${table} ), TREATAS ( __Dates, ${date} ) ), ${dupMetricRef} )\n`;
+    } else {
+     code += `VAR __Cur_${dupId} = ${dupMetricRef}\n`;
+    }
+    curExpr = `__Cur_${dupId}`;
+   }
+
+   let refExpr = 'BLANK ()';
+   if (dupComp === 'none') {
+    refExpr = 'BLANK ()';
+   } else if (['yoy', 'mom'].includes(dupComp)) {
+    if (isSameMetricAsMain && c.comparison === dupComp && needsCompare(c)) {
+     refExpr = '__Reference';
+    } else if (c.comparison === dupComp && needsCompare(c)) {
+     code += `VAR __Ref_${dupId} = IF ( __ComparableDates, CALCULATE ( ${dupMetricRef}, REMOVEFILTERS ( ${table} ), TREATAS ( __ShiftedDates, ${date} ) ) )\n`;
+     refExpr = `__Ref_${dupId}`;
+    } else if (dateNeeded) {
+     const months = dupComp === 'yoy' ? -12 : -1;
+     code += `VAR __ShiftedDates_${dupId} = DISTINCT ( SELECTCOLUMNS ( __Dates, "__ShiftedDate", EDATE ( ${date}, ${months} ) ) )\n` +
+      `VAR __PriorDates_${dupId} = SELECTCOLUMNS ( CALCULATETABLE ( VALUES ( ${date} ), REMOVEFILTERS ( ${table} ) ), "__ShiftedDate", ${date} )\n` +
+      `VAR __ComparableDates_${dupId} = __HasDates && COUNTROWS ( INTERSECT ( __ShiftedDates_${dupId}, __PriorDates_${dupId} ) ) = COUNTROWS ( __ShiftedDates_${dupId} )\n` +
+      `VAR __Ref_${dupId} = IF ( __ComparableDates_${dupId}, CALCULATE ( ${dupMetricRef}, REMOVEFILTERS ( ${table} ), TREATAS ( __ShiftedDates_${dupId}, ${date} ) ) )\n`;
+     refExpr = `__Ref_${dupId}`;
+    }
+   } else if (dupComp === 'previous') {
+    if (isSameMetricAsMain && c.comparison === 'previous' && needsCompare(c)) {
+     refExpr = '__Reference';
+    } else if (c.comparison === 'previous' && needsCompare(c)) {
+     code += `VAR __Ref_${dupId} = IF ( __ComparableDates, CALCULATE ( ${dupMetricRef}, REMOVEFILTERS ( ${table} ), TREATAS ( __PreviousDates, ${date} ) ) )\n`;
+     refExpr = `__Ref_${dupId}`;
+    } else if (dateNeeded) {
+     code += `VAR __CalendarDates_${dupId} = CALCULATETABLE ( VALUES ( ${date} ), REMOVEFILTERS ( ${table} ) )\n` +
+      `VAR __PreviousDates_${dupId} = FILTER ( __CalendarDates_${dupId}, ${date} >= __Start - __Span && ${date} < __Start )\n` +
+      `VAR __ComparableDates_${dupId} = __HasDates && COUNTROWS ( __PreviousDates_${dupId} ) > 0\n` +
+      `VAR __Ref_${dupId} = IF ( __ComparableDates_${dupId}, CALCULATE ( ${dupMetricRef}, REMOVEFILTERS ( ${table} ), TREATAS ( __PreviousDates_${dupId}, ${date} ) ) )\n`;
+     refExpr = `__Ref_${dupId}`;
+    }
+   } else if (dupComp === 'target') {
+    if (dupState.targetMeasure && dupState.targetMeasure.trim()) {
+     refExpr = targetRef(dupState.targetMeasure.trim());
+    } else if (c.targetMeasure) {
+     refExpr = '__Target';
+    } else {
+     refExpr = 'BLANK ()';
+    }
+   } else if (dupComp === 'custom') {
+    if (dupState.compareMeasure && dupState.compareMeasure.trim()) {
+     refExpr = measureRef(dupState.compareMeasure.trim());
+    } else if (c.compareMeasure) {
+     refExpr = measureRef(c.compareMeasure);
+    } else {
+     refExpr = 'BLANK ()';
+    }
+   }
+
+   const isIdenticalToMainDelta = isSameMetricAsMain && dupComp === c.comparison && dupMode === c.deltaMode && dupDir === c.direction && needsCompare(c);
+   if (isIdenticalToMainDelta) {
+    code += `VAR __Diff_${dupId} = __Difference\n` +
+     `VAR __Rel_${dupId} = __Relative\n` +
+     `VAR __arrow_${dupId} = __arrow\n` +
+     `VAR __delta_${dupId} = __delta\n` +
+     `VAR __deltaColor_${dupId} = __deltaColor\n`;
+   } else {
+    code += `VAR __Diff_${dupId} = IF ( NOT ISBLANK ( ${curExpr} ) && NOT ISBLANK ( ${refExpr} ), ${curExpr} - ${refExpr} )\n` +
+     `VAR __Rel_${dupId} = DIVIDE ( __Diff_${dupId}, ABS ( ${refExpr} ) )\n`;
+
+    const dupConf = {
+     ...c,
+     format: dupState.format || c.format,
+     decimals: dupState.decimals ?? c.decimals,
+     unit: dupState.unit || c.unit,
+     currency: dupState.currency || c.currency
+    };
+    let deltaExpr;
+    if (dupComp === 'none') {
+     deltaExpr = `"—"`;
+    } else if (dupMode === 'absolute') {
+     deltaExpr = `IF ( ISBLANK ( __Diff_${dupId} ), "—", IF ( __Diff_${dupId} > 0, "+", "" ) & ${formatted(`__Diff_${dupId}`, dupConf)} )`;
+    } else if (dupMode === 'pp') {
+     deltaExpr = `IF ( ISBLANK ( __Diff_${dupId} ), "—", FORMAT ( __Diff_${dupId} * 100, "+0.0;-0.0;0.0", __Cfg_Locale ) & " pp" )`;
+    } else {
+     deltaExpr = `IF ( ISBLANK ( __Rel_${dupId} ), "—", FORMAT ( __Rel_${dupId}, "+0.0%;-0.0%;0.0%", __Cfg_Locale ) )`;
+    }
+    code += `VAR __delta_${dupId} = ${deltaExpr}\n`;
+
+    code += `VAR __arrow_${dupId} = ${dupComp === 'none' ? `"—"` : `SWITCH ( TRUE (), ISBLANK ( __Diff_${dupId} ) || __Diff_${dupId} = 0, "—", __Diff_${dupId} > 0, "↗", "↘" )`}\n`;
+
+    let colorExpr;
+    if (dupComp === 'none' || dupDir === 'neutral') {
+     colorExpr = `__Cfg_ColorMuted`;
+    } else {
+     const higherIsBetter = dupDir === 'down' ? 'FALSE ()' : 'TRUE ()';
+     colorExpr = `SWITCH ( TRUE (), ISBLANK ( __Diff_${dupId} ) || __Diff_${dupId} = 0, __Cfg_ColorMuted, ( __Diff_${dupId} > 0 ) = ${higherIsBetter}, __Cfg_ColorGood, __Cfg_ColorBad )`;
+    }
+    code += `VAR __deltaColor_${dupId} = ${colorExpr}\n`;
+   }
   } else if (def.baseId === 'referenceValue') {
    const dupRef = dupState.measure && dupState.measure.trim() ? measureRef(dupState.measure) : (dupState.compareMeasure && dupState.compareMeasure.trim() ? measureRef(dupState.compareMeasure) : '__Reference');
    code += `VAR __val_${dupId} = ${formatted(dupRef, c)}\n`;
   } else if (dupState.measure && dupState.measure.trim()) {
    code += `VAR __val_${dupId} = ${formatted(measureRef(dupState.measure), c)}\n`;
-  } else if (def.baseId === 'trend') {
-   const dupKind = dupState.chartKind || c.chartKind;
-   if (dupKind !== 'donut' && needsDate(c)) {
-    code += trendDAX(c, dupId);
-   } else {
-    code += `VAR __trend_${dupId} = ""\n`;
-   }
   }
  }
 
- code += `RETURN\n    ${compileHTML(cardHTML(c, tokenData(c)))}\n`;
+ const compiledReturn = compileHTML(cardHTML(c, tokenData(c)));
+ const returnRefs = new Set([...compiledReturn.matchAll(/\b(__[a-zA-Z0-9_]+)\b/g)].map(m => m[1]));
+ const declaredSoFar = new Set([...code.matchAll(/\bVAR\s+(__[a-zA-Z0-9_]+)\s*=/g)].map(m => m[1]));
+ const missingInReturn = Array.from(returnRefs).filter(v => !declaredSoFar.has(v));
+ if (missingInReturn.length > 0) {
+  code += `// Variables de protección para evitar errores de compilación en Power BI:\n`;
+  for (const mv of missingInReturn) {
+   code += `VAR ${mv} = ""\n`;
+  }
+ }
+
+ code += `RETURN\n    ${compiledReturn}\n`;
  return code;
 }
 
@@ -379,3 +526,57 @@ export function generateDAXBody(c) {
  const dax = generateDAX(c);
  return dax.replace(/^\s*[\p{L}\p{N}_ ]+\s*=\s*/u, '').trim();
 }
+
+export function validateDAX(daxCode) {
+ let clean = '', paren = 0;
+ for (let i = 0; i < daxCode.length; i++) {
+  const ch = daxCode[i];
+  if (ch === '/' && daxCode[i + 1] === '/') {
+   while (i < daxCode.length && daxCode[i] !== '\n') i++;
+   continue;
+  }
+  if (ch === '/' && daxCode[i + 1] === '*') {
+   i += 2;
+   while (i < daxCode.length && !(daxCode[i] === '*' && daxCode[i + 1] === '/')) i++;
+   i++;
+   continue;
+  }
+  if (ch === '"' || ch === "'" || ch === '[') {
+   const end = ch === '[' ? ']' : ch;
+   let closed = false;
+   for (i++; i < daxCode.length; i++) {
+    if (daxCode[i] === end) {
+     if (daxCode[i + 1] === end) { i++; continue; }
+     closed = true;
+     break;
+    }
+   }
+   clean += ' ';
+   continue;
+  }
+  if (ch === '(') paren++;
+  if (ch === ')') paren--;
+  clean += ch;
+ }
+
+ const declared = new Set([...clean.matchAll(/\bVAR\s+(__[a-zA-Z0-9_]+)/g)].map(x => x[1]));
+ const refs = [...clean.matchAll(/\b(__[a-zA-Z0-9_]+)\b/g)].map(x => x[1]);
+ const undeclared = [];
+ for (const v of refs) {
+  if (!declared.has(v) && !undeclared.includes(v)) undeclared.push(v);
+ }
+
+ const hasMarkdownEscapes = /\\(\*|_|#|\[|\]|<|>|`)/.test(daxCode);
+ const hasBackticks = /`/.test(daxCode);
+
+ return {
+  valid: undeclared.length === 0 && paren === 0 && !hasMarkdownEscapes && !hasBackticks,
+  declared: Array.from(declared),
+  referenced: Array.from(new Set(refs)),
+  undeclared,
+  balancedParentheses: paren === 0,
+  hasMarkdownEscapes,
+  hasBackticks
+ };
+}
+

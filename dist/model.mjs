@@ -1,10 +1,17 @@
 import {sanitizeElements,ELEMENTS,SIZE_LIMITS,elementEnabled,elementState,DEFAULT_LAYER_ORDER,sanitizeLayerOrder,resolveElementDef} from './elements.mjs';
 import {ICON_OPTIONS} from './icons.mjs';
+
+/** @typedef {import('./types.d.ts').CardConfig} CardConfig */
+/** @typedef {import('./types.d.ts').ValidationIssue} ValidationIssue */
+/** @typedef {import('./types.d.ts').ThemeConfig} ThemeConfig */
+/** @typedef {import('./types.d.ts').TemplateConfig} TemplateConfig */
+
 export const FAMILIES = [
  {id:'all',name:'Todas las tarjetas',icon:'grid'}, {id:'basic',name:'KPI esenciales',icon:'square'},
  {id:'comparison',name:'Comparativas',icon:'compare'}, {id:'target',name:'Objetivos',icon:'target'},
  {id:'status',name:'Semáforos',icon:'signal'}, {id:'spark',name:'Tendencias',icon:'trend'}, {id:'executive',name:'Ejecutivas',icon:'layers'}
 ];
+/** @type {CardConfig} */
 export const BASE = {
  id:'executive-night',type:'executive',title:'Ingresos totales',subtitle:'Visión de negocio',eyebrow:'REVENUE OVERVIEW',
  measure:'Total Ventas',measureName:'KPI_Ventas_HTML',dateTable:'Calendario',dateColumn:'Fecha',targetMeasure:'Objetivo Ventas',compareMeasure:'Ventas Periodo Anterior',
@@ -83,6 +90,12 @@ export function healCorruptedText(str){
   .replace(/\uFFFD/g,'');
 }
 
+/**
+ * Normalizes and sanitizes any raw configuration input into a fully valid CardConfig.
+ * Enforces limits, valid enums, layer order completeness, and repair of unicode artifacts.
+ * @param {any} [raw]
+ * @returns {CardConfig}
+ */
 export function sanitizeConfig(raw={}){
  if(typeof raw==='string'){try{raw=JSON.parse(raw);}catch{raw={};}}
  if(!raw||typeof raw!=='object')raw={};
@@ -106,10 +119,10 @@ export function sanitizeConfig(raw={}){
 }
 export function familyName(type){return FAMILIES.find(f=>f.id===type)?.name??type;}
 const rendered=(c,id)=>elementEnabled(c,id)&&!elementState(c,id).deleted;
-export function needsTrend(c){return c.chartKind!=='donut'&&rendered(c,'trend');}
+export function needsTrend(c){return (c.chartKind!=='donut'&&rendered(c,'trend'))||Object.keys(c.elements||{}).some(k=>k.includes('_copy')&&!c.elements[k]?.deleted&&resolveElementDef(k)?.baseId==='trend'&&(c.elements[k]?.chartKind||c.chartKind)!=='donut');}
 export function needsGoal(c){return c.chartKind==='donut'&&rendered(c,'trend')||['goalLabel','progressLabel','progress'].some(id=>rendered(c,id));}
 export function needsCompare(c){return ['delta','compareLabel'].some(id=>rendered(c,id))||c.type==='comparison'&&['referenceLabel','referenceValue'].some(id=>rendered(c,id))&&c.showComparison;}
-export function needsDate(c){return needsTrend(c)||(needsCompare(c)&&['yoy','mom','previous'].includes(c.comparison));}
+export function needsDate(c){return needsTrend(c)||(needsCompare(c)&&['yoy','mom','previous'].includes(c.comparison))||Object.keys(c.elements||{}).some(k=>k.includes('_copy')&&!c.elements[k]?.deleted&&resolveElementDef(k)?.baseId==='delta'&&['yoy','mom','previous'].includes(c.elements[k]?.comparison||c.comparison));}
 export function isValidMeasureName(name){
  if(!name||typeof name!=='string')return false;
  const t=name.trim();
@@ -149,6 +162,12 @@ export function getCircularConflict(c){
  }
  return null;
 }
+/**
+ * Performs functional business-logic validation checks on a CardConfig.
+ * Detects missing required fields, circular references, incompatible thresholds, and warnings.
+ * @param {CardConfig} c
+ * @returns {ValidationIssue[]}
+ */
 export function checks(c){
  const issues=[];
  if(rendered(c,'title')&&!c.title.trim())issues.push({level:'error',text:'Añade un título para la tarjeta.',field:'title'});
@@ -169,8 +188,12 @@ export function checks(c){
   if(def?.baseId==='value'&&!st.measure?.trim()){
    issues.push({level:'warning',text:`Elemento '${def.label}': no tiene medida propia asignada (se calculará con la medida principal '${c.measure.trim()||'Medida'}').`,field:`dup_${dupId}_measure`,elementId:dupId});
   }
-  if(def?.baseId==='delta'&&c.comparison==='custom'&&!st.compareMeasure?.trim()){
-   issues.push({level:'error',text:`Elemento '${def.label}': indica la medida de referencia para la comparativa.`,field:`dup_${dupId}_compare`,elementId:dupId});
+  const effComp = st.comparison || c.comparison;
+  if(def?.baseId==='delta'&&effComp==='custom'&&!st.compareMeasure?.trim()&&!c.compareMeasure?.trim()){
+    issues.push({level:'error',text:`Elemento '${def.label}': indica la medida de referencia para la comparativa.`,field:`dup_${dupId}_compare`,elementId:dupId});
+  }
+  if(def?.baseId==='delta'&&effComp==='target'&&!st.targetMeasure?.trim()&&!c.targetMeasure?.trim()){
+    issues.push({level:'error',text:`Elemento '${def.label}': indica la medida u objetivo para la comparativa.`,field:`dup_${dupId}_target`,elementId:dupId});
   }
  }
  if(c.height<240&&['executive','target','status','spark'].includes(c.type))issues.push({level:'warning',text:'Esta composición puede necesitar más altura. Revisa el resultado a tamaño real.'});
