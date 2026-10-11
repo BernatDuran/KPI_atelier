@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {BASE,TEMPLATES,THEMES,sanitizeConfig,checks,needsDate,needsTrend,isValidMeasureName} from '../dist/model.mjs';
 import {sampleData,cardHTML,renderTrend,formatNumber,icon} from '../dist/cards.mjs';
-import {generateDAX,measureRef,tableRef} from '../dist/dax.mjs';
+import {generateDAX,measureRef,tableRef,validateDAX} from '../dist/dax.mjs';
 import {ELEMENT_IDS,ELEMENTS,elementState,elementSize,moveElement,resizeElement,updateElement,restoreElement,elementVisible} from '../dist/elements.mjs';
 import {hexToHSV,hsvToHex,contrastRatio,sanitizePalette,paletteFrom} from '../dist/colors.mjs';
 import {ICON_OPTIONS} from '../dist/icons.mjs';
@@ -525,4 +525,179 @@ test('Encoding resilience: healCorruptedText and sanitizeConfig repair Unicode r
  assert.equal(healedJson.footer, 'Rendimiento del período');
 });
 
+test('Multi-visual and duplicate DAX generation: isolated trends, independent deltas, pure DAX, variable integrity', () => {
+ // 1. Multi-chart card: trend (Sales) + trend_copy1 (Cost)
+ const multiChartConf = sanitizeConfig({
+  ...BASE,
+  measure: 'Total Ventas',
+  dateTable: 'Calendario',
+  dateColumn: 'Fecha',
+  elements: {
+   trend_copy1: {
+    measure: 'Coste Total',
+    dateTable: 'Calendario',
+    dateColumn: 'Fecha',
+    chartKind: 'trend',
+    trendStyle: 'area',
+    deleted: false
+   }
+  }
+ });
+ const daxMultiChart = generateDAX(multiChartConf);
+ assert.ok(daxMultiChart.includes('VAR __trend ='), 'Must declare original trend');
+ assert.ok(daxMultiChart.includes('VAR __trend_trend_copy1 ='), 'Must declare duplicate trend variable');
+ assert.ok(daxMultiChart.includes('// SERIE TEMPORAL: TREND_COPY1'), 'Must generate scoped time series for trend_copy1');
+ assert.ok(daxMultiChart.includes('CALCULATE ( [Coste Total]'), 'trend_copy1 time series must evaluate configured measure [Coste Total]');
+ assert.ok(daxMultiChart.includes('CALCULATE ( [Total Ventas]'), 'base trend time series must evaluate [Total Ventas]');
 
+ const valMultiChart = validateDAX(daxMultiChart);
+ assert.equal(valMultiChart.valid, true);
+ assert.deepEqual(valMultiChart.undeclared, []);
+ lexDax(daxMultiChart);
+
+ // 2. Multi-KPI card with independent metrics and deltas:
+ // KPI 1: [Total Ventas], YoY, direction 'up'
+ // KPI 2: [Coste Total], MoM, direction 'down' (deltaMode: relative)
+ const multiKPIConf = sanitizeConfig({
+  ...BASE,
+  measure: 'Total Ventas',
+  comparison: 'yoy',
+  direction: 'up',
+  dateTable: 'Calendario',
+  dateColumn: 'Fecha',
+  elements: {
+   value_copy1: {
+    measure: 'Coste Total',
+    format: 'currency',
+    currency: 'EUR',
+    deleted: false
+   },
+   delta_copy1: {
+    measure: 'Coste Total',
+    comparison: 'mom',
+    deltaMode: 'relative',
+    direction: 'down',
+    deleted: false
+   }
+  }
+ });
+ const daxMultiKPI = generateDAX(multiKPIConf);
+
+ // Verify no cross-metric comparison ([Total Ventas] - [Coste Total] must never occur)
+ assert.ok(!daxMultiKPI.includes('[Total Ventas] - [Coste Total]'));
+ assert.ok(!daxMultiKPI.includes('__Current - [Coste Total]'));
+ assert.ok(!daxMultiKPI.includes('__Current - __Ref_delta_copy1'));
+
+ // Verify delta_copy1 calculates Coste Total current vs previous month
+ assert.ok(daxMultiKPI.includes('VAR __Cur_delta_copy1 ='), 'Must declare current value of duplicate metric');
+ assert.ok(daxMultiKPI.includes('VAR __Ref_delta_copy1 ='), 'Must declare reference value of duplicate metric');
+ assert.ok(daxMultiKPI.includes('VAR __Diff_delta_copy1 = IF ( NOT ISBLANK ( __Cur_delta_copy1 ) && NOT ISBLANK ( __Ref_delta_copy1 ), __Cur_delta_copy1 - __Ref_delta_copy1 )'));
+ assert.ok(daxMultiKPI.includes('VAR __delta_delta_copy1 ='));
+ assert.ok(daxMultiKPI.includes('VAR __arrow_delta_copy1 ='));
+ assert.ok(daxMultiKPI.includes('VAR __deltaColor_delta_copy1 ='));
+ // Direction 'down' means higher is worse: ( __Diff > 0 ) = FALSE ()
+ assert.ok(daxMultiKPI.includes('( __Diff_delta_copy1 > 0 ) = FALSE ()'));
+
+ const valMultiKPI = validateDAX(daxMultiKPI);
+ assert.equal(valMultiKPI.valid, true);
+ assert.deepEqual(valMultiKPI.undeclared, []);
+ lexDax(daxMultiKPI);
+
+ // 3. Shared calculations when elements are identical
+ const sharedConf = sanitizeConfig({
+  ...BASE,
+  measure: 'Total Ventas',
+  comparison: 'yoy',
+  elements: {
+   value_copy1: {
+    deleted: false
+   },
+   delta_copy1: {
+    deleted: false
+   }
+  }
+ });
+ const daxShared = generateDAX(sharedConf);
+ assert.ok(daxShared.includes('VAR __val_value_copy1 = __value'), 'Must reuse __value calculation when identical');
+ assert.ok(daxShared.includes('VAR __Diff_delta_copy1 = __Difference'), 'Must reuse __Difference calculation when identical');
+ assert.ok(daxShared.includes('VAR __delta_delta_copy1 = __delta'), 'Must reuse __delta calculation when identical');
+ assert.ok(daxShared.includes('VAR __arrow_delta_copy1 = __arrow'), 'Must reuse __arrow calculation when identical');
+ assert.ok(daxShared.includes('VAR __deltaColor_delta_copy1 = __deltaColor'), 'Must reuse __deltaColor calculation when identical');
+ const valShared = validateDAX(daxShared);
+ assert.equal(valShared.valid, true);
+ assert.deepEqual(valShared.undeclared, []);
+ lexDax(daxShared);
+
+ // 4. Pure DAX verification: no markdown backticks or escaped markers
+ assert.equal(valMultiChart.hasMarkdownEscapes, false);
+ assert.equal(valMultiChart.hasBackticks, false);
+ assert.equal(valMultiKPI.hasMarkdownEscapes, false);
+ assert.equal(valMultiKPI.hasBackticks, false);
+ assert.equal(valShared.hasMarkdownEscapes, false);
+ assert.equal(valShared.hasBackticks, false);
+});
+test('Variation delta and comparison label twin synchronization, propagation and validation', () => {
+  // 1. Twin synchronization between delta_copy1 and compareLabel_copy1
+  const initial = sanitizeConfig({
+    ...BASE,
+    comparison: 'yoy',
+    elements: {
+      delta_copy1: { comparison: 'yoy' },
+      compareLabel_copy1: { comparison: 'yoy' }
+    }
+  });
+
+  // Updating delta_copy1 automatically syncs compareLabel_copy1
+  const syncFromDelta = updateElement(initial, 'delta_copy1', { comparison: 'mom' });
+  assert.equal(syncFromDelta.elements.delta_copy1.comparison, 'mom');
+  assert.equal(syncFromDelta.elements.compareLabel_copy1.comparison, 'mom', 'compareLabel_copy1 must synchronize to mom');
+
+  // Updating compareLabel_copy1 automatically syncs delta_copy1
+  const syncFromLabel = updateElement(syncFromDelta, 'compareLabel_copy1', { comparison: 'previous' });
+  assert.equal(syncFromLabel.elements.compareLabel_copy1.comparison, 'previous');
+  assert.equal(syncFromLabel.elements.delta_copy1.comparison, 'previous', 'delta_copy1 must synchronize to previous');
+
+  // Base element sync keeps root c.comparison in sync
+  const syncBase = updateElement(initial, 'delta', { comparison: 'mom' });
+  assert.equal(syncBase.comparison, 'mom', 'c.comparison must synchronize to mom');
+  assert.equal(syncBase.elements.compareLabel.comparison, 'mom');
+
+  // 2. Automatic label rendering vs custom text override
+  const autoHtml = cardHTML(syncFromDelta);
+  assert.ok(autoHtml.includes('vs. mes anterior'), 'Automatic label must reflect mom');
+
+  const customOverride = updateElement(syncFromDelta, 'compareLabel_copy1', { text: 'vs. Presupuesto Q3' });
+  const customHtml = cardHTML(customOverride);
+  assert.ok(customHtml.includes('vs. Presupuesto Q3'), 'Custom text override must be respected in display');
+  assert.equal(customOverride.elements.delta_copy1.comparison, 'mom', 'Delta math remains mom');
+
+  // 3. DAX propagation for duplicate delta
+  const daxMom = generateDAX(syncFromDelta);
+  assert.ok(daxMom.includes('EDATE'), 'MoM comparison generates EDATE shift');
+  const valMom = validateDAX(daxMom);
+  assert.equal(valMom.valid, true);
+
+  // 4. Validation in checks(c): detects missing compareMeasure on duplicate even when main card is yoy
+  const customDup = sanitizeConfig({
+    ...BASE,
+    comparison: 'yoy',
+    compareMeasure: '',
+    elements: {
+      delta_copy1: { comparison: 'custom' },
+      compareLabel_copy1: { comparison: 'custom' }
+    }
+  });
+  const errCustom = checks(customDup).filter(x => x.level === 'error');
+  assert.ok(errCustom.some(x => x.field === 'dup_delta_copy1_compare'), 'Must flag missing reference measure for custom delta copy');
+
+  // Providing compareMeasure resolves the error
+  const fixedCustom = sanitizeConfig({
+    ...customDup,
+    elements: {
+      ...customDup.elements,
+      delta_copy1: { ...customDup.elements.delta_copy1, compareMeasure: 'Presupuesto' }
+    }
+  });
+  const errFixed = checks(fixedCustom).filter(x => x.field === 'dup_delta_copy1_compare');
+  assert.equal(errFixed.length, 0, 'Providing compareMeasure clears error');
+});

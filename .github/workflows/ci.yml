@@ -23,8 +23,8 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
 
-      - name: Run complete test suite (73 tests)
-        run: node --test tests/core.test.mjs tests/editor.test.mjs tests/pbip.test.mjs tests/pbitool.test.mjs
+      - name: Run complete test suite (104 tests)
+        run: node --test tests/core.test.mjs tests/editor.test.mjs tests/pbip.test.mjs tests/pbitool.test.mjs tests/schema.test.mjs
 
   test-linux:
     name: Cross-Platform Core Tests (Ubuntu - Node ${{ matrix.node-version }})
@@ -43,4 +43,5 @@ jobs:
           node-version: ${{ matrix.node-version }}
 
       - name: Run cross-platform JS tests
-        run: node --test tests/core.test.mjs tests/editor.test.mjs tests/pbip.test.mjs
+        run: node --test tests/core.test.mjs tests/editor.test.mjs tests/pbip.test.mjs tests/schema.test.mjs
+

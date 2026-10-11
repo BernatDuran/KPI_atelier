@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { handlePbiApi, runBridge } from '../scripts/pbi_api.mjs';
+import { handlePbiApi, runBridge, shutdownBridgeDaemon } from '../scripts/pbi_api.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 
@@ -80,4 +80,8 @@ test('pbi_bridge.ps1 supports discover and status actions', async () => {
     assert.equal(status.connected, true);
     assert.equal(Array.isArray(status.databases), true);
   }
+});
+
+test.after(() => {
+  shutdownBridgeDaemon();
 });

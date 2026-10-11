@@ -1,8 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import path from 'node:path';
 import vm from 'node:vm';
 import {webcrypto} from 'node:crypto';
+
+function readCss(filePath = 'dist/styles.css') {
+  let content = fs.readFileSync(filePath, 'utf8');
+  return content.replace(/@import\s+['"]\.\/([^'"]+)['"];/g, (_, rel) => {
+    const sub = path.join(path.dirname(filePath), rel);
+    return fs.existsSync(sub) ? fs.readFileSync(sub, 'utf8') : '';
+  });
+}
 const appURL=new URL('../dist/app.mjs',import.meta.url);
 async function editor(){
  let source=fs.readFileSync(appURL,'utf8');const context={assert},handlers=new Map(),nodes=new Map(),storage=new Map();
@@ -12,7 +21,7 @@ async function editor(){
  const node=id=>{if(!nodes.has(id))nodes.set(id,{innerHTML:'',textContent:'',dataset:{},style:{setProperty(){}},classList:{add(){},remove(){},toggle(){}},get firstElementChild(){return this;},querySelector(s){return node(s);},querySelectorAll(){return [];},contains(){return false;},addEventListener(event,fn){add(id,event,fn);},setAttribute(){},focus(){},getBoundingClientRect(){return {left:0,top:0,width:100,height:100,right:100,bottom:100};},setPointerCapture(){},hasPointerCapture(){return true;},releasePointerCapture(){},closest(s){if(s.includes(id))return this;return null;},showModal(){this.open=true;},close(){this.open=false;}});return nodes.get(id);};
  const fire=(owner,event,e)=>{for(const f of handlers.get(owner+':'+event)||[])f(e);};
  const button=dataset=>({dataset,closest(selector){if(selector.includes('button'))return this;if(selector==='[data-layout]'&&dataset.layout)return this;return null;}});
- Object.assign(context,{structuredClone,Date,Intl,crypto:webcrypto,setTimeout(){},clearTimeout(){},requestAnimationFrame(){},localStorage:{getItem(k){return storage.get(k)??null;},setItem(k,v){storage.set(k,v);}},document:{querySelector:node,querySelectorAll(){return [];},activeElement:{tagName:'BODY',focus(){}},getElementById(){return null;},addEventListener(event,fn){add('document',event,fn);}},window:{addEventListener(event,fn){add('window',event,fn);}},fire,button});
+ Object.assign(context,{structuredClone,Date,Intl,crypto:webcrypto,setTimeout(){},clearTimeout(){},requestAnimationFrame(){},localStorage:{getItem(k){return storage.get(k)??null;},setItem(k,v){storage.set(k,v);}},document:{querySelector:node,querySelectorAll(){return [];},activeElement:{tagName:'BODY',focus(){}},getElementById(){return null;},addEventListener(event,fn){add('document',event,fn);},documentElement:node('html')},window:{addEventListener(event,fn){add('window',event,fn);}},fire,button});
  vm.createContext(context);vm.runInContext(source,context);return code=>vm.runInContext(code,context);
 }
 test('Dirty-navigation gate lets users stay, discard, or save and continue; save failure keeps edits open',async()=>{
@@ -833,7 +842,7 @@ test('Advanced Duplicates, Hierarchical Content Inspector, Stacking & Dynamic Re
   const fsMod = await import('fs');
 
   // 1. Z-Index Stacking: Verify styles.css assigns higher z-index to layers-popover and canvas-edit-bar
-  const css = fsMod.readFileSync('dist/styles.css', 'utf8');
+  const css = readCss('dist/styles.css');
   assert.ok(/\.canvas-edit-bar\{[^}]*z-index:\s*50/.test(css), 'canvas-edit-bar must have z-index: 50');
   assert.ok(/\.layers-popover\{[^}]*z-index:\s*100/.test(css), 'layers-popover must have z-index: 100');
   assert.ok(/#selection-overlay\{[^}]*z-index:\s*5/.test(css), 'selection-overlay has z-index: 5');
@@ -1063,7 +1072,7 @@ test('Horizontal duplicate adaptive scaling, guide containment, typology parity 
   assert.equal(dupState.width, dupState.frame.width, 'state.width must match new frame.width');
 
   // 2. Guide containment and styles: outside by default, no scroll triggered
-  const css = fs.readFileSync('dist/styles.css', 'utf8');
+  const css = readCss('dist/styles.css');
   assert.ok(css.includes('.smart-guide.exact.horizontal b {\n  left:calc(100% + 3px);\n  top:-7px;'), 'horizontal exact badge must be outside to the right by default');
   assert.ok(css.includes('scrollbar-gutter:stable'), 'stage layout must be stable against scrollbars');
 
@@ -1223,7 +1232,7 @@ test('Duplicate chart SVG rendering, DAX isolation, comparison label tracking, a
   `);
 
   // 5. Glassmorphism CSS verification
-  const css = fs.readFileSync('dist/styles.css', 'utf8');
+  const css = readCss('dist/styles.css');
   assert.ok(css.includes('.glass-stage::before'), 'styles.css must include ambient backdrop orb ::before');
   assert.ok(css.includes('.glass-stage::after'), 'styles.css must include ambient backdrop orb ::after');
   assert.ok(css.includes('scrollbar-gutter:stable'), 'styles.css must configure scrollbar-gutter:stable');
@@ -1261,6 +1270,303 @@ test('Duplicate chart appearance excludes background opacity, expanded data summ
   assert.equal($('#stage').scrollTop, 0, 'Stage scrollTop must be reset to 0');
   `);
 });
+
+test('Punto 1: Fine-grained DOM patching in Inspector and Canvas avoids structural reflows', async () => {
+  const run = await editor();
+  run(`
+  loadDesign(BASE);
+  renderStage();
+  const initialFit = $('#stage').querySelector('#card-fit');
+  assert.ok(initialFit, '#card-fit must exist in stage');
+
+  // Consecutive renderStage call reuses existing #card-fit node
+  c = { ...c, title: 'Título Actualizado' };
+  renderStage();
+  const nextFit = $('#stage').querySelector('#card-fit');
+  assert.equal(initialFit, nextFit, 'renderStage must reuse existing #card-fit node without wiping stage');
+  assert.ok($('#stage').querySelector('#main-card').innerHTML.includes('Título Actualizado'), 'main-card must reflect updated title');
+
+  // Inspector fine-grained patching: non-structural directChange does NOT wipe inspector DOM
+  tab = 'content';
+  renderInspector();
+  $('#inspector-fields').innerHTML = '<div id="preserved-control">input</div>';
+  directChange({ ...c, title: 'Otro Título' }, false, false);
+  assert.equal($('#inspector-fields').innerHTML, '<div id="preserved-control">input</div>', 'Non-structural directChange must NOT rebuild inspector DOM');
+
+  // Structural directChange re-renders inspector
+  directChange({ ...c, showIcon: false }, false, true);
+  assert.notEqual($('#inspector-fields').innerHTML, '<div id="preserved-control">input</div>', 'Structural directChange must rebuild inspector DOM');
+  `);
+});
+
+test('Punto 2: Real-time Power BI Desktop SSE stream listener', async () => {
+  const run = await editor();
+  run(`
+  // initLivePbiStream handles browser and node environments safely
+  assert.equal(typeof initLivePbiStream, 'function', 'initLivePbiStream must be exported as a function');
+  let called = false;
+  const cleanup = initLivePbiStream(instances => { called = true; });
+  assert.ok(cleanup === null || typeof cleanup === 'function', 'cleanup must be null or function');
+  `);
+});
+
+test('Punto 3: Full Dark Mode toggle, header button, and localStorage persistence', async () => {
+  const run = await editor();
+  run(`
+  // 1. Initial state and getters
+  assert.equal(getUiTheme(), 'light', 'Default UI theme must be light');
+
+  // 2. setUiTheme persists to storage and sets data-ui-theme attribute
+  setUiTheme('dark');
+  assert.equal(getUiTheme(), 'dark', 'getUiTheme must return dark after setUiTheme');
+  assert.equal(localStorage.getItem('kpi-atelier-ui-theme'), '"dark"', 'Must persist ui theme in localStorage');
+
+  // 3. toggleUiTheme alternates between dark and light
+  toggleUiTheme();
+  assert.equal(getUiTheme(), 'light', 'toggleUiTheme must switch back to light');
+  assert.equal(localStorage.getItem('kpi-atelier-ui-theme'), '"light"', 'Must persist updated light theme in localStorage');
+
+  // 4. Header contains toggle button with appropriate icon
+  setUiTheme('light');
+  render();
+  const appHeader = $('#app').innerHTML;
+  assert.ok(appHeader.includes('data-action="toggle-ui-theme"'), 'Header must render toggle-ui-theme button');
+  assert.ok(appHeader.includes('Cambiar a modo oscuro'), 'Light mode must suggest switching to dark');
+
+  // 5. Triggering toggle action updates UI and header
+  fire('document', 'click', { target: button({ action: 'toggle-ui-theme' }) });
+  assert.equal(getUiTheme(), 'dark', 'Clicking toggle-ui-theme button must flip theme to dark');
+  const darkAppHeader = $('#app').innerHTML;
+  assert.ok(darkAppHeader.includes('Cambiar a modo claro'), 'Dark mode must suggest switching to light');
+  `);
+});
+
+test('CSS Architecture: styles.css is decoupled into component submodules (tokens, shell, canvas, inspector, modals)', () => {
+  const styles = fs.readFileSync('dist/styles.css', 'utf8');
+  assert.ok(styles.includes("@import './css/tokens.css';"), 'styles.css must import tokens.css');
+  assert.ok(styles.includes("@import './css/shell.css';"), 'styles.css must import shell.css');
+  assert.ok(styles.includes("@import './css/canvas.css';"), 'styles.css must import canvas.css');
+  assert.ok(styles.includes("@import './css/inspector.css';"), 'styles.css must import inspector.css');
+  assert.ok(styles.includes("@import './css/modals.css';"), 'styles.css must import modals.css');
+
+  const modules = ['tokens.css', 'shell.css', 'canvas.css', 'inspector.css', 'modals.css'];
+  for (const m of modules) {
+    const p = path.join('dist/css', m);
+    assert.ok(fs.existsSync(p), `dist/css/${m} must exist`);
+    const content = fs.readFileSync(p, 'utf8');
+    assert.ok(content.length > 500, `dist/css/${m} must contain component rules`);
+  }
+});
+
+test('Template Rail: Collapsible sidebar state, workspace classes, and Ctrl+B shortcut', async () => {
+  const run = await editor();
+  run(`
+  // 1. Initial state is expanded
+  assert.equal(getRailCollapsed(), false);
+  render();
+  let appHTML = $('#app').innerHTML;
+  assert.ok(appHTML.includes('class="workspace"'));
+  assert.ok(!appHTML.includes('workspace rail-collapsed'));
+  assert.ok(appHTML.includes('Elige tu punto de partida'));
+  assert.ok(appHTML.includes('data-action="toggle-rail"'));
+
+  // 2. Toggle via action collapses the rail
+  fire('document', 'click', { target: button({ action: 'toggle-rail' }) });
+  assert.equal(getRailCollapsed(), true);
+  appHTML = $('#app').innerHTML;
+  assert.ok(appHTML.includes('workspace rail-collapsed'));
+  assert.ok(appHTML.includes('template-rail is-collapsed'));
+  assert.ok(appHTML.includes('rail-collapsed-bar'));
+  assert.ok(appHTML.includes('Plantillas'));
+
+  // 3. Toggle via Ctrl+B expands the rail back
+  fire('document', 'keydown', { ctrlKey: true, key: 'b' });
+  assert.equal(getRailCollapsed(), false);
+  appHTML = $('#app').innerHTML;
+  assert.ok(!appHTML.includes('workspace rail-collapsed'));
+  assert.ok(appHTML.includes('Elige tu punto de partida'));
+  `);
+});
+
+test('Binding Dropdown: Standard dropdown with search displays measures with table metadata without overengineered chips', async () => {
+  const run = await editor();
+  run(`
+  loadDesign(BASE);
+  setPbipModel({
+    modelName: 'EnterpriseModel',
+    tables: ['Ventas', 'Clientes', 'Calendario'],
+    measures: [
+      { name: 'Total Ventas', table: 'Ventas', dax: 'SUM(Ventas[Importe])' },
+      { name: 'Margen Bruto', table: 'Ventas', dax: '[Total Ventas] - [Coste]' },
+      { name: 'Total Clientes', table: 'Clientes', dax: 'DISTINCTCOUNT(Clientes[ID])' },
+      { name: 'NPS Medio', table: 'Clientes', dax: 'AVERAGE(Clientes[NPS])' }
+    ],
+    dateTables: [{ name: 'Calendario', dateColumns: ['Fecha'] }]
+  });
+
+  // Render dropdown: shows all measures with table metadata on the right
+  const initialHTML = renderBindingDropdown('measure', '');
+  assert.ok(!initialHTML.includes('binding-dropdown-table-filter'));
+  assert.ok(!initialHTML.includes('filter-table-chip'));
+  assert.ok(initialHTML.includes('Total Ventas'));
+  assert.ok(initialHTML.includes('Total Clientes'));
+  assert.ok(initialHTML.includes('<span class="binding-dropdown-meta">Ventas</span>'));
+  assert.ok(initialHTML.includes('<span class="binding-dropdown-meta">Clientes</span>'));
+
+  // Search by 'Ventas': matches both measure name and table metadata
+  const ventasHTML = renderBindingDropdown('measure', 'Ventas');
+  assert.ok(ventasHTML.includes('Total Ventas'));
+  assert.ok(ventasHTML.includes('Margen Bruto'));
+  assert.ok(!ventasHTML.includes('Total Clientes'));
+  assert.ok(!ventasHTML.includes('NPS Medio'));
+
+  // Search by 'Clientes': only Clientes measures shown
+  const clientesHTML = renderBindingDropdown('measure', 'Clientes');
+  assert.ok(!clientesHTML.includes('Total Ventas'));
+  assert.ok(clientesHTML.includes('Total Clientes'));
+  assert.ok(clientesHTML.includes('NPS Medio'));
+  `);
+});
+
+test('Productivity & UX: Shortcuts modal on ? key, Infographic guide in export modal, and canvas Tab navigation', async () => {
+  const run = await editor();
+  run(`
+  loadDesign(BASE);
+  c.measure = 'Total Ventas';
+  c._measureBound = true;
+  c.measureName = 'KPI_Total_Ventas';
+
+  // 1. Export modal contains '¿Cómo usar en Power BI?' button
+  exportModal();
+  assert.equal($('#modal').open, true);
+  const expHTML = $('#modal').innerHTML;
+  assert.ok(expHTML.includes('data-action="pbi-infographic"'));
+  assert.ok(expHTML.includes('¿Cómo usar en Power BI?'));
+
+  // 2. Clicking infographic action opens the 4-step infographic modal
+  fire('document', 'click', { target: button({ action: 'pbi-infographic' }) });
+  const infoHTML = $('#modal').innerHTML;
+  assert.ok(infoHTML.includes('pbi-infographic-container'));
+  assert.ok(infoHTML.includes('HTML Content Secure'));
+  assert.ok(infoHTML.includes('Crea la medida DAX'));
+  assert.ok(infoHTML.includes('Values'));
+  assert.ok(infoHTML.includes('Ajuste de dimensiones exactas'));
+  assert.ok(infoHTML.includes('data-action="back-to-export"'));
+
+  // 3. Back to export button returns to DAX export
+  fire('document', 'click', { target: button({ action: 'back-to-export' }) });
+  assert.ok($('#modal').innerHTML.includes('Tu diseño. Tu medida DAX.'));
+  closeModal();
+
+  // 4. Pressing '?' opens the shortcuts modal
+  fire('document', 'keydown', { key: '?' });
+  assert.equal($('#modal').open, true);
+  const scHTML = $('#modal').innerHTML;
+  assert.ok(scHTML.includes('shortcuts-modal'));
+  assert.ok(scHTML.includes('Atajos de Teclado'));
+  assert.ok(scHTML.includes('Lienzo y Visualización'));
+  assert.ok(scHTML.includes('Edición y Selección'));
+  assert.ok(scHTML.includes('Historial y Productividad'));
+  assert.ok(scHTML.includes('Ajustar tamaño'));
+  assert.ok(scHTML.includes('con elemento seleccionado'));
+  assert.ok(scHTML.includes('<kbd class="shortcut-key">+</kbd><span class="shortcut-slash">/</span><kbd class="shortcut-key">−'));
+  assert.ok(!scHTML.includes('Tamaño del elemento seleccionado (±1 px)'));
+  closeModal();
+  assert.equal($('#modal').open, false);
+  `);
+});
+
+test('Power BI Desktop live injection and measure overwrite lifecycle', async () => {
+  const run = await editor();
+  run(`
+  loadDesign(BASE);
+  c.measure = 'Total Ventas';
+  c._measureBound = true;
+  c.targetMeasure = '100';
+  c._targetCustomized = true;
+  c.measureName = 'VENTAS_TOTALES';
+
+  // Mock a connected live PBIP model
+  setPbipModel({
+    modelName: 'AventureWorksDW.pbip',
+    reportName: 'AventureWorksDW.pbip',
+    isLiveConnection: true,
+    server: 'localhost:61377',
+    database: 'test-db-guid',
+    tables: ['_Measures', 'Sales'],
+    measures: [
+      { name: 'Total Ventas', table: '_Measures' },
+      { name: 'VENTAS_TOTALES', table: '_Measures' }
+    ],
+    dateTables: [
+      { name: 'Calendario', dateColumns: ['Fecha'], isMarkedDateTable: true, primaryDateColumn: 'Fecha' }
+    ]
+  }, false);
+
+  // 1. When measure 'VENTAS_TOTALES' already exists in model, exportModal renders 'Sobrescribir en Power BI'
+  exportModal();
+  assert.equal($('#modal').open, true);
+  const expHTML = $('#modal').innerHTML;
+  assert.ok(expHTML.includes('data-action="inject-live-measure"'));
+  assert.ok(expHTML.includes('Sobrescribir en Power BI'), 'Must offer Sobrescribir en Power BI for existing measure');
+  closeModal();
+
+  // 2. When measureName does not exist, exportModal renders 'Crear en Power BI'
+  c.measureName = 'NUEVA_MEDIDA_KPI';
+  exportModal();
+  assert.ok($('#modal').innerHTML.includes('Crear en Power BI'), 'Must offer Crear en Power BI for new measure');
+  closeModal();
+
+  // 3. Confirm overwrite modal registers and executes pending action
+  let executed = false;
+  showInjectConfirmModal([], { name: 'VENTAS_TOTALES', table: '_Measures' }, async () => {
+    executed = true;
+  });
+  assert.equal($('#modal').open, true);
+  assert.ok($('#modal').innerHTML.includes('Confirmar sobrescritura en Power BI'));
+  assert.ok($('#modal').innerHTML.includes('data-action="proceed-inject-measure"'));
+
+  // Pending action is non-null and executable via click
+  assert.ok(typeof getPendingInjectAction() === 'function', 'Pending inject action must be registered');
+  fire('document', 'click', { target: button({ action: 'proceed-inject-measure' }) });
+  assert.equal(executed, true, 'proceed-inject-measure must execute pending inject action');
+  assert.equal(getPendingInjectAction(), null, 'Pending action must be cleared after execution');
+
+  // 4. showInjectSuccessModal renders clear success card, table, report, and next steps
+  showInjectSuccessModal({
+    measureName: 'NUEVA_MEDIDA_KPI',
+    tableName: '_Medidas',
+    reportName: 'People_Absentismo.pbip',
+    isNew: true
+  });
+  assert.equal($('#modal').open, true);
+  const successHTML = $('#modal').innerHTML;
+  assert.ok(successHTML.includes('¡Medida creada con éxito en Power BI!'));
+  assert.ok(successHTML.includes('[NUEVA_MEDIDA_KPI]'));
+  assert.ok(successHTML.includes('_Medidas'));
+  assert.ok(successHTML.includes('HTML Content Secure'));
+  closeModal();
+
+  // 5. showInjectErrorModal renders explicit error card with retry and reconnect actions
+  let retried = false;
+  showInjectErrorModal({
+    error: new Error('Excepción de conexión al puerto 61377'),
+    measureName: 'NUEVA_MEDIDA_KPI',
+    reportName: 'AdventureWorksDW.pbip',
+    onRetry: () => { retried = true; }
+  });
+  assert.equal($('#modal').open, true);
+  const errorHTML = $('#modal').innerHTML;
+  assert.ok(errorHTML.includes('No se pudo sincronizar con Power BI'));
+  assert.ok(errorHTML.includes('data-action="connect-live-pbi"'));
+  assert.ok(errorHTML.includes('data-action="proceed-inject-measure"'));
+  assert.ok(typeof getPendingInjectAction() === 'function');
+  fire('document', 'click', { target: button({ action: 'proceed-inject-measure' }) });
+  assert.equal(retried, true, 'proceed-inject-measure in error modal must trigger retry action');
+  closeModal();
+  `);
+});
+
 
 
 
