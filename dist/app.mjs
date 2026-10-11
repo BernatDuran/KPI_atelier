@@ -10,6 +10,7 @@ import { alignmentGuides } from './guides.mjs';
 import { BASE, TEMPLATES, THEMES, FAMILIES, sanitizeConfig, checks, getCircularConflict, familyName, needsTrend, needsDate, needsGoal, needsCompare, isValidMeasureName } from './model.mjs';
 import { icon, esc, cardHTML, sampleData, comparisonLabel } from './cards.mjs';
 import { generateDAX } from './dax.mjs';
+import { reviewMeasure, measureDestination } from './preflight.mjs';
 import { ELEMENTS, ELEMENT_IDS, SIZE_LIMITS, elementState, elementSize, elementAvailable, elementEnabled, elementVisible, updateElement, moveElement, resizeElement, restoreElement, clamp, frameFromBounds, detachElement, releaseElement, layerOrder, moveLayer, reorderLayer, resolveElementDef } from './elements.mjs';
 import { COLOR_ROLES, hexToHSV, hsvToHex, contrastRatio, paletteFrom, sanitizePalette } from './colors.mjs';
 import { ICON_OPTIONS } from './icons.mjs';
@@ -18,7 +19,8 @@ import { scanDirectoryHandle, scanFileList, fetchLivePbiModel, fetchLivePbiStatu
 import { $, btn, ib, read, setContext, getActiveContext, getC, setC, getBaseline, setBaseline, getMode, setMode, getTab, setTab, getView, setView, getSelectedElement, setSelectedElement, getCardSelected, setCardSelected, getSelectedElements, getPbipModel, setPbipModel, getUndo, getRedo, getSaved, setSaved, getZoom, setZoom, getCanvasDark, setCanvasDark, getContextPreview, setContextPreview, getMoveStep, setMoveStep, getLayersOpen, setLayersOpen, getGuidesEnabled, setGuidesEnabled, getFormatPainterSource, setFormatPainterSource, getGesture, setGesture, getDeleteConfirmLayer, setDeleteConfirmLayer, getClipboardElement, setClipboardElement, getClipboardElements, setClipboardElements, getPaletteDraft, setPaletteDraft, getColorRole, setColorRole, getColorHSV, setColorHSV, getColorPointer, setColorPointer, getContextResolution, setContextResolution, getFilter, setFilter, getQuery, setQuery, c, saved, view, mode, tab, filter, query, context, zoom, canvasDark, undo, redo, lastEdit, resizeObserver, toastTimer, lastFocus, cardSelected, selectedElement, selectedElements, moveStep, layersOpen, gesture, ignoreCanvasClick, formatPainterSource, deleteConfirmLayer, deleteConfirmTimer, draggedLayer, guidesEnabled, guidePreviewUntil, guideTimer, inspectorSections, inspectorPositions, customThemes, paletteDraft, colorRole, colorHSV, colorPointer, pbipModel, contextResolution, pendingRoundtripConf, pendingRoundtripName, getPendingRoundtripConf, setPendingRoundtripConf, getPendingRoundtripName, setPendingRoundtripName, editState, baseline, editingSavedId, pendingNavigation, getFriendlyReportName, applyPbipCalendarDefaults, dirty, showDirty, toast, persist, record, setConfig, themeSelect, filtered, thumb, loadDesign, saveCurrent, requestNavigation, uiTheme, getUiTheme, setUiTheme, toggleUiTheme, railCollapsed, getRailCollapsed, setRailCollapsed, toggleRailCollapsed, lastPbiSyncTime, getLastPbiSyncTime, setLastPbiSyncTime, formatSyncTimestamp } from './state.mjs';
 import { renderStage, fitThumbs, fitMain, measureElementFrame, renderCanvasBar, layersPanel, commitLayerOrder, clearLayerDrop, positionSelection, refreshCard, flashGuides, renderGuides, selectElement, selectCard, deselect, directChange, elementAction, reportOverflow, copySelectedElements, copySelectedElement, pasteElements, pasteElement, applyFormatPainter, startCardGesture, finishGesture, patchCardElementTransform, patchCardDimensions } from './canvas.mjs';
 import { field, select, range, check, percentRange, section, formats, comparisons, duplicateContentFields, renderInspector, renderStatus, updateHistoryButtons, rememberInspector, updateInspectorTabs, iconPickerField, surfaceInspector, appearanceSelect, appearanceRange, appearanceColor, elementAppearancePanel, editAppearance, elementInspector, cardDimensionsPanel, layoutPanel, chartPanel, cardInspector, dataSummaryCard, syncElementControls, syncCardControls, commitNumber } from './inspector.mjs';
-import { openModal, closeModal, filename, download, downloadJSON, copyDax, exportModal, validationModal, chooseLiveInstanceModal, showInjectConfirmModal, showInjectSuccessModal, showInjectErrorModal, guide, openIconPicker, iconGrid, themeTile, openThemeStudio, updateColorStudio, colorFromPointer, FIELD_TO_ELEMENTS, ELEMENT_TO_FIELD, highlightBindingElements, updateBindingFieldStatus, updateBindingModalStatus, updateBindableElements, fitBindingCard, getBindingFieldOptions, renderBindingDropdown, closeAllBindingDropdowns, applyBindingFieldValue, openDataBindingModal, shortcutsModal, pbiInfographicModal, setPendingInjectAction, getPendingInjectAction, clearPendingInjectAction } from './modals.mjs';
+import { openModal, closeModal, filename, download, downloadJSON, copyDax, exportModal, openMeasureReviewModal, validationModal, chooseLiveInstanceModal, showInjectConfirmModal, showInjectSuccessModal, showInjectErrorModal, guide, openIconPicker, iconGrid, themeTile, openThemeStudio, updateColorStudio, colorFromPointer, FIELD_TO_ELEMENTS, ELEMENT_TO_FIELD, getBindingElements, getBindingFieldsForElement, highlightBindingContext, highlightBindingElements, updateBindingFieldStatus, updateBindingModalStatus, updateBindableElements, fitBindingCard, getBindingFieldOptions, renderBindingDropdown, closeAllBindingDropdowns, applyBindingFieldValue, openDataBindingModal, shortcutsModal, pbiInfographicModal, setPendingInjectAction, getPendingInjectAction, clearPendingInjectAction } from './modals.mjs';
+import { cancelBindingReveal, revealBindingFields, openBindingDropdown, requestExport, confirmExport } from './modals.mjs';
 
 // Sincronizar contexto activo y registrar funciones orquestadoras para ESM y sandbox
 const activeContext = typeof globalThis !== 'undefined' ? globalThis : this;
@@ -53,13 +55,13 @@ function render() {
   app.innerHTML = `
     <header class="app-header">
       <a class="brand" href="#" data-action="home" aria-label="KPI Atelier, inicio">
-        <span class="brand-icon">${icon('chart', 22)}</span>
+        <span class="brand-icon">${icon('chart', 19)}</span>
         <strong>kpi<span class="brand-divider">/</span>atelier<span class="brand-dot">.</span></strong>
       </a>
       <nav class="top-nav" aria-label="Navegación principal">
-        ${btn('view-designer', 'Diseñador', 'sliders', curView === 'designer' ? 'selected' : '')}
-        ${btn('view-library', `Biblioteca <span class="count">${TEMPLATES.length}</span>`, 'grid', curView === 'library' ? 'selected' : '')}
-        ${btn('view-saved', 'Mis diseños', 'folder', curView === 'saved' ? 'selected' : '')}
+        ${btn('view-designer', 'Diseñador', 'sliders', curView === 'designer' ? 'selected' : '', curView === 'designer' ? 'aria-current="page"' : '')}
+        ${btn('view-library', `Biblioteca <span class="count">${TEMPLATES.length}</span>`, 'grid', curView === 'library' ? 'selected' : '', curView === 'library' ? 'aria-current="page"' : '')}
+        ${btn('view-saved', `Mis diseños <span class="count">${getSaved().length}</span>`, 'folder', curView === 'saved' ? 'selected' : '', curView === 'saved' ? 'aria-current="page"' : '')}
       </nav>
       <div class="header-right">
         ${pbipModel?.isLiveConnection ? `<span class="pbip-live-pill" title="Power BI Desktop conectado: ${esc(getFriendlyReportName(pbipModel))}"><i class="pbip-live-dot"></i> ${esc(getFriendlyReportName(pbipModel))}</span>` : ''}
@@ -69,11 +71,11 @@ function render() {
         <span class="avatar">BD</span>
       </div>
     </header>
-    <div class="page-heading">
+    <div class="page-heading ${curView === 'designer' ? 'designer-heading' : ''}">
       <div>
         <div class="eyebrow">TU ESTUDIO DE DISEÑO <span> / </span> POWER BI</div>
         <h1>${curView === 'designer' ? 'Grandes datos. <em>Mejor diseño.</em>' : curView === 'library' ? 'Un buen diseño empieza aquí.' : 'Tus ideas, listas para volver.'}</h1>
-        <p>${curView === 'designer' ? 'Dale a cada KPI el protagonismo que merece.' : curView === 'library' ? `${TEMPLATES.length} puntos de partida. Infinitas posibilidades. Todo editable.` : 'Guarda tus tarjetas y construye tu propio lenguaje visual.'}</p>
+        ${curView === 'designer' ? '' : `<p>${curView === 'library' ? `${TEMPLATES.length} puntos de partida. Infinitas posibilidades. Todo editable.` : 'Guarda tus tarjetas y construye tu propio lenguaje visual.'}</p>`}
       </div>
       <div class="heading-actions">
         <span id="save-state" class="save-state"></span>
@@ -213,9 +215,42 @@ function savedView() {
 // ----------------------------------------------------
 // Delegación Central de Eventos del DOM
 // ----------------------------------------------------
+function bindingContextAt(target) {
+  const field = target?.closest?.('[data-binding-field]');
+  if (field) return { keys: [field.dataset.bindingField] };
+  const element = target?.closest?.('#binding-card-inner [data-element]');
+  if (element) return { element: element.dataset.element, keys: getBindingFieldsForElement(element.dataset.element) };
+  return target?.closest?.('#binding-card-inner') ? { keys: [] } : null;
+}
+
+function focusBindingElement(target) {
+  const element = target?.closest?.('#binding-card-inner .is-bindable');
+  if (!element) return false;
+  const id = element.dataset.element;
+  const keys = getBindingFieldsForElement(id);
+  const key = keys.find(k => k === id || k.startsWith(id + '__')) ||
+    keys.find(k => k === ELEMENT_TO_FIELD[id]) || keys[0];
+  const input = document.getElementById(`f-bind-${key}`);
+  input?.focus({ preventScroll: true });
+  revealBindingFields([key], id);
+  return true;
+}
+
+document.addEventListener('pointerover', e => highlightBindingContext(bindingContextAt(e.target)));
+document.addEventListener('pointerout', e => highlightBindingContext(bindingContextAt(e.relatedTarget)));
+document.addEventListener('focusin', e => highlightBindingContext(bindingContextAt(e.target), 'focus'));
+document.addEventListener('focusout', e => highlightBindingContext(bindingContextAt(e.relatedTarget), 'focus'));
+document.addEventListener('wheel', cancelBindingReveal, { passive: true });
+document.addEventListener('pointerdown', cancelBindingReveal);
+
 document.addEventListener('click', e => {
-  if (!e.target.closest?.('.binding-dropdown-wrap')) {
+  if (focusBindingElement(e.target)) return;
+  const bindingField = e.target.closest?.('[data-binding-field]');
+  const bindingWrap = e.target.closest?.('.binding-dropdown-wrap') || bindingField?.querySelector?.('.binding-dropdown-wrap.has-dropdown');
+  if (!bindingWrap) {
     closeAllBindingDropdowns();
+  } else if (!e.target.closest?.('button')) {
+    openBindingDropdown(bindingField.dataset.bindingField);
   }
   const t = e.target.closest('button,a[data-action]');
   if (!t) return;
@@ -295,6 +330,7 @@ document.addEventListener('click', e => {
     }
     refreshCard();
     renderStatus();
+    updateBindingModalStatus();
     return;
   }
   const clearBtn = e.target.closest?.('[data-action="clear-bind-field"]');
@@ -429,21 +465,11 @@ document.addEventListener('click', e => {
     guide,
     validation: validationModal,
     export: exportModal,
+    'review-live-measure': openMeasureReviewModal,
     'open-data-modal': () => openDataBindingModal(),
     'close-modal': closeModal,
     'toggle-bind-dropdown': () => {
-      const fieldKey = t.dataset.field;
-      const menu = document.getElementById(`dropdown-menu-${fieldKey}`);
-      if (menu) {
-        const isOpen = menu.classList.contains('is-open');
-        closeAllBindingDropdowns();
-        if (!isOpen) {
-          menu.innerHTML = renderBindingDropdown(fieldKey, '');
-          menu.classList.add('is-open');
-          t.setAttribute('aria-expanded', 'true');
-          t.classList.add('is-open');
-        }
-      }
+      openBindingDropdown(t.dataset.field, true);
     },
     'select-binding-item': () => {
       const fieldKey = t.dataset.field;
@@ -455,7 +481,8 @@ document.addEventListener('click', e => {
     'back-to-export': () => exportModal(),
     'shortcuts-modal': () => shortcutsModal(),
     'copy-dax': copyDax,
-    'download-dax': () => download(filename() + '.dax', generateDAX(getC()), 'text/plain;charset=utf-8'),
+    'confirm-export-anyway': confirmExport,
+    'download-dax': () => download(filename() + '.dax', generateDAX(getC(), { allowIncomplete: true }), 'text/plain;charset=utf-8'),
     'download-json': () => downloadJSON(),
     'download-html': () => {
       const c = getC();
@@ -585,7 +612,7 @@ document.addEventListener('click', e => {
       }
     },
     'connect-live-pbi': async () => {
-      const connectBtn = app.querySelector('[data-action="connect-live-pbi"]');
+      const connectBtn = $('#modal')?.querySelector('[data-action="connect-live-pbi"]');
       const origContent = connectBtn ? connectBtn.innerHTML : '';
       if (connectBtn) {
         connectBtn.disabled = true;
@@ -627,7 +654,6 @@ document.addEventListener('click', e => {
       toast(`Conectando con '${repName}'…`);
       try {
         const catalog = await fetchLivePbiModel(srv, db);
-        closeModal();
         setPbipModel(catalog, true);
         toast(`⚡ Conectado en vivo a '${catalog.reportName || catalog.modelName}' (${catalog.measures.length} medidas, ${catalog.dateTables.length} tablas con fecha).`);
         openDataBindingModal();
@@ -682,7 +708,7 @@ document.addEventListener('click', e => {
     },
     'inject-live-measure': async () => {
       let pbipModel = getPbipModel();
-      const c = getC();
+      const c = structuredClone(getC());
       if (!pbipModel?.server) {
         toast('Buscando informes abiertos en Power BI Desktop…');
         const instances = await discoverLivePbi().catch(() => []);
@@ -727,72 +753,12 @@ document.addEventListener('click', e => {
         );
         return;
       }
-      const modelMeasureNames = (pbipModel.measures || []).map(m => (m.name || '').trim().toLowerCase());
-      const missingItems = [];
-      const cleanM = extractBareMeasure(c.measure).toLowerCase();
-      if (!cleanM) {
-        missingItems.push({ type: 'Medida principal', detail: 'No has seleccionado ninguna medida de negocio.' });
-      } else if (!modelMeasureNames.includes(cleanM)) {
-        missingItems.push({ type: 'Medida principal', detail: `La medida [${c.measure.trim()}] no existe en tu informe de Power BI.` });
-      }
-      if (needsGoal(c) || (needsCompare(c) && c.comparison === 'target')) {
-        const rawTarget = (c.targetMeasure || '').trim();
-        if (!rawTarget) {
-          missingItems.push({ type: 'Medida objetivo', detail: 'Falta indicar la medida o cifra objetivo.' });
-        } else if (!/^-?\d+(\.\d+)?$/.test(rawTarget)) {
-          const cleanT = extractBareMeasure(rawTarget).toLowerCase();
-          if (!modelMeasureNames.includes(cleanT)) {
-            missingItems.push({ type: 'Medida objetivo', detail: `La medida [${rawTarget}] no existe en tu informe de Power BI.` });
-          }
-        }
-      }
-      if (needsCompare(c) && c.comparison === 'custom') {
-        const rawComp = (c.compareMeasure || '').trim();
-        if (!rawComp) {
-          missingItems.push({ type: 'Medida de referencia', detail: 'Falta indicar la medida de comparación.' });
-        } else {
-          const cleanC = extractBareMeasure(rawComp).toLowerCase();
-          if (!modelMeasureNames.includes(cleanC)) {
-            missingItems.push({ type: 'Medida de referencia', detail: `La medida [${rawComp}] no existe en tu informe de Power BI.` });
-          }
-        }
-      }
-      if (needsDate(c)) {
-        const rawTable = (c.dateTable || '').replace(/^'|'$/g, '').trim();
-        const rawCol = (c.dateColumn || '').replace(/^\[|\]$/g, '').trim();
-        if (!rawTable) {
-          missingItems.push({ type: 'Tabla calendario', detail: 'Falta indicar la tabla calendario del modelo.' });
-        } else {
-          const foundDt = (pbipModel.dateTables || []).find(dt => dt.name.toLowerCase() === rawTable.toLowerCase());
-          const tableExistsInModel = foundDt || (pbipModel.tables || []).some(t => t.toLowerCase() === rawTable.toLowerCase());
-          if (!tableExistsInModel) {
-            missingItems.push({ type: 'Tabla calendario', detail: `La tabla '${rawTable}' no existe en tu informe de Power BI.` });
-          } else if (!rawCol) {
-            missingItems.push({ type: 'Columna de fecha', detail: 'Falta indicar la columna de fechas continuas.' });
-          } else if (foundDt && foundDt.dateColumns?.length) {
-            const colExists = foundDt.dateColumns.some(col => col.replace(/^\[|\]$/g, '').trim().toLowerCase() === rawCol.toLowerCase());
-            if (!colExists) {
-              missingItems.push({ type: 'Columna de fecha', detail: `La columna '${rawCol}' no existe en la tabla '${foundDt.name}' de tu informe.` });
-            }
-          }
-        }
-      }
-      for (const [dupId, dupState] of Object.entries(c.elements || {})) {
-        if (dupState?.deleted) continue;
-        const def = resolveElementDef(dupId);
-        if (dupState?.measure) {
-          const cleanDupM = extractBareMeasure(dupState.measure).toLowerCase();
-          if (cleanDupM && !modelMeasureNames.includes(cleanDupM)) {
-            missingItems.push({ type: `Elemento duplicado '${def?.label || dupId}'`, detail: `La medida [${dupState.measure.trim()}] no existe en tu informe de Power BI.` });
-          }
-        }
-        if (dupState?.compareMeasure) {
-          const cleanDupC = extractBareMeasure(dupState.compareMeasure).toLowerCase();
-          if (cleanDupC && !modelMeasureNames.includes(cleanDupC)) {
-            missingItems.push({ type: `Elemento duplicado '${def?.label || dupId}'`, detail: `La medida de comparación [${dupState.compareMeasure.trim()}] no existe en tu informe de Power BI.` });
-          }
-        }
-      }
+      const review = reviewMeasure(c, pbipModel);
+      const missingItems = [
+        ...review.missing,
+        ...review.unverified.map(r => ({ type: r.label, detail: `${r.value}: no se pudo verificar esta referencia en el catálogo del modelo.`, field: r.field })),
+        ...review.issues.filter(x => x.level === 'error').map(x => ({ type: 'Configuración', detail: x.text, field: x.field }))
+      ];
       if (missingItems.length) {
         openModal(
           'Validación de datos con Power BI',
@@ -818,7 +784,7 @@ document.addEventListener('click', e => {
       const rawMeasureName = extractBareMeasure(c.measureName);
       const cleanNewName = rawMeasureName.toLowerCase();
       const existingMeasure = (pbipModel.measures || []).find(m => (m.name || '').trim().toLowerCase() === cleanNewName);
-      const executeInjection = async () => {
+      const executeInjection = async (overwriteConfirmed = false) => {
         const injectBtn = $('#modal')?.querySelector('[data-action="inject-live-measure"]') || $('#modal')?.querySelector('[data-action="proceed-inject-measure"]') || b;
         if (injectBtn) {
           injectBtn.disabled = true;
@@ -826,19 +792,26 @@ document.addEventListener('click', e => {
         }
         toast(existingMeasure ? '⚡ Sobrescribiendo medida en Power BI Desktop…' : '⚡ Creando medida en Power BI Desktop…');
         try {
+          const freshCatalog = await fetchLivePbiModel(pbipModel.server, pbipModel.database || '');
+          if (pbipModel.database && freshCatalog.database !== pbipModel.database) throw new Error('El modelo conectado ha cambiado. Vuelve a conectar el informe.');
+          setPbipModel(freshCatalog, false);
+          const freshReview = reviewMeasure(c, freshCatalog);
+          if (!freshReview.valid) {
+            await openMeasureReviewModal();
+            toast('Corrige las referencias pendientes antes de aplicar la medida.');
+            return;
+          }
+          if (freshReview.existing && !overwriteConfirmed) {
+            showInjectConfirmModal([], freshReview.existing, () => executeInjection(true));
+            return;
+          }
+          pbipModel = freshCatalog;
           const dax = generateDAX(c);
           const escapedName = rawMeasureName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
           const cleanDax = dax.replace(new RegExp(`^\\s*(\\[?${escapedName}\\]?)\\s*=\\s*`, 'u'), '');
           const daxExpression = '\r\n' + cleanDax.trimStart();
           
-          const defaultMeasuresTable = 
-            (c.targetTable && pbipModel.tables?.includes(c.targetTable) ? c.targetTable : null) ||
-            (pbipModel.measures?.find(m => m.table)?.table) ||
-            (pbipModel.tables?.find(t => /^_?m(easure|edida)s?$/i.test(t))) ||
-            (pbipModel.tables?.find(t => /^_?(kpi|metric)/i.test(t))) ||
-            (pbipModel.tables?.[0]) ||
-            '_Measures';
-          const targetTbl = existingMeasure ? existingMeasure.table : defaultMeasuresTable;
+          const targetTbl = measureDestination(c, pbipModel).table;
           
           let result;
           try {
@@ -860,10 +833,18 @@ document.addEventListener('click', e => {
                 toast(`⚡ Reconectando con Power BI Desktop en ${matching.server}…`);
                 const freshCat = await fetchLivePbiModel(matching.server, matching.database || '');
                 setPbipModel(freshCat, false);
+                if (pbipModel.database && freshCat.database !== pbipModel.database) throw new Error('El informe reconectado no corresponde al modelo validado.');
+                const retryReview = reviewMeasure(c, freshCat);
+                if (!retryReview.valid) throw new Error('La reconexión contiene referencias pendientes o no encontradas. Corrige los datos antes de aplicar.');
+                pbipModel = freshCat;
+                if (retryReview.existing && !overwriteConfirmed) {
+                  showInjectConfirmModal([], retryReview.existing, () => executeInjection(true));
+                  return;
+                }
                 result = await injectMeasureToLivePbi({
                   server: matching.server,
                   database: matching.database || '',
-                  tableName: targetTbl,
+                  tableName: retryReview.table,
                   measureName: rawMeasureName,
                   daxExpression: daxExpression,
                   formatString: '',
@@ -899,7 +880,7 @@ document.addEventListener('click', e => {
         }
       };
       if (existingMeasure) {
-        showInjectConfirmModal([], existingMeasure, executeInjection);
+        showInjectConfirmModal([], existingMeasure, () => executeInjection(true));
         return;
       }
       await executeInjection();
@@ -1038,6 +1019,18 @@ app.addEventListener('input', e => {
 
 // Eventos de entrada de datos en diálogos y buscador de iconos
 document.addEventListener('input', e => {
+  if (e.target.id === 'f-bind-granularity') {
+    setC(sanitizeConfig({ ...getC(), granularity: e.target.value }));
+    persist();
+    const inner = document.getElementById('binding-card-inner');
+    if (inner) {
+      inner.innerHTML = cardHTML(getC(), undefined, true);
+      highlightBindingElements('granularity', true);
+      fitBindingCard();
+    }
+    refreshCard();
+    renderStatus();
+  }
   if (e.target.id === 'icon-search') {
     const grid = $('#icon-grid');
     if (grid) grid.innerHTML = iconGrid(e.target.value);
@@ -1055,8 +1048,7 @@ document.addEventListener('input', e => {
     const inner = document.getElementById('binding-card-inner');
     if (inner) {
       inner.innerHTML = cardHTML(getC(), undefined, true);
-      const el = inner.querySelector(`[data-element="${dupId}"]`);
-      if (el) el.classList.add('binding-highlight');
+      highlightBindingElements(fieldKey, true);
       fitBindingCard();
     }
     refreshCard();
@@ -1068,6 +1060,7 @@ document.addEventListener('input', e => {
       const toggle = document.querySelector(`[data-action="toggle-bind-dropdown"][data-field="${fieldKey}"]`) || document.querySelector(`[data-action="toggle-bind-dropdown"][data-field="${dupId}"]`);
       if (toggle) toggle.setAttribute('aria-expanded', 'true');
     }
+    updateBindingModalStatus();
     return;
   }
   const bindKey = e.target.dataset?.bindKey;
@@ -1317,6 +1310,11 @@ app.addEventListener('click', e => {
 // Atajos de teclado generales y de lienzo
 document.addEventListener('keydown', e => {
   const target = e.target;
+  if ((e.key === 'Enter' || e.key === ' ') && target?.closest?.('#binding-card-inner .is-bindable')) {
+    e.preventDefault();
+    focusBindingElement(target);
+    return;
+  }
   const bindKey = target?.dataset?.bindKey;
   if (bindKey) {
     const menu = document.getElementById(`dropdown-menu-${bindKey}`);
@@ -1509,6 +1507,10 @@ $('#file-import')?.addEventListener('change', async e => {
 });
 
 // Cierre del modal por clic exterior
+$('#modal')?.addEventListener('cancel', e => {
+  e.preventDefault();
+  closeModal();
+});
 $('#modal')?.addEventListener('click', e => {
   const modal = $('#modal');
   if (e.target === modal) {

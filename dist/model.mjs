@@ -36,7 +36,8 @@ export const THEMES = {
  rose:{name:'Rosewater',background:'#f7ecee',text:'#543741',muted:'#916c79',accent:'#bd758b',borderColor:'#ead8dd',positive:'#407b62',negative:'#bc525e',warning:'#a87c39'},
  arctic:{name:'Arctic',background:'#e8f2f2',text:'#254548',muted:'#668589',accent:'#3d9596',borderColor:'#cfe4e4',positive:'#2f7f67',negative:'#bb6166',warning:'#a57d36'},
  terracotta:{name:'Terracotta',background:'#f7eae1',text:'#593c32',muted:'#937461',accent:'#b8664d',borderColor:'#ebd6c8',positive:'#557d4d',negative:'#bb4e47',warning:'#a07a27'},
- graphite:{name:'Graphite',background:'#292932',text:'#f4f1f7',muted:'#ada5bc',accent:'#c0b2ee',borderColor:'#45414e',positive:'#9bd9b8',negative:'#f5a4ac',warning:'#e5c48d'}
+ graphite:{name:'Graphite',background:'#292932',text:'#f4f1f7',muted:'#ada5bc',accent:'#c0b2ee',borderColor:'#45414e',positive:'#9bd9b8',negative:'#f5a4ac',warning:'#e5c48d'},
+ marble:{name:'Mármol',background:'#f4f4f4',text:'#202020',muted:'#777777',accent:'#4b4b4b',borderColor:'#dddddd',positive:'#303030',negative:'#999999',warning:'#686868'}
 };
 const p=(id,name,description,category,overrides)=>({id,name,description,category,config:{...BASE,id,progressHeight:category==='target'?8:4,...overrides}});
 export const TEMPLATES = [
@@ -120,7 +121,7 @@ export function sanitizeConfig(raw={}){
 export function familyName(type){return FAMILIES.find(f=>f.id===type)?.name??type;}
 const rendered=(c,id)=>elementEnabled(c,id)&&!elementState(c,id).deleted;
 export function needsTrend(c){return (c.chartKind!=='donut'&&rendered(c,'trend'))||Object.keys(c.elements||{}).some(k=>k.includes('_copy')&&!c.elements[k]?.deleted&&resolveElementDef(k)?.baseId==='trend'&&(c.elements[k]?.chartKind||c.chartKind)!=='donut');}
-export function needsGoal(c){return c.chartKind==='donut'&&rendered(c,'trend')||['goalLabel','progressLabel','progress'].some(id=>rendered(c,id));}
+export function needsGoal(c){return c.chartKind==='donut'&&rendered(c,'trend')||['goalLabel','progressLabel','progress'].some(id=>rendered(c,id))||Object.keys(c.elements||{}).some(id=>resolveElementDef(id)?.baseId==='trend'&&!c.elements[id]?.deleted&&(c.elements[id]?.chartKind||c.chartKind)==='donut');}
 export function needsCompare(c){return ['delta','compareLabel'].some(id=>rendered(c,id))||c.type==='comparison'&&['referenceLabel','referenceValue'].some(id=>rendered(c,id))&&c.showComparison;}
 export function needsDate(c){return needsTrend(c)||(needsCompare(c)&&['yoy','mom','previous'].includes(c.comparison))||Object.keys(c.elements||{}).some(k=>k.includes('_copy')&&!c.elements[k]?.deleted&&resolveElementDef(k)?.baseId==='delta'&&['yoy','mom','previous'].includes(c.elements[k]?.comparison||c.comparison));}
 export function isValidMeasureName(name){
@@ -159,6 +160,9 @@ export function getCircularConflict(c){
   if(st.compareMeasure&&target===norm(st.compareMeasure)){
    return {type:`medida de referencia del duplicado (${resolveElementDef(dupId)?.label||dupId})`,name:st.compareMeasure.trim(),field:`dup_${dupId}_compare`};
   }
+  if(st.targetMeasure&&target===norm(st.targetMeasure)){
+   return {type:`medida objetivo del duplicado (${resolveElementDef(dupId)?.label||dupId})`,name:st.targetMeasure.trim(),field:dupId};
+  }
  }
  return null;
 }
@@ -185,15 +189,21 @@ export function checks(c){
  for(const dupId of dupKeys){
   const def=resolveElementDef(dupId);
   const st=c.elements[dupId];
-  if(def?.baseId==='value'&&!st.measure?.trim()){
-   issues.push({level:'warning',text:`Elemento '${def.label}': no tiene medida propia asignada (se calculará con la medida principal '${c.measure.trim()||'Medida'}').`,field:`dup_${dupId}_measure`,elementId:dupId});
+  if(['value','trend','delta','referenceValue'].includes(def?.baseId)&&!st.measure?.trim()){
+   issues.push({level:'error',text:`Elemento '${def.label}': asigna su medida propia.`,field:def.baseId==='trend'||def.baseId==='delta'?`${dupId}__measure`:dupId,elementId:dupId});
+  }
+  if(def?.baseId==='trend'&&(st.chartKind||c.chartKind)!=='donut'&&(!st.dateTable?.trim()||!st.dateColumn?.trim())){
+   issues.push({level:'error',text:`Elemento '${def.label}': completa su tabla y columna de fecha.`,field:`${dupId}__${!st.dateTable?.trim()?'dateTable':'dateColumn'}`,elementId:dupId});
+  }
+  if(['goalLabel','progressLabel','progress'].includes(def?.baseId)&&!st.targetMeasure?.trim()){
+   issues.push({level:'error',text:`Elemento '${def.label}': indica su medida u objetivo numérico.`,field:dupId,elementId:dupId});
   }
   const effComp = st.comparison || c.comparison;
-  if(def?.baseId==='delta'&&effComp==='custom'&&!st.compareMeasure?.trim()&&!c.compareMeasure?.trim()){
-    issues.push({level:'error',text:`Elemento '${def.label}': indica la medida de referencia para la comparativa.`,field:`dup_${dupId}_compare`,elementId:dupId});
+  if(def?.baseId==='delta'&&effComp==='custom'&&!st.compareMeasure?.trim()){
+    issues.push({level:'error',text:`Elemento '${def.label}': indica la medida de referencia para la comparativa.`,field:dupId,elementId:dupId});
   }
-  if(def?.baseId==='delta'&&effComp==='target'&&!st.targetMeasure?.trim()&&!c.targetMeasure?.trim()){
-    issues.push({level:'error',text:`Elemento '${def.label}': indica la medida u objetivo para la comparativa.`,field:`dup_${dupId}_target`,elementId:dupId});
+  if(def?.baseId==='delta'&&effComp==='target'&&!st.targetMeasure?.trim()){
+    issues.push({level:'error',text:`Elemento '${def.label}': indica la medida u objetivo para la comparativa.`,field:dupId,elementId:dupId});
   }
  }
  if(c.height<240&&['executive','target','status','spark'].includes(c.type))issues.push({level:'warning',text:'Esta composición puede necesitar más altura. Revisa el resultado a tamaño real.'});

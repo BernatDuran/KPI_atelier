@@ -119,6 +119,18 @@ export function cardHTML(c,d=sampleData(c),editor=false){
    dupContent=d[`val_${dupId}`]||d.previous;
    dupExtra='font-weight:600;line-height:1.4;';
   }
+  else if(def.baseId==='goalLabel'){
+   dupContent=`Objetivo <span style="color:${c.text}">${d[`val_${dupId}`]??d.targettext??d.target}</span>`;
+   dupExtra='line-height:1.4;';
+  }
+  else if(def.baseId==='progressLabel'){
+   dupContent=d[`progress_${dupId}`]??d.progress;
+   dupExtra='font-weight:600;line-height:1.4;';
+  }
+  else if(def.baseId==='progress'){
+   dupContent=`<div style="height:100%;width:${d[`progressWidth_${dupId}`]??d.progressWidth}%;background:${color(dupId)};border-radius:8px"></div>`;
+   dupExtra=`height:${elementSize(c,dupId)}px;border-radius:8px;background:${bg(dupId)};overflow:hidden;`;
+  }
   else if(def.baseId==='compareLabel'){
    const dupComp=dupState.comparison||c.comparison;
    const autoDupLabel=comparisonLabel({comparison:dupComp});
@@ -129,7 +141,7 @@ export function cardHTML(c,d=sampleData(c),editor=false){
    const chartKind=dupState.chartKind||c.chartKind;
    const dupHeight=elementSize(c,dupId);
    const dupC={...c,...dupState,trendHeight:dupHeight};
-   dupContent=chartKind==='donut'?renderDonut(dupC,d,dupId):(d[`trend_${dupId}`]||renderTrend(dupC,c.sampleScenario==='empty'?[]:seriesValues(dupC),dupId));
+   dupContent=chartKind==='donut'?renderDonut(dupC,{...d,progress:d[`progress_${dupId}`]??d.progress,progressWidth:d[`progressWidth_${dupId}`]??d.progressWidth},dupId):(d[`trend_${dupId}`]||renderTrend(dupC,c.sampleScenario==='empty'?[]:seriesValues(dupC),dupId));
    dupExtra='line-height:0;';
   }
   else if(def.baseId==='status'){
@@ -162,6 +174,8 @@ export function tokenData(c=null){
    tokens[`arrow_${dupId}`]=`@@arrow_${dupId}@@`;
    tokens[`deltaColor_${dupId}`]=`@@deltaColor_${dupId}@@`;
    tokens[`trend_${dupId}`]=`@@trend_${dupId}@@`;
+   tokens[`progress_${dupId}`]=`@@progress_${dupId}@@`;
+   tokens[`progressWidth_${dupId}`]=`@@progressWidth_${dupId}@@`;
   }
  }
  return tokens;

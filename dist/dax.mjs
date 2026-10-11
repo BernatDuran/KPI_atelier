@@ -45,9 +45,9 @@ function formatted(v, c) {
  return `IF ( ISBLANK ( ${v} ), "—", FORMAT ( DIVIDE ( ${v}, ${divisor} ), ${quote(pattern)}, __Cfg_Locale ) & ${unit} & ${quote(suffix)} )`;
 }
 
-export function generateDAX(c) {
+export function generateDAX(c, { allowIncomplete = false } = {}) {
  const errors = checks(c).filter(x => x.level === 'error');
- if (errors.length) throw new Error(errors.map(x => x.text).join('\n'));
+ if (errors.length && !allowIncomplete) throw new Error(errors.map(x => x.text).join('\n'));
 
  const m = measureRef(c.measure);
  const dateNeeded = needsDate(c);
@@ -85,8 +85,8 @@ export function generateDAX(c) {
   Object.keys(c.elements || {}).filter(k => k.includes('_copy') && !c.elements[k].deleted).map(dupId => {
    const def = resolveElementDef(dupId);
    const st = elementState(c, dupId);
-   if (def?.baseId === 'trend') return `// - Gráfico en ${def?.label || dupId}: medida ${st.measure && st.measure.trim() ? measureRef(st.measure) : m}, calendario ${tableRef(st.dateTable || c.dateTable)}[${st.dateColumn || c.dateColumn}]\n`;
-   if (def?.baseId === 'value' || (st.measure && st.measure.trim())) return `// - Medida en ${def?.label || dupId}: ${st.measure && st.measure.trim() ? measureRef(st.measure) : m}\n`;
+   if (def?.baseId === 'trend') return `// - Gráfico en ${def?.label || dupId}: medida ${st.measure?.trim() ? measureRef(st.measure) : 'Sin configurar'}, calendario ${tableRef(st.dateTable || '')}[${st.dateColumn || 'Sin configurar'}]\n`;
+   if (def?.baseId === 'value' || (st.measure && st.measure.trim())) return `// - Medida en ${def?.label || dupId}: ${st.measure?.trim() ? measureRef(st.measure) : 'Sin configurar'}\n`;
    if (def?.baseId === 'delta' && st.compareMeasure?.trim()) return `// - Medida de referencia en ${def?.label || dupId}: ${measureRef(st.compareMeasure)}\n`;
    return '';
   }).join('') + `\n`;
@@ -196,6 +196,12 @@ export function generateDAX(c) {
  }
 
  const dupIds = Object.keys(c.elements || {}).filter(k => k.includes('_copy') && !c.elements[k].deleted);
+ const duplicateGoal = (id, current, objective, conf) =>
+  `VAR __Target_${id} = ${objective}\n` +
+  `VAR __val_${id} = ${formatted(`__Target_${id}`, conf)}\n` +
+  `VAR __GoalRatio_${id} = IF ( __Target_${id} > 0 && NOT ISBLANK ( ${current} ), DIVIDE ( ${current}, __Target_${id} ) )\n` +
+  `VAR __progress_${id} = IF ( ISBLANK ( __GoalRatio_${id} ), "—", FORMAT ( __GoalRatio_${id}, "0%", __Cfg_Locale ) )\n` +
+  `VAR __progressWidth_${id} = FORMAT ( MIN ( 1, MAX ( 0, COALESCE ( __GoalRatio_${id}, 0 ) ) ) * 100, "0.0", "en-US" )\n`;
  for (const dupId of dupIds) {
   const def = resolveElementDef(dupId);
   if (!def) continue;
@@ -205,11 +211,14 @@ export function generateDAX(c) {
    if (dupKind !== 'donut' && needsDate(c)) {
     code += trendDAX(c, dupId);
    } else {
+    const metric = dupState.measure?.trim() ? measureRef(dupState.measure) : 'BLANK ()';
+    code += `VAR __Cur_${dupId} = ${metric}\n`;
+    code += duplicateGoal(dupId, `__Cur_${dupId}`, c.targetMeasure?.trim() ? targetRef(c.targetMeasure) : 'BLANK ()', c);
     code += `VAR __trend_${dupId} = ""\n`;
    }
   } else if (def.baseId === 'value') {
-   const dupMeasure = dupState.measure && dupState.measure.trim() ? measureRef(dupState.measure) : m;
-   const isSameAsMainMeasure = !dupState.measure || dupState.measure.trim().toLowerCase() === c.measure.trim().toLowerCase();
+   const dupMeasure = dupState.measure?.trim() ? measureRef(dupState.measure) : 'BLANK ()';
+   const isSameAsMainMeasure = Boolean(dupState.measure?.trim()) && dupState.measure.trim().toLowerCase() === c.measure.trim().toLowerCase();
    const dupConf = {
     ...c,
     format: dupState.format || c.format,
@@ -237,23 +246,8 @@ export function generateDAX(c) {
     }
    }
   } else if (def.baseId === 'delta') {
-   let targetMetric = null;
-   if (dupState.measure && dupState.measure.trim()) {
-    targetMetric = dupState.measure.trim();
-   } else {
-    const pairedValId = dupId.replace(/^delta_/, 'value_');
-    if (c.elements?.[pairedValId]?.measure?.trim()) {
-     targetMetric = c.elements[pairedValId].measure.trim();
-    } else {
-     const otherValDups = Object.keys(c.elements || {}).filter(k => resolveElementDef(k)?.baseId === 'value' && !c.elements[k].deleted && c.elements[k].measure?.trim());
-     if (otherValDups.length === 1) {
-      targetMetric = c.elements[otherValDups[0]].measure.trim();
-     } else {
-      targetMetric = c.measure;
-     }
-    }
-   }
-   const dupMetricRef = measureRef(targetMetric);
+   const targetMetric = dupState.measure?.trim() || '';
+   const dupMetricRef = targetMetric ? measureRef(targetMetric) : 'BLANK ()';
    const isSameMetricAsMain = targetMetric.toLowerCase() === c.measure.trim().toLowerCase();
    const dupComp = dupState.comparison || c.comparison;
    const dupMode = dupState.deltaMode || c.deltaMode;
@@ -304,22 +298,19 @@ export function generateDAX(c) {
    } else if (dupComp === 'target') {
     if (dupState.targetMeasure && dupState.targetMeasure.trim()) {
      refExpr = targetRef(dupState.targetMeasure.trim());
-    } else if (c.targetMeasure) {
-     refExpr = '__Target';
     } else {
      refExpr = 'BLANK ()';
     }
    } else if (dupComp === 'custom') {
     if (dupState.compareMeasure && dupState.compareMeasure.trim()) {
      refExpr = measureRef(dupState.compareMeasure.trim());
-    } else if (c.compareMeasure) {
-     refExpr = measureRef(c.compareMeasure);
     } else {
      refExpr = 'BLANK ()';
     }
    }
 
-   const isIdenticalToMainDelta = isSameMetricAsMain && dupComp === c.comparison && dupMode === c.deltaMode && dupDir === c.direction && needsCompare(c);
+   const sameReference = !['target','custom'].includes(dupComp) || String(dupComp === 'target' ? dupState.targetMeasure : dupState.compareMeasure).trim().toLowerCase() === String(dupComp === 'target' ? c.targetMeasure : c.compareMeasure).trim().toLowerCase();
+   const isIdenticalToMainDelta = isSameMetricAsMain && sameReference && dupComp === c.comparison && dupMode === c.deltaMode && dupDir === c.direction && needsCompare(c);
    if (isIdenticalToMainDelta) {
     code += `VAR __Diff_${dupId} = __Difference\n` +
      `VAR __Rel_${dupId} = __Relative\n` +
@@ -361,8 +352,10 @@ export function generateDAX(c) {
     code += `VAR __deltaColor_${dupId} = ${colorExpr}\n`;
    }
   } else if (def.baseId === 'referenceValue') {
-   const dupRef = dupState.measure && dupState.measure.trim() ? measureRef(dupState.measure) : (dupState.compareMeasure && dupState.compareMeasure.trim() ? measureRef(dupState.compareMeasure) : '__Reference');
+   const dupRef = dupState.measure?.trim() ? measureRef(dupState.measure) : 'BLANK ()';
    code += `VAR __val_${dupId} = ${formatted(dupRef, c)}\n`;
+  } else if (['goalLabel','progressLabel','progress'].includes(def.baseId)) {
+   code += duplicateGoal(dupId, '__Current', dupState.targetMeasure?.trim() ? targetRef(dupState.targetMeasure) : 'BLANK ()', { ...c, ...dupState });
   } else if (dupState.measure && dupState.measure.trim()) {
    code += `VAR __val_${dupId} = ${formatted(measureRef(dupState.measure), c)}\n`;
   }
@@ -386,15 +379,16 @@ export function generateDAX(c) {
 function trendDAX(c, elementId = 'trend') {
  const isOrig = elementId === 'trend';
  const st = isOrig ? c : elementState(c, elementId);
+ if (!isOrig && (!st.measure?.trim() || !st.dateTable?.trim() || !st.dateColumn?.trim())) return `// ${elementId}: referencias sin configurar\nVAR __trend_${elementId} = ""\n`;
  const dupHeight = isOrig ? c.trendHeight : elementSize(c, elementId);
  const effC = { ...c, ...st, trendHeight: dupHeight };
  const g = chartGeometry(effC, elementId);
  const fmt = v => `FORMAT ( ${v}, "0.000", "en-US" )`;
  const customTrendColor = appearance(effC, elementId).colorMode === 'custom';
  const color = customTrendColor ? elementColor(effC, elementId) : '__Cfg_ColorAccent';
- const table = tableRef(st.dateTable || c.dateTable);
- const date = `${table}${colRef(st.dateColumn || c.dateColumn)}`;
- const m = measureRef(st.measure && st.measure.trim() ? st.measure : c.measure);
+ const table = tableRef(st.dateTable || '');
+ const date = `${table}${colRef(st.dateColumn || '')}`;
+ const m = st.measure?.trim() ? measureRef(st.measure) : 'BLANK ()';
  const pfx = isOrig ? '' : `_${elementId}`;
  const bucket = d => `SWITCH ( __Granularity${pfx}, 1, ${d}, 2, ${d} - WEEKDAY ( ${d}, 2 ) + 1, DATE ( YEAR ( ${d} ), MONTH ( ${d} ), 1 ) )`;
  const maxPts = effC.maxPoints || 24;
