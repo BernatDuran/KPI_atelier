@@ -2,9 +2,9 @@
 # Bridge between KPI Atelier and local Power BI Desktop (Analysis Services Tabular)
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory=$true)]
-    [ValidateSet("discover", "status", "schema", "inject-measure")]
-    [string]$Action,
+    [string]$Action = "",
+    [switch]$Interactive,
+    [switch]$FromStdin,
 
     [string]$Server = "",
     [string]$Database = "",
@@ -163,15 +163,29 @@ function Discover-Instances {
     return $results
 }
 
-try {
+function Invoke-BridgeAction {
+    param(
+        [string]$Action,
+        [string]$Server = "",
+        [string]$Database = "",
+        [string]$TableName = "",
+        [string]$TableNameBase64 = "",
+        [string]$MeasureName = "",
+        [string]$MeasureNameBase64 = "",
+        [string]$Expression = "",
+        [string]$ExpressionBase64 = "",
+        [string]$FormatString = "",
+        [string]$ConfigJson = "",
+        [string]$ConfigBase64 = ""
+    )
+
     switch ($Action) {
         "discover" {
             $instances = @(Discover-Instances)
-            $out = @{
+            return @{
                 success = $true
                 instances = $instances
             }
-            $out | ConvertTo-Json -Depth 5 -Compress
         }
 
         "status" {
@@ -194,13 +208,13 @@ try {
                         compatibilityLevel = $db.CompatibilityLevel
                     }
                 }
-                @{
+                return @{
                     success = $true
                     connected = $true
                     server = $Server
                     serverName = $srv.Name
                     databases = $dbList
-                } | ConvertTo-Json -Depth 5 -Compress
+                }
             } finally {
                 $srv.Disconnect()
             }
@@ -360,7 +374,7 @@ try {
                     "Power BI Desktop"
                 }
 
-                @{
+                return @{
                     success = $true
                     server = $Server
                     database = $db.Name
@@ -370,7 +384,7 @@ try {
                     tables = $tablesOut
                     measures = $allMeasures
                     detectedDateTables = $detectedDateTables
-                } | ConvertTo-Json -Depth 6 -Compress
+                }
             } finally {
                 $srv.Disconnect()
             }
@@ -411,11 +425,11 @@ try {
                 }
                 if (-not $db) { $db = $srv.Databases[0] }
 
-                # Check if measure already exists in any table in the model
+                # Check if measure already exists in any table in the model (case-insensitive)
                 $existingMeas = $null
                 $existingTable = $null
                 foreach ($tbl in $db.Model.Tables) {
-                    $found = $tbl.Measures.Find($MeasureName)
+                    $found = $tbl.Measures | Where-Object { $_.Name -ieq $MeasureName } | Select-Object -First 1
                     if ($found) {
                         $existingMeas = $found
                         $existingTable = $tbl
@@ -430,12 +444,26 @@ try {
                 } else {
                     $targetTable = $null
                     if ($TableName) {
-                        $targetTable = $db.Model.Tables.Find($TableName)
+                        $targetTable = $db.Model.Tables | Where-Object { $_.Name -ieq $TableName } | Select-Object -First 1
                     }
                     if (-not $targetTable) {
-                        $targetTable = $db.Model.Tables.Find("_Measures")
+                        $targetTable = $db.Model.Tables | Where-Object { 
+                            $_.Name -match '^_?m(easure|edida)s?$' -or 
+                            $_.Name -match '^_?(kpi|metric)s?$'
+                        } | Select-Object -First 1
                         if (-not $targetTable) {
-                            $targetTable = $db.Model.Tables | Where-Object { -not ($_.Name -like "LocalDateTable_*") } | Select-Object -First 1
+                            $targetTable = $db.Model.Tables | Where-Object {
+                                $_.Measures.Count -gt 0 -and
+                                -not ($_.Name -like "LocalDateTable_*") -and
+                                -not ($_.Name -like "DateTableTemplate_*")
+                            } | Select-Object -First 1
+                        }
+                        if (-not $targetTable) {
+                            $targetTable = $db.Model.Tables | Where-Object {
+                                -not ($_.Name -like "LocalDateTable_*") -and
+                                -not ($_.Name -like "DateTableTemplate_*") -and
+                                -not $_.IsHidden
+                            } | Select-Object -First 1
                         }
                     }
                     if (-not $targetTable) {
@@ -469,7 +497,7 @@ try {
 
                 $db.Model.SaveChanges() | Out-Null
 
-                @{
+                return @{
                     success = $true
                     isNew = $isNew
                     server = $Server
@@ -477,18 +505,152 @@ try {
                     tableName = $targetTable.Name
                     measureName = $MeasureName
                     hasAnnotation = [bool]$ConfigJson
-                } | ConvertTo-Json -Depth 5 -Compress
+                }
+            } finally {
+                $srv.Disconnect()
+            }
+        }
+
+        "delete-measure" {
+            if (-not $Server) { throw "Se requiere el parámetro -Server." }
+
+            if ($MeasureNameBase64) {
+                $MeasureName = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($MeasureNameBase64))
+            }
+            if (-not $MeasureName) { throw "Se requiere el parámetro -MeasureName o -MeasureNameBase64." }
+
+            $srv = Connect-Server $Server
+            try {
+                if ($srv.Databases.Count -eq 0) {
+                    throw "El servidor no tiene bases de datos cargadas."
+                }
+
+                $db = $null
+                if ($Database) {
+                    $db = $srv.Databases.Find($Database)
+                    if (-not $db) {
+                        $db = $srv.Databases | Where-Object { $_.Name -eq $Database -or $_.ID -eq $Database } | Select-Object -First 1
+                    }
+                }
+                if (-not $db) { $db = $srv.Databases[0] }
+
+                $deleted = $false
+                $fromTable = ""
+                foreach ($tbl in $db.Model.Tables) {
+                    $found = $tbl.Measures | Where-Object { $_.Name -ieq $MeasureName } | Select-Object -First 1
+                    if ($found) {
+                        $tbl.Measures.Remove($found) | Out-Null
+                        $deleted = $true
+                        $fromTable = $tbl.Name
+                        break
+                    }
+                }
+
+                if ($deleted) {
+                    $db.Model.SaveChanges() | Out-Null
+                }
+
+                return @{
+                    success = $true
+                    deleted = $deleted
+                    measureName = $MeasureName
+                    tableName = $fromTable
+                }
             } finally {
                 $srv.Disconnect()
             }
         }
     }
-} catch {
-    $errObj = @{
-        success = $false
-        error = $_.Exception.Message
-        details = $_.ScriptStackTrace
+}
+
+if ($Interactive) {
+    [Console]::Out.WriteLine('{"ready":true}')
+    while ($true) {
+        $line = [Console]::In.ReadLine()
+        if ($null -eq $line) { break }
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        try {
+            $req = $line | ConvertFrom-Json
+            $resp = Invoke-BridgeAction `
+                -Action $req.action `
+                -Server $req.server `
+                -Database $req.database `
+                -TableName $req.tableName `
+                -TableNameBase64 $req.tableNameBase64 `
+                -MeasureName $req.measureName `
+                -MeasureNameBase64 $req.measureNameBase64 `
+                -Expression $req.expression `
+                -ExpressionBase64 $req.expressionBase64 `
+                -FormatString $req.formatString `
+                -ConfigJson $req.configJson `
+                -ConfigBase64 $req.configBase64
+
+            $jsonOut = $resp | ConvertTo-Json -Depth 6 -Compress
+            [Console]::Out.WriteLine($jsonOut)
+        } catch {
+            $errObj = @{
+                success = $false
+                error = $_.Exception.Message
+                details = $_.ScriptStackTrace
+            }
+            $jsonOut = $errObj | ConvertTo-Json -Depth 5 -Compress
+            [Console]::Out.WriteLine($jsonOut)
+        }
     }
-    $errObj | ConvertTo-Json -Depth 5 -Compress
-    exit 1
+} elseif ($FromStdin) {
+    try {
+        $raw = [Console]::In.ReadToEnd()
+        if ([string]::IsNullOrWhiteSpace($raw)) { throw "No se recibieron datos por stdin." }
+        $req = $raw | ConvertFrom-Json
+        $resp = Invoke-BridgeAction `
+            -Action $req.action `
+            -Server $req.server `
+            -Database $req.database `
+            -TableName $req.tableName `
+            -TableNameBase64 $req.tableNameBase64 `
+            -MeasureName $req.measureName `
+            -MeasureNameBase64 $req.measureNameBase64 `
+            -Expression $req.expression `
+            -ExpressionBase64 $req.expressionBase64 `
+            -FormatString $req.formatString `
+            -ConfigJson $req.configJson `
+            -ConfigBase64 $req.configBase64
+
+        $resp | ConvertTo-Json -Depth 6 -Compress
+    } catch {
+        $errObj = @{
+            success = $false
+            error = $_.Exception.Message
+            details = $_.ScriptStackTrace
+        }
+        $errObj | ConvertTo-Json -Depth 5 -Compress
+        exit 1
+    }
+} else {
+    try {
+        if (-not $Action) { throw "Se requiere especificar el parámetro -Action." }
+        $resp = Invoke-BridgeAction `
+            -Action $Action `
+            -Server $Server `
+            -Database $Database `
+            -TableName $TableName `
+            -TableNameBase64 $TableNameBase64 `
+            -MeasureName $MeasureName `
+            -MeasureNameBase64 $MeasureNameBase64 `
+            -Expression $Expression `
+            -ExpressionBase64 $ExpressionBase64 `
+            -FormatString $FormatString `
+            -ConfigJson $ConfigJson `
+            -ConfigBase64 $ConfigBase64
+
+        $resp | ConvertTo-Json -Depth 6 -Compress
+    } catch {
+        $errObj = @{
+            success = $false
+            error = $_.Exception.Message
+            details = $_.ScriptStackTrace
+        }
+        $errObj | ConvertTo-Json -Depth 5 -Compress
+        exit 1
+    }
 }
