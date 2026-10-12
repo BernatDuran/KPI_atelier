@@ -64,7 +64,8 @@ export function createPbiApi({ bridge = runBridge, pollMs = 4000 } = {}) {
       }
     } catch (err) {
       const status = err instanceof HttpError ? err.status : err.code === 'CONFLICT' ? 409 : err.code === 'BRIDGE_TIMEOUT' ? 504 : err.code === 'BRIDGE_BUSY' ? 503 : 502;
-      sendJson(res,status,{success:false,error:err.message || 'Error de conexión Power BI.',code:err.code || 'INVALID_REQUEST',outcomeUnknown:Boolean(err.outcomeUnknown)});
+      sendJson(res,status,{success:false,error:err.message || 'Error de conexión Power BI.',code:err.code || 'INVALID_REQUEST',outcomeUnknown:Boolean(err.outcomeUnknown),
+        ...(err.diagnostic ? { diagnostic: err.diagnostic } : {}), ...(err.requestId ? { requestId: err.requestId } : {})});
     }
     return true;
   }

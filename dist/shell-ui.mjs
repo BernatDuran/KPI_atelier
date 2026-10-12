@@ -5,7 +5,10 @@ import { renderInspector, rememberInspector } from './inspector.mjs';
 import { renderStage, fitThumbs } from './canvas.mjs';
 
 export function render() {
-  rememberInspector();
+  const remembered = rememberInspector();
+  const focused = document.activeElement;
+  const focusedId = focused?.id;
+  const focusedAction = focused?.dataset?.action;
   const curView = getView();
   const pbipModel = getPbipModel();
 
@@ -51,11 +54,15 @@ export function render() {
     </footer>`;
 
   if (curView === 'designer') {
-    renderInspector();
+    renderInspector(remembered);
     renderStage();
   }
   fitThumbs();
   showDirty();
+  if (!remembered?.focus) {
+    const replacement = focusedId ? document.getElementById(focusedId) : focusedAction ? app.querySelector(`[data-action="${focusedAction}"]`) : null;
+    replacement?.focus({ preventScroll: true });
+  }
 }
 
 export function designer() {
@@ -82,7 +89,7 @@ export function designer() {
         </div>
       ` : `
         <div class="rail-heading">
-          <h2>Elige tu punto de partida</h2>
+          <h2>Elige tu tarjeta</h2>
           <div class="rail-heading-actions">
             <span>01—${TEMPLATES.length}</span>
             <button class="icon-btn rail-toggle-btn" data-action="toggle-rail" title="Colapsar barra de plantillas (Ctrl+B)" aria-label="Colapsar barra de plantillas">
@@ -100,8 +107,8 @@ export function designer() {
       <div class="canvas-toolbar">
         <div class="live-label"><i></i>VISTA PREVIA</div>
         <div class="segmented small">
-          <button data-action="single" class="${!context ? 'active' : ''}" title="Vista individual de la tarjeta">${icon('card', 14)}Tarjeta</button>
-          <button data-action="context" class="${context ? 'active' : ''}" title="Vista de la tarjeta en contexto del informe">${icon('grid', 14)}En contexto</button>
+          <button data-action="single" aria-pressed="${!context}" class="${!context ? 'active' : ''}" title="Vista individual de la tarjeta">${icon('card', 14)}Tarjeta</button>
+          <button data-action="context" aria-pressed="${context}" class="${context ? 'active' : ''}" title="Vista de la tarjeta en contexto del informe">${icon('grid', 14)}En contexto</button>
         </div>
         <div class="toolbar-icons">
           ${ib('undo', 'Deshacer', 'undo', undo.length ? '' : 'disabled')}
@@ -120,11 +127,11 @@ export function designer() {
           <button data-action="zoom-in" aria-label="Acercar">+</button>
           ${ib('zoom-fit', 'Ajustar vista', 'expand')}
         </div>
-        <span class="sample-tag">DATOS DE MUESTRA</span>
       </div>
+      <details id="design-diagnostics" class="design-diagnostics" hidden aria-label="Avisos de legibilidad de la tarjeta"></details>
       <div class="palette-section">
         <div class="theme-swatches">
-          ${Object.entries(THEMES).map(([key, t]) => `<button data-theme="${key}" class="theme-swatch ${c.theme === key ? 'active' : ''}" title="${t.name}" aria-label="Aplicar tema ${t.name}" style="--swatch:${t.background};--dot:${t.accent}"><span></span><small>${t.name}</small></button>`).join('')}
+          ${Object.entries(THEMES).map(([key, t]) => `<button data-theme="${key}" aria-pressed="${c.theme === key}" class="theme-swatch ${c.theme === key ? 'active' : ''}" title="${t.name}" aria-label="Aplicar tema ${t.name}" style="--swatch:${t.background};--dot:${t.accent}"><span></span><small>${t.name}</small></button>`).join('')}
           <button class="theme-swatch theme-add" data-action="themes" title="Crear o editar una paleta"><span>${icon('plus', 15)}</span><small>Crear tema</small></button>
         </div>
       </div>
@@ -132,7 +139,7 @@ export function designer() {
     <aside class="inspector">
       <div class="inspector-title"><h2>Nivel de detalle</h2>${ib('reset', 'Restaurar esta plantilla', 'reset')}</div>
       <div class="mode-switch">${[['essential', 'Esencial'], ['advanced', 'Avanzado']].map(([id, label]) => `<button data-mode="${id}" class="${mode === id ? 'active' : ''}" aria-pressed="${mode === id}">${label}</button>`).join('')}</div>
-      <div class="inspector-tabs" role="tablist">${[['content', 'Contenido'], ['style', 'Estilo'], ['data', 'Datos & DAX']].map(([id, label]) => `<button role="tab" aria-selected="${tab === id}" data-tab="${id}" class="${tab === id ? 'active' : ''}">${label}</button>`).join('')}</div>
+      <div class="inspector-tabs" role="tablist" aria-label="Propiedades del diseño">${[['content', 'Contenido'], ['style', 'Estilo'], ['data', 'Datos & DAX']].map(([id, label]) => `<button role="tab" aria-selected="${tab === id}" data-tab="${id}" class="${tab === id ? 'active' : ''}">${label}</button>`).join('')}</div>
       <div id="inspector-fields" class="inspector-fields"></div>
     </aside>
   </div>`;
@@ -140,7 +147,7 @@ export function designer() {
 
 export function railCards() {
   const c = getC();
-  return filtered().map(t => `<button class="template-item ${c.id === t.id ? 'chosen' : ''}" data-template="${t.id}" aria-label="Usar ${t.name}">${thumb(t.config)}<div><strong>${t.name}</strong>${c.id === t.id ? '<span class="chosen-mark">' + icon('check', 12) + '</span>' : '<span>' + icon('arrow', 12) + '</span>'}</div><small>${familyName(t.category)}</small></button>`).join('') || '<p class="empty-hint">No hay plantillas con ese nombre.</p>';
+  return filtered().map(t => `<button class="template-item ${c.id === t.id ? 'chosen' : ''}" data-template="${t.id}" aria-pressed="${c.id === t.id}" aria-label="Usar ${t.name}">${thumb(t.config)}<div><strong>${t.name}</strong>${c.id === t.id ? '<span class="chosen-mark">' + icon('check', 12) + '</span>' : '<span>' + icon('arrow', 12) + '</span>'}</div><small>${familyName(t.category)}</small></button>`).join('') || '<p class="empty-hint">No hay plantillas con ese nombre.</p>';
 }
 
 export function library() {

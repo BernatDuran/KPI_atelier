@@ -2,9 +2,12 @@ import { installEditorEvents } from './editor-events.mjs';
 import { chooseModelFolder, importModelFiles, cancelModelScan } from './model-import.mjs';
 import { installLayerEvents } from './layer-events.mjs';
 import { initLiveConnection } from './live-connection.mjs';
+import { beginModelRequest, cancelModelRequest } from './model-session.mjs';
 import { handleStudioClick, handleStudioInput, installStudioPointerEvents } from './studio-ui.mjs';
 import { recordEdit } from './state.mjs';
-import { validateImportedJSON } from './schema.mjs';
+import { captureDesignSession, isDesignSessionCurrent } from './state.mjs';
+import { getModalRevision, getPendingWriteReviewAction, clearPendingWriteReviewAction } from './modals.mjs';
+import { validateImportedJSON, MAX_CONFIG_BYTES } from './schema.mjs';
 import { applyLiveMeasure } from './measure-write.mjs';
 import { render, railCards, galleryCards } from './shell-ui.mjs';
 /**
@@ -17,11 +20,11 @@ import { applyLayout } from './layout.mjs';
 import { BASE, TEMPLATES, sanitizeConfig } from './model.mjs';
 import { icon, esc, cardHTML } from './cards.mjs';
 import { generateDAX } from './dax.mjs';
-import { ELEMENTS, elementState, elementVisible, updateElement, moveElement, restoreElement, moveLayer } from './elements.mjs';
+import { ELEMENTS, elementState, elementVisible, updateElement, moveElement, restoreElement, restorationIssue, moveLayer } from './elements.mjs';
 import { fetchLivePbiModel, discoverLivePbi } from './pbip.mjs';
 
-import { $, btn, setContext, getActiveContext, getC, setC, getBaseline, setMode, getTab, setTab, getView, setView, getSelectedElement, setSelectedElement, getSelectedElements, getPbipModel, setPbipModel, getUndo, getRedo, getSaved, setSaved, getZoom, setZoom, getCanvasDark, setCanvasDark, getContextPreview, setContextPreview, getMoveStep, setMoveStep, getLayersOpen, setLayersOpen, getGuidesEnabled, setGuidesEnabled, getFormatPainterSource, setFormatPainterSource, getDeleteConfirmLayer, setDeleteConfirmLayer, getContextResolution, setContextResolution, setFilter, setQuery, getPendingRoundtripConf, setPendingRoundtripConf, getPendingRoundtripName, setPendingRoundtripName, dirty, toast, persist, setConfig, themeSelect, loadDesign, saveCurrent, requestNavigation, toggleUiTheme, toggleRailCollapsed } from './state.mjs';
-import { renderStage, fitThumbs, fitMain, measureElementFrame, renderCanvasBar, commitLayerOrder, positionSelection, refreshCard, renderGuides, selectElement, selectCard, deselect, directChange, elementAction } from './canvas.mjs';
+import { $, btn, setContext, getActiveContext, getC, setC, getBaseline, setMode, getTab, setTab, getView, setView, getSelectedElement, setSelectedElement, getSelectedElements, getPbipModel, setPbipModel, getUndo, getRedo, getSaved, deleteSaved, getZoom, setZoom, getCanvasDark, setCanvasDark, getContextPreview, setContextPreview, getMoveStep, setMoveStep, getLayersOpen, setLayersOpen, getGuidesEnabled, setGuidesEnabled, getFormatPainterSource, setFormatPainterSource, getDeleteConfirmLayer, setDeleteConfirmLayer, getContextResolution, setContextResolution, setFilter, setQuery, getPendingRoundtripConf, setPendingRoundtripConf, getPendingRoundtripName, setPendingRoundtripName, dirty, toast, persist, setConfig, themeSelect, loadDesign, saveCurrent, requestNavigation, toggleUiTheme, toggleRailCollapsed } from './state.mjs';
+import { renderStage, fitThumbs, fitMain, resetContextViewport,setContextManualZoom,measureElementFrame, renderCanvasBar, commitLayerOrder, positionSelection, refreshCard, renderGuides, selectElement, selectCard, deselect, directChange, elementAction } from './canvas.mjs';
 import { field, renderInspector, renderStatus, updateHistoryButtons, rememberInspector, editAppearance, syncElementControls, syncCardControls, commitNumber } from './inspector.mjs';
 import { openModal, closeModal, filename, download, downloadJSON, copyDax, exportModal, openMeasureReviewModal, validationModal, chooseLiveInstanceModal, guide, openIconPicker, iconGrid, openThemeStudio, ELEMENT_TO_FIELD, getBindingFieldsForElement, highlightBindingContext, renderBindingDropdown, closeAllBindingDropdowns, applyBindingFieldValue, openDataBindingModal, shortcutsModal, pbiInfographicModal, getPendingInjectAction, clearPendingInjectAction } from './modals.mjs';
 import { cancelBindingReveal, revealBindingFields, openBindingDropdown, confirmExport } from './modals.mjs';
@@ -44,6 +47,8 @@ installStudioPointerEvents();
 
 const app = $('#app') || (typeof document !== 'undefined' ? (document.querySelector('#app') || document.body) : null);
 installLayerEvents(app);
+let reviewedDelete = null;
+const importWarningsHTML = warnings => warnings.length ? `<div class="measure-review-issues" role="status"><p>Se han aplicado estos ajustes de compatibilidad:</p><ul>${warnings.map(warning => `<li>${esc(warning)}</li>`).join('')}</ul></div>` : '';
 
 function bindingContextAt(target) {
   const field = target?.closest?.('[data-binding-field]');
@@ -79,12 +84,14 @@ document.addEventListener('click', e => {
   const bindingWrap = e.target.closest?.('.binding-dropdown-wrap') || bindingField?.querySelector?.('.binding-dropdown-wrap.has-dropdown');
   if (!bindingWrap) {
     closeAllBindingDropdowns();
-  } else if (!e.target.closest?.('button')) {
+  } else if (!e.target.closest?.('button') && bindingField) {
+    // The label, selected name and free space open the same menu as the chevron.
     openBindingDropdown(bindingField.dataset.bindingField);
   }
   const t = e.target.closest('button,a[data-action]');
   if (!t) return;
-  if (handleStudioClick(t)) return;
+  const studioAction = handleStudioClick(t);
+  if (studioAction) return Promise.resolve(studioAction).catch(err => toast(err.message || 'No se pudo actualizar la paleta.'));
   if (t.dataset.action === 'home') e.preventDefault();
   if (t.dataset.template) {
     const selected = TEMPLATES.find(x => x.id === t.dataset.template);
@@ -97,7 +104,11 @@ document.addEventListener('click', e => {
   if (t.dataset.filter) { setFilter(t.dataset.filter); render(); return; }
   if (t.dataset.load) {
     const s = getSaved().find(x => x.id === t.dataset.load);
-    if (s) requestNavigation(() => { loadDesign(s.config, s.id); toast('Diseño abierto.'); });
+    if (s) requestNavigation(() => {
+      loadDesign(s.config, s.id);
+      if (s.normalizationWarnings?.length) openModal('Diseño abierto con ajustes', 'Revisa los cambios de compatibilidad de este diseño guardado.', importWarningsHTML(s.normalizationWarnings), btn('close-modal', 'Entendido', 'check', 'button primary'));
+      else toast('Diseño abierto.');
+    });
     return;
   }
   if (t.dataset.surface) { setConfig({ surfaceEffect: t.dataset.surface }); return; }
@@ -122,6 +133,10 @@ document.addEventListener('click', e => {
   if (t.dataset.layerVisibility) {
     const id = t.dataset.layerVisibility;
     setSelectedElement(id);
+    if (!elementVisible(getC(), id)) {
+      const issue = restorationIssue(getC(), id);
+      if (issue) { toast(issue); return; }
+    }
     directChange(elementVisible(getC(), id) ? updateElement(getC(), id, { hidden: true }) : restoreElement(getC(), id));
     return;
   }
@@ -179,25 +194,24 @@ document.addEventListener('click', e => {
     single: () => { setContextPreview(false); setZoom(100); renderStage(); render(); },
     context: () => {
       setContextPreview(true);
-      const stage = $('#stage');
-      const [resW, resH] = getContextResolution() === '1920x1080' ? [1920, 1080] : [1280, 720];
-      const availW = Math.max(300, (stage?.clientWidth || 800) - 80);
-      const availH = Math.max(240, (stage?.clientHeight || 500) - 80);
-      setZoom(Math.max(25, Math.min(100, Math.round(Math.min(availW / resW, availH / resH) * 100))));
+      resetContextViewport();
+      setZoom(100);
       render();
     },
     'canvas-color': () => { setCanvasDark(!getCanvasDark()); renderStage(); },
     'toggle-ui-theme': () => { toggleUiTheme(); render(); },
     'toggle-rail': () => { toggleRailCollapsed(); render(); },
     'zoom-in': () => {
+      if(getContextPreview())setContextManualZoom();
       const cur = getZoom();
       const next = Math.min(200, Math.floor(cur / 5) * 5 + 5);
       setZoom(next);
       renderStage();
     },
     'zoom-out': () => {
+      if(getContextPreview())setContextManualZoom();
       const cur = getZoom();
-      const prev = Math.max(25, Math.ceil(cur / 5) * 5 - 5);
+      const prev = Math.max(getContextPreview()?1:25, Math.ceil(cur / 5) * 5 - 5);
       setZoom(prev);
       renderStage();
     },
@@ -205,10 +219,8 @@ document.addEventListener('click', e => {
       const stage = $('#stage');
       const c = getC();
       if (getContextPreview()) {
-        const [resW, resH] = getContextResolution() === '1920x1080' ? [1920, 1080] : [1280, 720];
-        const availW = Math.max(300, (stage?.clientWidth || 800) - 80);
-        const availH = Math.max(240, (stage?.clientHeight || 500) - 80);
-        setZoom(Math.max(25, Math.min(100, Math.round(Math.min(availW / resW, availH / resH) * 100))));
+        resetContextViewport();
+        setZoom(100);
       } else {
         const cardH = $('#main-card')?.firstElementChild?.offsetHeight || c.height || 300;
         const cardW = c.width || 400;
@@ -223,13 +235,10 @@ document.addEventListener('click', e => {
       toast(`Vista ajustada (${getZoom()} %)`);
     },
     'context-res': () => {
+      resetContextViewport();
       setContextResolution(t.dataset.res || '1280x720');
       try { localStorage.setItem('kpi-atelier-context-res', JSON.stringify(getContextResolution())); } catch {}
-      const stage = $('#stage');
-      const [resW, resH] = getContextResolution() === '1920x1080' ? [1920, 1080] : [1280, 720];
-      const availW = Math.max(300, (stage?.clientWidth || 800) - 80);
-      const availH = Math.max(240, (stage?.clientHeight || 500) - 80);
-      setZoom(Math.max(25, Math.min(100, Math.round(Math.min(availW / resW, availH / resH) * 100))));
+      setZoom(100);
       renderStage();
       render();
     },
@@ -286,7 +295,11 @@ document.addEventListener('click', e => {
     guide,
     validation: validationModal,
     export: exportModal,
-    'review-live-measure': openMeasureReviewModal,
+    'review-live-measure': () => {
+      const review = getPendingWriteReviewAction();
+      clearPendingWriteReviewAction();
+      return review ? review() : openMeasureReviewModal();
+    },
     'open-data-modal': () => openDataBindingModal(),
     'close-modal': closeModal,
     'toggle-bind-dropdown': () => {
@@ -297,6 +310,7 @@ document.addEventListener('click', e => {
       const val = t.dataset.value;
       applyBindingFieldValue(fieldKey, val);
       closeAllBindingDropdowns();
+      document.getElementById(`f-bind-${fieldKey}`)?.focus();
     },
     'pbi-infographic': () => pbiInfographicModal(),
     'back-to-export': () => exportModal(),
@@ -316,9 +330,18 @@ document.addEventListener('click', e => {
       const ctx = getActiveContext();
       openModal('Una idea que merece quedarse.', 'Guarda esta tarjeta en tu colección personal.', `<label class="save-label" for="design-name">Nombre del diseño</label><input class="save-input" id="design-name" maxlength="80" value="${esc(saved.find(s => s.id === ctx.editingSavedId)?.name || c.title + ' · ' + (TEMPLATES.find(x => x.id === c.id)?.name || 'Mi diseño'))}" autofocus><p class="field-help">Se guardará en este navegador. Puedes exportar el JSON como copia.</p>`, btn('close-modal', 'Cancelar', null, 'button secondary') + btn('confirm-save', 'Guardar diseño', 'save', 'button primary'));
     },
-    'confirm-save': () => {
+    'confirm-save': async () => {
       const name = $('#design-name')?.value || '';
-      if (saveCurrent(name)) { closeModal(); render(); toast('Diseño guardado en tu colección.'); }
+      const session = captureDesignSession(), revision = getModalRevision();
+      t.disabled = true;
+      try {
+        if (await saveCurrent(name)) {
+          if (!isDesignSessionCurrent(session)) return;
+          if (getModalRevision() === revision) closeModal();
+          render();
+          if (!getActiveContext().lastSaveConflict) toast(getActiveContext().lastCollectionSyncWarning || 'Diseño guardado en tu colección.');
+        }
+      } finally { t.disabled = false; }
     },
     'guard-discard': () => {
       const ctx = getActiveContext();
@@ -330,11 +353,17 @@ document.addEventListener('click', e => {
       closeModal();
       go?.();
     },
-    'guard-save': () => {
+    'guard-save': async () => {
       const ctx = getActiveContext();
       const go = ctx.pendingNavigation;
       const name = $('#guard-name')?.value || '';
-      if (saveCurrent(name)) { closeModal(); go?.(); }
+      const session = captureDesignSession(), revision = getModalRevision();
+      t.disabled = true;
+      try {
+        if (await saveCurrent(name) && isDesignSessionCurrent(session) && getModalRevision() === revision && ctx.pendingNavigation === go) {
+          closeModal(); go?.();
+        }
+      } finally { t.disabled = false; }
     },
     'saved-json': () => {
       const s = getSaved().find(item => item.id === t.dataset.id);
@@ -342,13 +371,15 @@ document.addEventListener('click', e => {
     },
     delete: () => {
       const s = getSaved().find(item => item.id === t.dataset.id);
-      if (s) openModal('¿Eliminar este diseño?', esc(s.name), '<p>El borrador actual no se eliminará.</p>', btn('close-modal', 'Cancelar', null, 'button secondary') + btn('confirm-delete', 'Eliminar', 'trash', 'button danger', `data-id="${s.id}"`));
+      reviewedDelete = s ? structuredClone(s) : null;
+      if (s) openModal('¿Eliminar este diseño?', esc(s.name), '<p>Se eliminará la versión que acabas de revisar. El borrador actual se conservará.</p>', btn('close-modal', 'Cancelar', null, 'button secondary') + btn('confirm-delete', 'Eliminar', 'trash', 'button danger', `data-id="${s.id}"`));
     },
-    'confirm-delete': () => {
-      const next = getSaved().filter(s => s.id !== t.dataset.id);
+    'confirm-delete': async () => {
+      const reviewed = reviewedDelete;
+      reviewedDelete = null;
+      if (!reviewed || reviewed.id !== t.dataset.id) return;
       try {
-        localStorage.setItem('kpi-atelier-saved', JSON.stringify(next));
-        setSaved(next);
+        if (!await deleteSaved(t.dataset.id, reviewed)) { closeModal(); render(); return; }
         closeModal();
         render();
         toast('Diseño eliminado.');
@@ -388,29 +419,28 @@ document.addEventListener('click', e => {
     themes: openThemeStudio,
     'connect-pbip': chooseModelFolder,
     'disconnect-pbip': () => {
+      cancelModelRequest();
       setPbipModel(null);
-      const c = getC();
-      const tpl = TEMPLATES.find(x => x.id === c.id) || TEMPLATES[0];
-      setC(sanitizeConfig({ ...c, dateTable: tpl.config.dateTable || 'Calendario', dateColumn: tpl.config.dateColumn || 'Fecha' }));
-      persist();
       refreshCard();
-      toast('Modelo desconectado.');
+      toast('Modelo desconectado. Las referencias del diseño se han conservado.');
       openDataBindingModal();
     },
     'refresh-live-pbi': async () => {
       const pbipModel = getPbipModel();
       if (!pbipModel?.server) return;
+      const request = beginModelRequest();
       try {
         toast('Actualizando modelo desde Power BI Desktop…');
-        const catalog = await fetchLivePbiModel(pbipModel.server, pbipModel.databaseId || pbipModel.database || '');
-        setPbipModel(catalog, true);
+        const catalog = await fetchLivePbiModel(pbipModel.server, pbipModel.databaseId || pbipModel.database || '', { signal: request.signal });
+        if (!request.commit(catalog, false)) return;
         toast(`Modelo actualizado (${catalog.measures.length} medidas, ${catalog.dateTables.length} tablas con fecha).`);
         openDataBindingModal();
       } catch (err) {
-        toast(`Error al actualizar: ${err.message}`);
-      }
+        if (request.isCurrent()) toast(`Error al actualizar: ${err.message}`);
+      } finally { request.finish(); }
     },
     'connect-live-pbi': async () => {
+      const request = beginModelRequest();
       const connectBtn = $('#modal')?.querySelector('[data-action="connect-live-pbi"]');
       const origContent = connectBtn ? connectBtn.innerHTML : '';
       if (connectBtn) {
@@ -419,7 +449,8 @@ document.addEventListener('click', e => {
       }
       toast('Buscando informes abiertos en Power BI Desktop…');
       try {
-        const instances = await discoverLivePbi();
+        const instances = await discoverLivePbi({ signal: request.signal });
+        if (!request.isCurrent()) return;
         if (!instances || !instances.length) {
           toast('No se detectó ninguna instancia abierta de Power BI Desktop. Abre tu archivo en Desktop y vuelve a intentarlo.');
           return;
@@ -431,13 +462,14 @@ document.addEventListener('click', e => {
         const first = instances[0];
         const repName = first.reportName ? `'${first.reportName}'` : `(${first.server})`;
         toast(`Conectando con Power BI Desktop ${repName}…`);
-        const catalog = await fetchLivePbiModel(first.server, first.database || '');
-        setPbipModel(catalog, true);
+        const catalog = await fetchLivePbiModel(first.server, first.database || '', { signal: request.signal });
+        if (!request.commit(catalog, true)) return;
         toast(`⚡ Conectado con éxito a '${catalog.reportName || catalog.modelName}' (${catalog.measures.length} medidas, ${catalog.dateTables.length} tablas con fecha).`);
         openDataBindingModal();
       } catch (err) {
-        toast(`Error al conectar con Power BI: ${err.message}`);
+        if (request.isCurrent()) toast(`Error al conectar con Power BI: ${err.message}`);
       } finally {
+        request.finish();
         if (connectBtn) {
           connectBtn.disabled = false;
           connectBtn.innerHTML = origContent;
@@ -445,6 +477,7 @@ document.addEventListener('click', e => {
       }
     },
     'select-live-instance': async () => {
+      const request = beginModelRequest();
       const srv = t.dataset.server;
       const db = t.dataset.db || '';
       const repName = t.dataset.report || 'Power BI';
@@ -452,15 +485,16 @@ document.addEventListener('click', e => {
       t.innerHTML = `${icon('sparkles', 13)} Conectando…`;
       toast(`Conectando con '${repName}'…`);
       try {
-        const catalog = await fetchLivePbiModel(srv, db);
-        setPbipModel(catalog, true);
+        const catalog = await fetchLivePbiModel(srv, db, { signal: request.signal });
+        if (!request.commit(catalog, true)) return;
         toast(`⚡ Conectado en vivo a '${catalog.reportName || catalog.modelName}' (${catalog.measures.length} medidas, ${catalog.dateTables.length} tablas con fecha).`);
         openDataBindingModal();
       } catch (err) {
+        if (!request.isCurrent()) return;
         toast(`Error al conectar: ${err.message}`);
         t.disabled = false;
         t.innerHTML = `${icon('sparkles', 13)} Conectar informe`;
-      }
+      } finally { request.finish(); }
     },
     'load-roundtrip-measure': () => {
       const mName = t.dataset.measure;
@@ -470,18 +504,20 @@ document.addEventListener('click', e => {
       if (rm?.configAnnotation) {
         try {
           const conf = typeof rm.configAnnotation === 'string' ? JSON.parse(rm.configAnnotation) : rm.configAnnotation;
-          setPendingRoundtripConf(conf);
+          const validation = validateImportedJSON(conf);
+          if (!validation.valid) throw new Error(validation.errors.slice(0, 3).join('; '));
+          setPendingRoundtripConf(validation.config);
           setPendingRoundtripName(rm.name);
           openModal(
             '¿Cargar diseño en el lienzo?',
             `Se sustituirá el diseño actual por la configuración de la tarjeta '${esc(rm.name)}'.`,
-            '<p class="field-help">Los cambios no guardados se reemplazarán por esta tarjeta. Puedes recuperar el diseño previo con Deshacer.</p>',
+            '<p class="field-help">Los cambios no guardados se reemplazarán por esta tarjeta. Puedes recuperar el diseño previo con Deshacer.</p>' + importWarningsHTML([...new Set([...(rm.configWarnings || []), ...validation.warnings])]),
             btn('cancel-roundtrip-load', 'Cancelar', null, 'button secondary') +
             `<button type="button" class="button primary" data-action="confirm-roundtrip-load">${icon('sparkles', 14)} <span>Cargar en lienzo</span></button>`,
             'roundtrip-confirm-modal'
           );
         } catch (err) {
-          toast(`No se pudo leer la configuración de '${esc(rm.name)}'.`);
+          toast(`No se pudo leer la configuración de '${rm.name}': ${err.message}`);
         }
       }
     },
@@ -556,7 +592,7 @@ document.addEventListener('click', e => {
   }
 
   try {
-    Promise.resolve(actions[a]?.()).catch(err => toast(err.message || 'No se pudo completar la acción.'));
+    return Promise.resolve(actions[a]?.()).catch(err => toast(err.message || 'No se pudo completar la acción.'));
   } catch (err) { toast(err.message || 'No se pudo completar la acción.'); }
 });
 
@@ -662,17 +698,14 @@ document.addEventListener('input', e => {
   const menu = document.getElementById('dropdown-menu-' + key);
   if (menu && getPbipModel()) {
     closeAllBindingDropdowns();
-    menu.innerHTML = renderBindingDropdown(key, input.value);
-    menu.classList.add('is-open');
-    input.setAttribute('aria-expanded', 'true');
-    menu.parentElement?.querySelector('.binding-dropdown-toggle')?.setAttribute('aria-expanded', 'true');
+    openBindingDropdown(key, false, input.value);
   }
 });
 
 // Eventos de cambio (confirmación de campos numéricos, select, checkbox)
 app.addEventListener('change', e => {
   const t = e.target;
-  if (t.type === 'number' && (t.dataset.key || t.dataset.elprop)) { commitNumber(t); return; }
+  if (t.type === 'number' && (t.dataset.key || t.dataset.elprop || t.dataset.dupval)) { commitNumber(t); return; }
   if (t.id === 'family-filter') { setFilter(t.value); const rail = $('#rail-cards'); if (rail) rail.innerHTML = railCards(); fitThumbs(); return; }
   if (t.dataset.appearance && getSelectedElement()) {
     if (t.tagName === 'SELECT') renderInspector();
@@ -703,7 +736,7 @@ $('#file-import')?.addEventListener('change', async e => {
   const f = e.target.files?.[0];
   e.target.value = '';
   if (!f) return;
-  if (f.size > 100000) { toast('El JSON es demasiado grande (máximo 100 KB).'); return; }
+  if (f.size > MAX_CONFIG_BYTES) { toast('El JSON es demasiado grande (máximo 512 KB).'); return; }
   try {
     const data = JSON.parse(await f.text());
     if (data.schema !== 'kpi-atelier' || data.version !== 1 || !data.config || typeof data.config !== 'object' || Array.isArray(data.config)) {
@@ -712,7 +745,11 @@ $('#file-import')?.addEventListener('change', async e => {
     const validation = validateImportedJSON(data);
     if (!validation.valid) throw new Error('Configuración inválida: ' + validation.errors.slice(0, 3).join('; '));
     const conf = sanitizeConfig(validation.config);
-    requestNavigation(() => { loadDesign(conf); toast('Configuración importada.'); });
+    requestNavigation(() => {
+      loadDesign(conf);
+      if (validation.warnings.length) openModal('Configuración importada con ajustes', 'Revisa los cambios realizados al cargar este diseño.', importWarningsHTML(validation.warnings), btn('close-modal', 'Entendido', 'check', 'button primary'));
+      else toast('Configuración importada.');
+    });
   } catch (err) {
     toast(err.message || 'No se pudo leer el archivo.');
   }

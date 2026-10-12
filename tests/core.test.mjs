@@ -366,9 +366,9 @@ test('SPEC-001: REQ-002 applies REMOVEFILTERS and TREATAS in __RawSeries with co
 test('SPEC-001: REQ-003 serializes trend coordinates with 0.000 and en-US',()=>{
  const dax=generateDAX({...BASE,showMax:true,showMin:true});
  assert.doesNotMatch(dax,/0\.###/);
- assert.match(dax,/VAR __chartFirst = FORMAT \( MINX \( __Coordinates, \[__X\] \), "0\.000", "en-US" \)/);
- assert.match(dax,/VAR __chartLast = FORMAT \( MAXX \( __Coordinates, \[__X\] \), "0\.000", "en-US" \)/);
- const fmtCalls=[...dax.matchAll(/FORMAT\s*\([^,]+,\s*"0\.000",\s*"en-US"\s*\)/g)];
+ assert.match(dax,/VAR __chartFirst = FORMAT \( MINX \( __Coordinates, \[__X\] \), "0\.000", __Svg_Locale \)/);
+ assert.match(dax,/VAR __chartLast = FORMAT \( MAXX \( __Coordinates, \[__X\] \), "0\.000", __Svg_Locale \)/);
+ const fmtCalls=[...dax.matchAll(/FORMAT\s*\([^,]+,\s*"0\.000",\s*__Svg_Locale\s*\)/g)];
  assert.ok(fmtCalls.length>=14,'All dynamic SVG coordinates use 0.000 en-US');
  lexDax(dax);
 });
@@ -527,15 +527,16 @@ test('Encoding resilience: healCorruptedText and sanitizeConfig repair Unicode r
 });
 
 test('Multi-visual and duplicate DAX generation: isolated trends, independent deltas, pure DAX, variable integrity', () => {
- // 1. Multi-chart card: trend (Sales) + trend_copy1 (Cost)
+ // 1. Multi-chart card: trend (Sales) + value/trend_copy1 (Cost)
  const multiChartConf = sanitizeConfig({
   ...BASE,
   measure: 'Total Ventas',
   dateTable: 'Calendario',
   dateColumn: 'Fecha',
   elements: {
+   value_copy1: {measure:'Coste Total'},
    trend_copy1: {
-    measure: 'Coste Total',
+    measure: 'Legacy ignored',
     dateTable: 'Calendario',
     dateColumn: 'Fecha',
     chartKind: 'trend',
@@ -713,34 +714,43 @@ test('Incomplete DAX exports require explicit opt-in and do not substitute a mai
  lexDax(dax);
 });
 
-test('Duplicate objectives and donut charts calculate with their explicit references, including blank exports',()=>{
- const c=sanitizeConfig({...BASE,elements:{goalLabel_copy1:{targetMeasure:'Plan propio'},progressLabel_copy1:{targetMeasure:'250'},progress_copy1:{targetMeasure:'Plan propio'},trend_copy1:{chartKind:'donut',measure:'Unidades'}}});
+test('Related variations, objectives and donut charts follow their value and the shared target, including empty values',()=>{
+ const c=sanitizeConfig({...BASE,targetMeasure:'Plan compartido',elements:{value_copy1:{measure:'Unidades'},delta_copy1:{measure:'Ignorada',comparison:'target'},goalLabel_copy1:{targetMeasure:'Plan obsoleto'},progressLabel_copy1:{targetMeasure:'250'},progress_copy1:{targetMeasure:'Plan obsoleto'},trend_copy1:{chartKind:'donut',measure:'Obsoleta'}}});
  const dax=generateDAX(c);
- assert.match(dax,/VAR __Target_goalLabel_copy1 = IF \( __HasDates, CALCULATE \( \[Plan propio\]/);
- assert.match(dax,/VAR __Target_progressLabel_copy1 = 250/);
+ assert.match(dax,/VAR __Target_goalLabel_copy1 = __Objective_goalLabel_copy1/);
+ assert.match(dax,/VAR __Target_progressLabel_copy1 = __Objective_goalLabel_copy1/);
  assert.match(dax,/VAR __Cur_trend_copy1 = IF \( __HasDates, CALCULATE \( \[Unidades\]/);
+ assert.match(dax,/VAR __Cur_delta_copy1 = IF \( __HasDates, CALCULATE \( \[Unidades\]/);
+ assert.match(dax,/VAR __Cur_progress_copy1 = IF \( __HasDates, CALCULATE \( \[Unidades\]/);
+ assert.doesNotMatch(dax,/Ignorada|Obsoleta/);
+ assert.match(dax,/CALCULATE \( \[Plan obsoleto\]/);
  assert.match(dax,/__progressWidth_progress_copy1/);
  assert.match(dax,/__progressWidth_trend_copy1/);
  lexDax(dax);
- c.elements.goalLabel_copy1.targetMeasure='';c.elements.trend_copy1.measure='';
+ c.elements.value_copy1.measure='';
  const incomplete=generateDAX(c,{allowIncomplete:true});
- assert.match(incomplete,/VAR __Target_goalLabel_copy1 = BLANK \(\)/);
+ assert.match(incomplete,/VAR __Cur_progress_copy1 = BLANK \(\)/);
  assert.match(incomplete,/VAR __Cur_trend_copy1 = BLANK \(\)/);
- c.measureName='Plan propio';
+ c.measureName='Plan compartido';
  assert.ok(checks(c).some(x=>x.field==='measureName'&&x.text.includes('circular')));
 });
 
 
-test('Each copied trend owns dates, extent and rolling data window for its own calendar',()=>{
- const c=sanitizeConfig({...BASE,elements:{trend_copy1:{measure:'Coste',dateTable:'Fechas costes',dateColumn:'Dia'},trend_copy2:{measure:'Pedidos',dateTable:'Fechas pedidos',dateColumn:'Fecha'}}});
+test('Each copied trend uses the main calendar, including filters and its own rolling data window',()=>{
+ const c=sanitizeConfig({...BASE,elements:{value_copy1:{measure:'Coste'},value_copy2:{measure:'Pedidos'},trend_copy1:{measure:'Ignorada',dateTable:'Fechas costes',dateColumn:'Dia'},trend_copy2:{measure:'Pedidos',dateTable:'Fechas pedidos',dateColumn:'Fecha'}}});
  const dax=generateDAX(c);
- for(const [id,table,col,metric] of [['trend_copy1','Fechas costes','Dia','Coste'],['trend_copy2','Fechas pedidos','Fecha','Pedidos']]){
-  assert.ok(dax.includes(`VAR __HasCalendarFilter_${id} = ISFILTERED ( '${table}' )`));
-  assert.ok(dax.includes(`LASTNONBLANK ( '${table}'[${col}], [${metric}] )`));
-  assert.ok(dax.includes(`VAR __Start_${id} = MINX ( __Dates_${id}, '${table}'[${col}] )`));
+ assert.doesNotMatch(dax,/Fechas costes|Fechas pedidos/);
+ for(const [id,metric] of [['trend_copy1','Coste'],['trend_copy2','Pedidos']]){
+  const table=c.dateTable,col=c.dateColumn;
+  assert.ok(dax.includes(`VAR __Dates_${id} = __Dates`));
+  assert.ok(dax.includes(`CALCULATE ( [${metric}], REMOVEFILTERS ( '${table}' )`));
+  assert.ok(dax.includes(`VAR __Start_${id} = __Start`));
   assert.ok(dax.includes(`FILTER ( __Dates_${id}, __HasDates_${id} && '${table}'[${col}] >= __WindowStart_${id} )`));
   assert.ok(dax.includes(`SWITCH ( TRUE (), __Span_${id} <= 24`));
  }
+ const changed=generateDAX({...c,dateTable:'Calendario compartido nuevo',dateColumn:'Día real',elements:{...c.elements,trend_copy1:{...c.elements.trend_copy1,dateTable:'Ignorado',dateColumn:'Ignorada'}}});
+ assert.doesNotMatch(changed,/Ignorado|Ignorada/);
+ assert.ok(changed.includes("REMOVEFILTERS ( 'Calendario compartido nuevo' ), TREATAS ( __GroupDates, 'Calendario compartido nuevo'[Día real] )"));
  lexDax(dax);
 });
 
@@ -748,7 +758,7 @@ test('Copied status exports dynamic measure-driven labels and opacities with BLA
  const c=sanitizeConfig({...BASE,type:'status',elements:{status_copy1:{measure:'SLA propio',direction:'down',goodThreshold:.03,warnThreshold:.05,statusGood:'Correcto propio',statusWarn:'Alerta propia',statusBad:'Error propio'}}});
  const dax=generateDAX(c);
  assert.match(dax,/VAR __StatusValue_status_copy1 = IF \( __HasDates, CALCULATE \( \[SLA propio\]/);
- assert.match(dax,/ISBLANK \( __StatusValue_status_copy1 \), 0, __StatusValue_status_copy1 <= 0.03, 3/);
+ assert.match(dax,/ISBLANK \( __StatusValue_status_copy1 \), 0, __StatusValue_status_copy1 <= __Cfg_GoodThreshold_status_copy1, 3/);
  assert.match(dax,/VAR __status_status_copy1 = SWITCH \( __StatusCode_status_copy1, 3, "Correcto propio"/);
  assert.match(dax,/VAR __statusGoodOpacity_status_copy1 = IF \( __StatusCode_status_copy1 = 3/);
  assert.ok(dax.slice(dax.indexOf('RETURN\n')).includes('__status_status_copy1'));

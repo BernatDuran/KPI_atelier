@@ -19,9 +19,19 @@ export const ELEMENTS={
  period:{label:'Período',kind:'text',sizeKey:'periodSize',defaultSize:9,toggle:'showFooter'}
 };
 export const ELEMENT_IDS=Object.keys(ELEMENTS);
+export const MAX_DUPLICATES=8;
+export const MAX_DUPLICATES_PER_TYPE=2;
 // Top of the layer panel is the front of the card. Defaults match HTML paint order.
 export const DEFAULT_LAYER_ORDER=['period','footer','referenceValue','referenceLabel','progress','progressLabel','goalLabel','trend','status','compareLabel','delta','subtitle','value','title','icon','eyebrow'];
 export const SIZE_LIMITS={text:[6,140],icon:[10,120],chart:[24,240],bar:[2,40]};
+const DECORATIVE_COPIES=new Set(['eyebrow','icon','title','subtitle','compareLabel','referenceLabel','footer','period']);
+const DATA_PROPERTIES=new Set(['measure','format','decimals','suffix','unit','currency','targetMeasure','compareMeasure','deltaMode','comparison','direction','statusGood','statusWarn','statusBad','goodThreshold','warnThreshold','dateTable','dateColumn','chartKind','trendStyle','trendCurve','areaFill','granularity','fillOpacity','lineWidth','showMax','showMin','showDot','showMarkerGuides','zeroBase','trendGrid','donutThickness','donutLabel']);
+export function unsupportedCopyDataProperties(id,state){
+ const def=resolveElementDef(id);
+ if(!def?.isDuplicate||!DECORATIVE_COPIES.has(def.baseId))return [];
+ // Comparison labels use their comparison mode only to select the automatic text.
+ return Object.keys(state||{}).filter(key=>DATA_PROPERTIES.has(key)&&!(def.baseId==='compareLabel'&&key==='comparison'));
+}
 export const clamp=(v,min,max)=>Math.max(min,Math.min(max,v));
 export const snap=(v,step=1)=>Math.round(v/step)*step;
 export function resolveElementDef(id){
@@ -47,7 +57,7 @@ export function sanitizeElements(raw){
   el.hidden=p.hidden===true;el.deleted=p.deleted===true;
   if(typeof p.text==='string')el.text=p.text.slice(0,160);
   if(typeof p.icon==='string')el.icon=p.icon.slice(0,40);
-  if(Number.isFinite(Number(p.size)))el.size=clamp(Math.round(Number(p.size)),6,240);
+  if(Number.isFinite(Number(p.size)))el.size=clamp(Math.round(Number(p.size)),...SIZE_LIMITS[ELEMENTS[id].kind]);
   if(typeof p.measure==='string')el.measure=p.measure.slice(0,120);
   if(typeof p.format==='string'&&['currency','percent','number'].includes(p.format))el.format=p.format;
   if(Number.isFinite(Number(p.decimals)))el.decimals=clamp(Math.round(Number(p.decimals)),0,3);
@@ -64,12 +74,16 @@ export function sanitizeElements(raw){
   if(typeof p.statusBad==='string')el.statusBad=p.statusBad.slice(0,80);
   if(Number.isFinite(Number(p.goodThreshold)))el.goodThreshold=Number(p.goodThreshold);
   if(Number.isFinite(Number(p.warnThreshold)))el.warnThreshold=Number(p.warnThreshold);
-  if(typeof p.dateTable==='string')el.dateTable=p.dateTable.slice(0,120);
-  if(typeof p.dateColumn==='string')el.dateColumn=p.dateColumn.slice(0,120);
+  // Duplicate charts follow the card calendar; discard old independent dates on import.
+  if(!ELEMENTS[id].isDuplicate||ELEMENTS[id].baseId!=='trend'){
+   if(typeof p.dateTable==='string')el.dateTable=p.dateTable.slice(0,120);
+   if(typeof p.dateColumn==='string')el.dateColumn=p.dateColumn.slice(0,120);
+  }
   if(typeof p.chartKind==='string'&&['trend','donut'].includes(p.chartKind))el.chartKind=p.chartKind;
   if(typeof p.trendStyle==='string'&&['area','line','bars'].includes(p.trendStyle))el.trendStyle=p.trendStyle;
   if(typeof p.trendCurve==='string'&&['smooth','linear','step'].includes(p.trendCurve))el.trendCurve=p.trendCurve;
   if(typeof p.areaFill==='string'&&['gradient','solid'].includes(p.areaFill))el.areaFill=p.areaFill;
+  if(typeof p.granularity==='string'&&['auto','day','week','month'].includes(p.granularity))el.granularity=p.granularity;
   if(Number.isFinite(Number(p.fillOpacity)))el.fillOpacity=clamp(Number(p.fillOpacity),0,1);
   if(Number.isFinite(Number(p.lineWidth)))el.lineWidth=clamp(Number(p.lineWidth),1,6);
   if(typeof p.showMax==='boolean')el.showMax=p.showMax;
@@ -82,9 +96,54 @@ export function sanitizeElements(raw){
   if(typeof p.donutLabel==='boolean')el.donutLabel=p.donutLabel;
   const frame=sanitizeFrame(p.frame);if(frame)el.frame=frame;
   result[id]={...el,...sanitizeAppearance(p,id)};
+  for(const key of unsupportedCopyDataProperties(id,result[id]))delete result[id][key];
  }return result;
 }
 export function elementState(c,id){return {x:0,y:0,width:0,hidden:false,deleted:false,...c.elements?.[id]};}
+// Related copies follow the value with the same number, or own an explicit measure.
+export function usesValueBinding(c,id){
+ const def=resolveElementDef(id),base=def?.baseId||id;
+ return ['delta','goalLabel','progressLabel','progress','trend','status'].includes(base);
+}
+export function valueBinding(c,id){
+ const def=resolveElementDef(id),suffix=def?.isDuplicate?id.match(/_copy\d+$/)?.[0]:null;
+ const candidate=suffix?`value${suffix}`:null;
+ const owner=candidate&&c.elements?.[candidate]&&!elementState(c,candidate).deleted?candidate:def?.isDuplicate?id:'value';
+ return {id:owner,field:owner==='value'?'measure':owner===id?`${id}__measure`:owner,measure:owner==='value'?c.measure:String(c.elements?.[owner]?.measure??''),state:owner==='value'?{}:elementState(c,owner)};
+}
+export function requiresOwnValueBinding(c,id){const def=resolveElementDef(id);return def?.isDuplicate&&usesValueBinding(c,id)&&def.baseId!=='goalLabel'&&!(def.baseId==='delta'&&(elementState(c,id).comparison||c.comparison)==='none')&&valueBinding(c,id).id===id;}
+export function usesGoalBinding(c,id){
+ const def=resolveElementDef(id),base=def?.baseId||id,st=elementState(c,id);
+ return ['goalLabel','progressLabel','progress'].includes(base)||base==='trend'&&(st.chartKind||c.chartKind)==='donut'||base==='delta'&&(st.comparison||c.comparison)==='target';
+}
+// One objective per numbered family, shared by its label, progress, ring and comparison.
+export function goalBinding(c,id){
+ const def=resolveElementDef(id),suffix=def?.isDuplicate?id.match(/_copy\d+$/)?.[0]:null;
+ if(!suffix)return {id:'goalLabel',field:'targetMeasure',measure:c.targetMeasure};
+ const candidates=['goalLabel','progress','progressLabel','trend','delta'].map(base=>base+suffix)
+  .filter(key=>c.elements?.[key]&&!elementState(c,key).deleted&&usesGoalBinding(c,key));
+ const owner=candidates[0]||id;
+ const configured=candidates.find(key=>c.elements[key].targetMeasure!==undefined);
+ return {id:owner,field:`${owner}__targetMeasure`,measure:configured?String(c.elements[configured].targetMeasure):c.targetMeasure};
+}
+export function linkedElements(c){
+ const elements={...c.elements};
+ for(const [id,st] of Object.entries(elements)){
+  const def=resolveElementDef(id);
+  if(!def?.isDuplicate)continue;
+  const ignored=unsupportedCopyDataProperties(id,st),associated=usesValueBinding(c,id);
+  if(!ignored.length&&!associated)continue;
+  elements[id]={...st};
+  for(const key of ignored)delete elements[id][key];
+  if(associated&&(def.baseId==='goalLabel'||valueBinding(c,id).id!==id))delete elements[id].measure;
+  if(usesGoalBinding(c,id)){
+   const target=goalBinding(c,id);
+   if(id===target.id)elements[id].targetMeasure=target.measure;
+   else delete elements[id].targetMeasure;
+  }
+ }
+ return elements;
+}
 export function elementSize(c,id){
  resolveElementDef(id);
  const e=ELEMENTS[id];
@@ -131,11 +190,22 @@ export function elementAvailable(c,id){
  if(['referenceLabel','referenceValue'].includes(id))return c.type==='comparison'&&c.comparison!=='none';
  return true;
 }
-export function elementEnabled(c,id){const key=ELEMENTS[id]?.toggle;return elementAvailable(c,id)&&(!key||c[key]!==false);}
+export function elementEnabled(c,id){const key=resolveElementDef(id)?.toggle;return elementAvailable(c,id)&&(!key||c[key]!==false);}
+// Hidden layers retain their calculations; disabled families/toggles and deleted
+// layers do not participate in the exported card or its data dependencies.
+export function activeDuplicateIds(c){return Object.keys(c.elements||{}).filter(id=>resolveElementDef(id)?.isDuplicate&&elementEnabled(c,id)&&!elementState(c,id).deleted);}
 export function elementVisible(c,id){const state=elementState(c,id);return elementEnabled(c,id)&&!state.hidden&&!state.deleted;}
 export function updateElement(c,id,patch){
+ if(patch?.deleted===false&&restorationIssue(c,id))return c;
  let nextElements = { ...c.elements, [id]: { ...elementState(c, id), ...patch } };
+ if(resolveElementDef(id)?.isDuplicate&&resolveElementDef(id).baseId==='trend'){
+  delete nextElements[id].dateTable;delete nextElements[id].dateColumn;
+ }
  let nextConfig = { ...c, elements: nextElements };
+ if(patch?.deleted===true&&resolveElementDef(id)?.isDuplicate&&usesGoalBinding(c,id)){
+  const oldGoal=goalBinding(c,id),remaining=Object.keys(nextElements).find(key=>!nextElements[key].deleted&&key.match(/_copy\d+$/)?.[0]===id.match(/_copy\d+$/)?.[0]&&usesGoalBinding(nextConfig,key));
+  if(oldGoal.id===id&&remaining){const owner=goalBinding(nextConfig,remaining).id;nextConfig.elements[owner]={...nextConfig.elements[owner],targetMeasure:oldGoal.measure};}
+ }
  if (patch && 'comparison' in patch) {
   const newComp = patch.comparison;
   const twinId = getComparisonTwinId(id, c);
@@ -157,6 +227,7 @@ export function updateElement(c,id,patch){
    nextConfig.comparison = newComp;
   }
  }
+ nextConfig.elements=linkedElements(nextConfig);
  return nextConfig;
 }
 export function sanitizeFrame(raw){
@@ -188,7 +259,30 @@ export function resizeElement(c,id,delta,axis='size',measuredWidth=100,step=1){
  if(def?.isDuplicate){return updateElement(c,id,{size:newSize});}
  return {...c,[def.sizeKey]:newSize};
 }
-export function restoreElement(c,id){const def=ELEMENTS[id];const n=updateElement(c,id,{hidden:false,deleted:false});if(def.toggle)n[def.toggle]=true;return n;}
+export function restorationIssue(c,id){
+ const def=resolveElementDef(id);
+ if(!def)return 'El elemento no pertenece al catálogo de la tarjeta.';
+ if(!def.isDuplicate||c.elements?.[id]&&!elementState(c,id).deleted)return null;
+ const copies=Object.keys(c.elements||{}).filter(key=>resolveElementDef(key)?.isDuplicate&&!elementState(c,key).deleted);
+ if(copies.length>=MAX_DUPLICATES)return `La tarjeta admite como máximo ${MAX_DUPLICATES} copias. Elimina otra copia antes de restaurarla.`;
+ if(copies.filter(key=>resolveElementDef(key).baseId===def.baseId).length>=MAX_DUPLICATES_PER_TYPE)return `Se admiten como máximo ${MAX_DUPLICATES_PER_TYPE} copias de ${ELEMENTS[def.baseId].label.toLowerCase()}. Elimina otra de ese tipo antes de restaurarla.`;
+ return null;
+}
+export function restoreElement(c,id){
+ const def=resolveElementDef(id);if(restorationIssue(c,id))return c;
+ const n=updateElement(c,id,{hidden:false,deleted:false});if(def.toggle)n[def.toggle]=true;return n;
+}
+export function resetElement(c,id,template){
+ const def=resolveElementDef(id);if(restorationIssue(c,id))return c;
+ const state={...template.elements?.[id],x:0,y:0,width:0,hidden:false,deleted:false};
+ // A copy stores its own size. Writing its base sizeKey would resize the original.
+ if(def.isDuplicate)state.size=elementSize(template,def.baseId);
+ const configured={...c,elements:{...c.elements,[id]:state}};
+ // Resetting an inactive copy must not enable the original's shared toggle.
+ const next=def.isDuplicate?updateElement(configured,id,{hidden:false,deleted:false}):restoreElement(configured,id);
+ if(!def.isDuplicate)next[def.sizeKey]=elementSize(template,id);
+ return next;
+}
 export function releaseElement(c,id){const p={...elementState(c,id),x:0,y:0,width:0};delete p.frame;return {...c,elements:{...c.elements,[id]:p}};}
 export function sanitizeLayerOrder(raw){
  const known=Array.isArray(raw)?raw.filter(id=>ELEMENT_IDS.includes(id)||resolveElementDef(id)):[];

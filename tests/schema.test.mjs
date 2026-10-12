@@ -55,7 +55,7 @@ test('validateCardConfig detects legacy geometryVersion 1 with warning', () => {
   const legacy = { ...BASE, geometryVersion: 1 };
   const result = validateCardConfig(legacy);
   assert.equal(result.valid, true);
-  assert.ok(result.warnings.some(w => w.includes('version 1')));
+  assert.ok(result.warnings.some(w => w.includes('versión 1')&&w.includes('geometría actual')));
 });
 
 test('validateCardConfig warns on unknown properties in strict mode', () => {

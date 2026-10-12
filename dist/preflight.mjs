@@ -1,5 +1,5 @@
-import { checks, needsDate, needsGoal, needsCompare } from './model.mjs';
-import { resolveElementDef, elementState } from './elements.mjs';
+import { checks, needsDate, needsMainGoal, needsCompare } from './model.mjs';
+import { resolveElementDef, elementState, activeDuplicateIds,goalBinding,usesGoalBinding,requiresOwnValueBinding } from './elements.mjs';
 import { isNumericLiteral } from './dax.mjs';
 
 const normalized = value => String(value || '').trim().toLocaleLowerCase('es');
@@ -8,11 +8,14 @@ const bareMeasure = value => String(value || '').trim().replace(/^\[|\]$/g, '').
 export function measureDestination(c, model) {
   const existing = (model?.measures || []).find(m => normalized(m.name) === normalized(bareMeasure(c.measureName)));
   const tables = model?.tables || [];
-  const table = existing?.table || tables.find(t => normalized(t) === normalized(c.targetTable)) ||
-    model?.measures?.find(m => m.table)?.table ||
+  const requested = String(c.targetTable || '').trim();
+  const table = existing?.table || (requested ? tables.find(t => normalized(t) === normalized(requested)) || requested :
     tables.find(t => /^_?m(easure|edida)s?$/i.test(t)) ||
-    tables.find(t => /^_?(kpi|metric)/i.test(t)) || tables[0] || '_Measures';
-  return { existing, table };
+    tables.find(t => /^_?(kpi|metric)/i.test(t)) ||
+    model?.measures?.find(m => tables.includes(m.table))?.table || tables[0] || '');
+  const error = model && !existing && (!table || !tables.some(t => normalized(t) === normalized(table)))
+    ? 'La tabla de destino no existe en el modelo conectado. Elige una tabla disponible.' : '';
+  return { existing, table, error, automatic: !existing && !requested };
 }
 
 // The same catalog checks are used by the review and the write action.
@@ -47,25 +50,23 @@ export function reviewMeasure(c, model) {
   };
 
   addMeasure('Medida principal', c.measure, 'measure');
-  if (needsGoal(c) || (needsCompare(c) && c.comparison === 'target')) addMeasure('Objetivo', c.targetMeasure, 'targetMeasure', true);
+  if (needsMainGoal(c)) addMeasure('Objetivo principal', c.targetMeasure, 'targetMeasure', true);
   if (needsCompare(c) && c.comparison === 'custom') addMeasure('Comparación', c.compareMeasure, 'compareMeasure');
   if (needsDate(c)) addDate('Calendario · columna de fecha', c.dateTable, c.dateColumn, 'dateTable');
 
-  for (const id of Object.keys(c.elements || {})) {
+  for (const id of activeDuplicateIds(c)) {
     const def = resolveElementDef(id);
     const st = elementState(c, id);
     if (!def?.isDuplicate || st.deleted) continue;
-    if (['value', 'trend', 'delta', 'referenceValue'].includes(def.baseId) || def.baseId === 'status' && st.measure?.trim()) {
-      addMeasure(def.label, st.measure, ['trend','delta'].includes(def.baseId) ? `${id}__measure` : id);
-    }
-    if (['goalLabel', 'progressLabel', 'progress'].includes(def.baseId) || def.baseId === 'delta' && (st.comparison || c.comparison) === 'target') {
-      addMeasure(`Objetivo · ${def.label}`, st.targetMeasure, id, true);
+    if (requiresOwnValueBinding(c,id)||['value','referenceValue'].includes(def.baseId)) {
+      addMeasure(def.label, st.measure, requiresOwnValueBinding(c,id) ? `${id}__measure` : id);
     }
     if (def.baseId === 'delta' && (st.comparison || c.comparison) === 'custom') {
       addMeasure(`Comparación · ${def.label}`, st.compareMeasure, id);
     }
-    if (def.baseId === 'trend' && (st.chartKind || c.chartKind) !== 'donut') {
-      addDate(`Calendario · ${def.label}`, st.dateTable, st.dateColumn, `${id}__dateTable`);
+    if(usesGoalBinding(c,id)){
+      const goal=goalBinding(c,id);
+      if(!fields[goal.field])addMeasure(`Objetivo · Copia ${id.match(/_copy(\d+)$/)?.[1]}`,goal.measure,goal.field,true);
     }
   }
 
@@ -73,9 +74,11 @@ export function reviewMeasure(c, model) {
     type: r.label, detail: r.empty ? 'Falta configurar esta referencia.' : `${r.value} no se encuentra en el modelo conectado.`, field: r.field
   }));
   const unverified = references.filter(r => r.status === 'unknown');
-  const { existing, table } = measureDestination(c, model);
+  const { existing, table, error: destinationError, automatic } = measureDestination(c, model);
+  if (destinationError) issues.push({ level: 'error', text: destinationError, field: 'targetTable' });
+  fields.targetTable = { status: destinationError ? 'error' : model ? 'ok' : 'unknown', empty: !table, value: table };
   const errors = issues.filter(x => x.level === 'error');
   fields.measureName = { status: errors.some(x => x.field === 'measureName') ? 'error' : 'ok', empty: !String(c.measureName || '').trim(), value: c.measureName };
-  return { references, fields, issues, missing, unverified, existing, table,
+  return { references, fields, issues, missing, unverified, existing, table, automatic,
     valid: errors.length === 0 && missing.length === 0 && unverified.length === 0 };
 }

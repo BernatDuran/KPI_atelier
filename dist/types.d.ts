@@ -73,12 +73,15 @@ export interface ElementCustomization extends ElementAppearance {
   statusBad?: string;
   goodThreshold?: number;
   warnThreshold?: number;
+  /** @deprecated Legacy imports only. Charts use CardConfig.dateTable. */
   dateTable?: string;
+  /** @deprecated Legacy imports only. Charts use CardConfig.dateColumn. */
   dateColumn?: string;
   chartKind?: ChartKind;
   trendStyle?: TrendStyle;
   trendCurve?: TrendCurve;
   areaFill?: AreaFill;
+  granularity?: GranularityMode;
   fillOpacity?: number;
   lineWidth?: number;
   showMax?: boolean;
@@ -128,6 +131,7 @@ export interface CardConfig {
   // Measure and Model Data Bindings
   measure: string;
   measureName: string;
+  targetTable: string;
   dateTable: string;
   dateColumn: string;
   targetMeasure: string;
@@ -272,16 +276,24 @@ export interface ValidationResult {
 export interface SavedDesign {
   id: string;
   name: string;
-  timestamp?: number;
+  /** ISO timestamp; legacy library entries may omit it. */
+  date?: string;
+  draft?: boolean;
+  normalizationWarnings?: string[];
+  /** Transient optimistic concurrency revision; never saved in the library. */
+  storageRevision?: string;
+  /** Original stored entry used for optimistic concurrency; never persisted. */
+  storageRevision?: string;
   config: CardConfig;
 }
 
 export interface MeasureCatalogEntry {
   name: string;
-  table?: string;
-  dataType?: string;
-  dax?: string;
-  description?: string;
+  table: string;
+  expression?: string;
+  formatString?: string;
+  configAnnotation?: Partial<CardConfig> | null;
+  configWarnings?: string[];
 }
 
 export interface ColumnCatalogEntry {
@@ -299,16 +311,85 @@ export interface TableCatalogEntry {
 }
 
 export interface ModelCatalog {
-  tables: Record<string, TableCatalogEntry>;
-  dateTables: string[];
-  allMeasures: string[];
+  modelName: string;
+  reportName?: string;
+  server?: string;
+  database?: string;
+  databaseId?: string;
+  isLiveConnection?: boolean;
+  tables: string[];
+  measures: MeasureCatalogEntry[];
+  dateTables: DateTableCatalogEntry[];
+}
+
+export interface DateTableCatalogEntry {
+  name: string;
+  dateColumns: string[];
+  isMarkedDateTable?: boolean;
+  primaryDateColumn?: string | null;
+  isLikelyCalendar?: boolean;
 }
 
 export interface LivePbiInstance {
+  pid: number;
   port: number;
-  dbName: string;
-  modelName: string;
-  source: string;
+  server: string;
+  database?: string;
+  reportName?: string;
+  modelName?: string;
+}
+
+export interface MeasureWritePayload {
+  server: string;
+  database: string;
+  tableName: string;
+  measureName: string;
+  daxExpression: string;
+  expectedExpression: string | null;
+  formatString: string;
+  configAnnotation: CardConfig;
+}
+
+export interface MeasureWriteResult {
+  success: boolean;
+  measureName: string;
+  tableName: string;
+  isNew: boolean;
+}
+
+export interface ModelRequestSession {
+  readonly signal: AbortSignal;
+  isCurrent(): boolean;
+  commit(catalog: ModelCatalog, autoAssign?: boolean): boolean;
+  finish(): void;
+}
+
+export interface DesignSession {
+  context: { designRevision?: number };
+  revision: number;
+}
+
+export interface MeasureWriteTarget {
+  readonly server: string;
+  readonly database: string;
+  readonly tableName: string;
+  readonly measureName: string;
+  readonly reportName: string;
+}
+
+export interface MeasureWriteApproval {
+  server: string;
+  database: string;
+  table: string;
+  expression: string | null;
+}
+
+export interface BridgeApiError extends Error {
+  status?: number;
+  code?: string;
+  outcomeUnknown?: boolean;
+  diagnostic?: string;
+  requestId?: string;
 }
 
 export interface AlignmentGuide {
@@ -320,12 +401,12 @@ export interface AlignmentGuide {
 
 declare global {
   interface EventTarget {
-    value?: any;
+    value?: string;
     dataset?: DOMStringMap;
     closest?: (selector: string) => HTMLElement | null;
     matches?: (selector: string) => boolean;
     id?: string;
-    focus?: (options?: any) => void;
+    focus?: (options?: FocusOptions) => void;
     tagName?: string;
     isContentEditable?: boolean;
     disabled?: boolean;
@@ -338,13 +419,13 @@ declare global {
     selectionEnd?: number;
   }
   interface HTMLElement {
-    value?: any;
+    value?: string;
     disabled?: boolean;
     select?: () => void;
-    focus?: (options?: any) => void;
-    setSelectionRange?: (...args: any[]) => void;
+    focus?: (options?: FocusOptions) => void;
+    setSelectionRange?: (start: number, end: number, direction?: 'forward' | 'backward' | 'none') => void;
   }
   interface Window {
-    showDirectoryPicker?: (options?: any) => Promise<any>;
+    showDirectoryPicker?: (options?: { mode?: 'read' | 'readwrite' }) => Promise<FileSystemDirectoryHandle>;
   }
 }

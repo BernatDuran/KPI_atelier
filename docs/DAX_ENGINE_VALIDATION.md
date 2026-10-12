@@ -1,5 +1,9 @@
 # Validación DAX en motor Power BI
 
+La revisión más reciente de los vínculos de copias, objetivos independientes y formatos técnicos se documenta en [Vínculos coherentes de las copias](VALIDACION_VINCULOS_COPIAS.md), con 49 consultas correctas de 49.
+
+Registro histórico de la primera validación. Para el contrato actual de calendario compartido y copias, consulta [el cierre 1.4.3](REMEDIACION_1_4_3.md) y [sus 47 resultados con hashes](VALIDACION_DAX_1_4_3.json).
+
 Fecha: 2026-10-12. Se ejecutó el DAX generado por la versión de desarrollo en el motor tabular de Power BI Desktop, conectado explícitamente al modelo AdventureWorksDW de prueba.
 
 **Resultado: 29 consultas correctas de 29.** Cada consulta devolvió únicamente `pass = true`; no se guardaron cifras ni resultados de negocio.

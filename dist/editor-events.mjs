@@ -2,16 +2,24 @@ import { render } from './shell-ui.mjs';
 import { resizeCard } from './layout.mjs';
 import { sanitizeConfig } from './model.mjs';
 import { ELEMENTS, SIZE_LIMITS, elementState, elementSize, elementVisible, updateElement, moveElement, clamp, detachElement, resolveElementDef } from './elements.mjs';
-import { $, getC, setC, getView, getSelectedElement, getCardSelected, getSelectedElements, getPbipModel, getUndo, getRedo, getContextPreview, getMoveStep, getFormatPainterSource, setFormatPainterSource, getGesture, setGesture, toast, record, toggleRailCollapsed } from './state.mjs';
+import { $, getC, setC, getView, setZoom, getSelectedElement, getCardSelected, getSelectedElements, getPbipModel, getUndo, getRedo, getContextPreview, getMoveStep, getFormatPainterSource, setFormatPainterSource, getGesture, setGesture, toast, record, toggleRailCollapsed } from './state.mjs';
 import { measureElementFrame, renderCanvasBar, refreshCard, flashGuides, renderGuides, selectElement, selectCard, deselect, directChange, elementAction, copySelectedElements, pasteElements, applyFormatPainter, startCardGesture, finishGesture } from './canvas.mjs';
 import { updateHistoryButtons, syncElementControls, syncCardControls } from './inspector.mjs';
-import { renderBindingDropdown, closeAllBindingDropdowns, applyBindingFieldValue, shortcutsModal } from './modals.mjs';
+import { closeAllBindingDropdowns, applyBindingFieldValue, shortcutsModal } from './modals.mjs';
+import { openBindingDropdown, selectBindingOption } from './binding-ui.mjs';
+import { renderStage, panContext,setContextManualZoom } from './canvas.mjs';
 
 /** Pointer gestures and desktop keyboard navigation share the same editor operations. */
 export function installEditorEvents(app, focusBindingElement) {
+let contextDrag=null;
 // Gestos con el puntero
 app.addEventListener('pointerdown', e => {
-  if (getContextPreview() || e.button !== 0) return;
+  if(e.button!==0)return;
+  if(getContextPreview()){
+    const stage=e.target.closest?.('#stage.can-pan');
+    if(stage){contextDrag={pointer:e.pointerId,x:e.clientX,y:e.clientY};stage.classList.add('is-panning');stage.querySelector('.context-pan-viewport')?.focus({preventScroll:true});app.setPointerCapture?.(e.pointerId);e.preventDefault();}
+    return;
+  }
   const cardHandle = e.target.closest('[data-card-resize]');
   if (cardHandle) { startCardGesture(e, cardHandle.dataset.cardResize); return; }
   const handle = e.target.closest('[data-resize]');
@@ -95,6 +103,7 @@ app.addEventListener('pointerdown', e => {
 });
 
 app.addEventListener('pointermove', e => {
+  if(contextDrag&&e.pointerId===contextDrag.pointer){panContext(e.clientX-contextDrag.x,e.clientY-contextDrag.y);contextDrag.x=e.clientX;contextDrag.y=e.clientY;e.preventDefault();return;}
   const g = getGesture();
   if (!g || e.pointerId !== g.pointer) return;
   if (!g.changed && Math.hypot(e.clientX - g.startX, e.clientY - g.startY) < 3) return;
@@ -128,18 +137,16 @@ app.addEventListener('pointermove', e => {
     const Y0 = p0.y;
 
     if (g.kind === 'nw') {
-      const clampDy = Math.min(0, dy);
       const snappedDx = Math.round(dx / step) * step;
-      const snappedDy = Math.round(clampDy / step) * step;
+      const snappedDy = Math.round(dy / step) * step;
       const targetW = Math.max(16, Math.min(800, W0 - snappedDx));
       const targetS = clamp(S0 - snappedDy, ...bounds);
       next = updateElement(detached, g.id, { x: X0 - (targetW - W0), y: Y0 - (targetS - S0), width: targetW });
       if (def?.isDuplicate) next = updateElement(next, g.id, { size: targetS });
       else next = { ...next, [def.sizeKey]: targetS };
     } else {
-      const clampDy = Math.max(0, dy);
       const snappedDx = Math.round(dx / step) * step;
-      const snappedDy = Math.round(clampDy / step) * step;
+      const snappedDy = g.kind === 'e' ? 0 : Math.round(dy / step) * step;
       const targetW = Math.max(16, Math.min(800, W0 + snappedDx));
       const targetS = clamp(S0 + snappedDy, ...bounds);
       next = updateElement(detached, g.id, { width: targetW });
@@ -154,9 +161,12 @@ app.addEventListener('pointermove', e => {
   updateHistoryButtons();
 });
 
-app.addEventListener('pointerup', () => finishGesture());
-app.addEventListener('pointercancel', () => finishGesture(true));
+const endContextDrag=()=>{const pointer=contextDrag?.pointer;contextDrag=null;$('#stage')?.classList.remove('is-panning');if(pointer!==undefined&&app.hasPointerCapture?.(pointer))app.releasePointerCapture(pointer);};
+app.addEventListener('pointerup', () => {endContextDrag();finishGesture();});
+app.addEventListener('pointercancel', () => {endContextDrag();finishGesture(true);});
+app.addEventListener('lostpointercapture',endContextDrag);
 app.addEventListener('click', e => {
+  if(getContextPreview())return;
   if (getFormatPainterSource()) return;
   const isCtrl = e.ctrlKey || e.metaKey;
   const el = e.target.closest('[data-element]');
@@ -171,7 +181,36 @@ app.addEventListener('click', e => {
 
 // Atajos de teclado generales y de lienzo
 document.addEventListener('keydown', e => {
-  const target = e.target;
+  const target = /** @type {HTMLElement} */ (e.target);
+  if(getContextPreview()&&target?.closest?.('#stage')&&['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)){
+    e.preventDefault();panContext(e.key==='ArrowLeft'?24:e.key==='ArrowRight'?-24:0,e.key==='ArrowUp'?24:e.key==='ArrowDown'?-24:0);return;
+  }
+  if (target?.matches?.('[role="tab"][data-tab]') && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
+    e.preventDefault();
+    const tabs = Array.from(target.closest('[role="tablist"]').querySelectorAll('button[role="tab"]'));
+    const current = tabs.indexOf(target);
+    const index = e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1 : (current + (e.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+    const id = tabs[index].id;
+    /** @type {HTMLButtonElement} */ (tabs[index]).click();
+    document.getElementById(id)?.focus();
+    return;
+  }
+  const editingText = ['INPUT', 'TEXTAREA', 'SELECT'].includes(target?.tagName) || target?.isContentEditable;
+  const command = e.ctrlKey || e.metaKey;
+  if (command && !editingText && !$('#modal')?.open) {
+    const key = e.key.toLowerCase();
+    if (key === 'y' || key === 'z') {
+      e.preventDefault();
+      $('#app')?.querySelector(`[data-action="${key === 'y' || e.shiftKey ? 'redo' : 'undo'}"]`)?.click();
+      return;
+    }
+    if (getView() === 'designer' && (key === '0' || key === '1')) {
+      e.preventDefault();
+      if (key === '0') { if(getContextPreview())setContextManualZoom();setZoom(100); renderStage(); }
+      else $('#app')?.querySelector('[data-action="zoom-fit"]')?.click();
+      return;
+    }
+  }
   if ((e.key === 'Enter' || e.key === ' ') && target?.closest?.('#binding-card-inner .is-bindable')) {
     e.preventDefault();
     focusBindingElement(target);
@@ -181,35 +220,22 @@ document.addEventListener('keydown', e => {
   if (bindKey) {
     const menu = document.getElementById(`dropdown-menu-${bindKey}`);
     const isOpen = menu && menu.classList.contains('is-open');
-    if (e.key === 'ArrowDown') {
+    if (e.key === 'Tab') { closeAllBindingDropdowns(); return; }
+    if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key) && (isOpen || e.key.startsWith('Arrow'))) {
       e.preventDefault();
       if (!isOpen) {
         if (menu && getPbipModel()) {
-          closeAllBindingDropdowns();
-          menu.innerHTML = renderBindingDropdown(bindKey, target.value);
-          menu.classList.add('is-open');
-          const toggle = document.querySelector(`[data-action="toggle-bind-dropdown"][data-field="${bindKey}"]`);
-          if (toggle) { toggle.setAttribute('aria-expanded', 'true'); toggle.classList.add('is-open'); }
+          openBindingDropdown(bindKey, false, target.value);
+          const options = menu.querySelectorAll('[role="option"]');
+          selectBindingOption(menu, e.key === 'ArrowUp' ? options.length - 1 : 0);
         }
         return;
       }
       const items = Array.from(menu.querySelectorAll('.binding-dropdown-item'));
       if (!items.length) return;
       const curIdx = items.findIndex(it => it.classList.contains('is-selected'));
-      const nextIdx = curIdx < items.length - 1 ? curIdx + 1 : 0;
-      items.forEach((it, idx) => it.classList.toggle('is-selected', idx === nextIdx));
-      items[nextIdx].scrollIntoView({ block: 'nearest' });
-      return;
-    }
-    if (e.key === 'ArrowUp') {
-      if (!isOpen) return;
-      e.preventDefault();
-      const items = Array.from(menu.querySelectorAll('.binding-dropdown-item'));
-      if (!items.length) return;
-      const curIdx = items.findIndex(it => it.classList.contains('is-selected'));
-      const prevIdx = curIdx > 0 ? curIdx - 1 : items.length - 1;
-      items.forEach((it, idx) => it.classList.toggle('is-selected', idx === prevIdx));
-      items[prevIdx].scrollIntoView({ block: 'nearest' });
+      const nextIdx = e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1 : (curIdx + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+      selectBindingOption(menu, nextIdx);
       return;
     }
     if (e.key === 'Enter' && isOpen) {

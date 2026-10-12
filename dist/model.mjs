@@ -1,4 +1,4 @@
-import {sanitizeElements,ELEMENTS,SIZE_LIMITS,elementEnabled,elementState,DEFAULT_LAYER_ORDER,sanitizeLayerOrder,resolveElementDef} from './elements.mjs';
+import {sanitizeElements,ELEMENTS,SIZE_LIMITS,elementEnabled,elementState,DEFAULT_LAYER_ORDER,sanitizeLayerOrder,resolveElementDef,activeDuplicateIds,usesValueBinding,linkedElements,valueBinding,goalBinding,usesGoalBinding,requiresOwnValueBinding,unsupportedCopyDataProperties} from './elements.mjs';
 import {ICON_OPTIONS} from './icons.mjs';
 
 /** @typedef {import('./types.d.ts').CardConfig} CardConfig */
@@ -14,7 +14,7 @@ export const FAMILIES = [
 /** @type {CardConfig} */
 export const BASE = {
  id:'executive-night',type:'executive',title:'Ingresos totales',subtitle:'Visión de negocio',eyebrow:'REVENUE OVERVIEW',
- measure:'Total Ventas',measureName:'KPI_Ventas_HTML',dateTable:'Calendario',dateColumn:'Fecha',targetMeasure:'Objetivo Ventas',compareMeasure:'Ventas Periodo Anterior',
+ measure:'Total Ventas',measureName:'KPI_Ventas_HTML',targetTable:'',dateTable:'Calendario',dateColumn:'Fecha',targetMeasure:'Objetivo Ventas',compareMeasure:'Ventas Periodo Anterior',
  format:'currency',currency:'EUR',unit:'auto',decimals:1,locale:'es-ES',suffix:'',direction:'up',comparison:'yoy',deltaMode:'relative',
  theme:'night',accent:'#c3ec83',positive:'#96daa7',negative:'#ff9a98',warning:'#e8c373',background:'#17272b',text:'#ffffff',muted:'#a4b5b5',
  geometryVersion:2,layout:'stacked',width:440,height:400,radius:22,padding:28,borderWidth:1,borderColor:'#304247',shadow:'soft',font:'Segoe UI',valueSize:48,titleSize:14,fontWeight:600,align:'left',
@@ -28,16 +28,16 @@ export const BASE = {
 };
 export const THEMES = {
  night:{name:'Midnight',background:'#17272b',text:'#ffffff',muted:'#a4b5b5',accent:'#c3ec83',borderColor:'#304247',positive:'#96daa7',negative:'#ff9a98',warning:'#e8c373'},
- paper:{name:'Porcelain',background:'#ffffff',text:'#253336',muted:'#7d898c',accent:'#477568',borderColor:'#e2e8e5',positive:'#278360',negative:'#cc5a54',warning:'#b6892f'},
- mint:{name:'Sage',background:'#eaf1e7',text:'#244333',muted:'#6c8273',accent:'#4b805d',borderColor:'#d9e4d4',positive:'#287247',negative:'#b95548',warning:'#9b7425'},
- lavender:{name:'Lavender',background:'#edeaf7',text:'#3c3454',muted:'#8a809a',accent:'#8771bb',borderColor:'#ddd7ef',positive:'#397b67',negative:'#bd596e',warning:'#a67a35'},
- sand:{name:'Sandstone',background:'#f6eee2',text:'#51412c',muted:'#9c8973',accent:'#bd8144',borderColor:'#e9dcc9',positive:'#57814d',negative:'#bd594a',warning:'#b98427'},
- cobalt:{name:'Cobalt',background:'#e8eefb',text:'#263858',muted:'#7388a6',accent:'#527bdd',borderColor:'#d4e0f5',positive:'#337b62',negative:'#bf565e',warning:'#9e7c30'},
- rose:{name:'Rosewater',background:'#f7ecee',text:'#543741',muted:'#916c79',accent:'#bd758b',borderColor:'#ead8dd',positive:'#407b62',negative:'#bc525e',warning:'#a87c39'},
- arctic:{name:'Arctic',background:'#e8f2f2',text:'#254548',muted:'#668589',accent:'#3d9596',borderColor:'#cfe4e4',positive:'#2f7f67',negative:'#bb6166',warning:'#a57d36'},
- terracotta:{name:'Terracotta',background:'#f7eae1',text:'#593c32',muted:'#937461',accent:'#b8664d',borderColor:'#ebd6c8',positive:'#557d4d',negative:'#bb4e47',warning:'#a07a27'},
+ paper:{name:'Porcelain',background:'#ffffff',text:'#253336',muted:'#6b7678',accent:'#477568',borderColor:'#e2e8e5',positive:'#247858',negative:'#ad4d47',warning:'#876523'},
+ mint:{name:'Sage',background:'#eaf1e7',text:'#244333',muted:'#5c6e62',accent:'#447455',borderColor:'#d9e4d4',positive:'#276e45',negative:'#9c483d',warning:'#7b5c1d'},
+ lavender:{name:'Lavender',background:'#edeaf7',text:'#3c3454',muted:'#6d657a',accent:'#705e9b',borderColor:'#ddd7ef',positive:'#316959',negative:'#954657',warning:'#7a5a26'},
+ sand:{name:'Sandstone',background:'#f6eee2',text:'#51412c',muted:'#776857',accent:'#8e6133',borderColor:'#e9dcc9',positive:'#486a3f',negative:'#9a493d',warning:'#7f5b1b'},
+ cobalt:{name:'Cobalt',background:'#e8eefb',text:'#263858',muted:'#5b6b83',accent:'#4466b7',borderColor:'#d4e0f5',positive:'#2c6c56',negative:'#9a464c',warning:'#775d24'},
+ rose:{name:'Rosewater',background:'#f7ecee',text:'#543741',muted:'#83616d',accent:'#925a6b',borderColor:'#ead8dd',positive:'#386b55',negative:'#9d454f',warning:'#7c5b2a'},
+ arctic:{name:'Arctic',background:'#e8f2f2',text:'#254548',muted:'#556e72',accent:'#307475',borderColor:'#cfe4e4',positive:'#296e5a',negative:'#944d51',warning:'#7c5d29'},
+ terracotta:{name:'Terracotta',background:'#f7eae1',text:'#593c32',muted:'#7d6352',accent:'#9b5641',borderColor:'#ebd6c8',positive:'#476840',negative:'#9f423c',warning:'#785c1d'},
  graphite:{name:'Graphite',background:'#292932',text:'#f4f1f7',muted:'#ada5bc',accent:'#c0b2ee',borderColor:'#45414e',positive:'#9bd9b8',negative:'#f5a4ac',warning:'#e5c48d'},
- marble:{name:'Mármol',background:'#f4f4f4',text:'#202020',muted:'#777777',accent:'#4b4b4b',borderColor:'#dddddd',positive:'#303030',negative:'#999999',warning:'#686868'}
+ marble:{name:'Mármol',background:'#f4f4f4',text:'#202020',muted:'#6d6d6d',accent:'#4b4b4b',borderColor:'#dddddd',positive:'#303030',negative:'#646464',warning:'#646464'}
 };
 const p=(id,name,description,category,overrides)=>({id,name,description,category,config:{...BASE,id,progressHeight:category==='target'?8:4,...overrides}});
 export const TEMPLATES = [
@@ -65,6 +65,10 @@ TEMPLATES.push(
 
 export const LIMITS={geometryVersion:[1,2],donutThickness:[4,28],effectIntensity:[0,100],glassOpacity:[10,100],glassBlur:[0,40],width:[200,800],height:[200,650],radius:[0,40],padding:[12,48],borderWidth:[0,4],decimals:[0,3],valueSize:[24,80],titleSize:[10,24],fontWeight:[400,800],trendHeight:[40,150],lineWidth:[1,6],fillOpacity:[0,1],maxPoints:[6,90]};
 export const ENUMS={layout:['stacked','chart-left','chart-right'],chartKind:['trend','donut'],trendCurve:['smooth','linear','step'],areaFill:['gradient','solid'],trendGrid:['none','horizontal','dots'],surfaceEffect:['solid','glass','aurora','glow','raised'],effectColorMode:['theme','custom'],type:['basic','comparison','target','status','spark','executive'],theme:[...Object.keys(THEMES),'custom'],format:['currency','number','percent'],currency:['EUR','USD','GBP'],unit:['auto','none','k','m'],locale:['es-ES','en-US','ca-ES'],direction:['up','down','neutral'],comparison:['yoy','mom','previous','target','custom','none'],deltaMode:['relative','absolute','pp'],shadow:['none','soft','strong'],font:['Segoe UI','Arial','Georgia'],align:['left','center'],trendStyle:['area','line','bars'],granularity:['auto','day','week','month'],sampleScenario:['normal','zero','empty','negative'],icon:['trend','chart','users','target','bolt','box','shield','heart','clock','layers']};
+export const STRING_LIMITS={id:100,title:160,subtitle:160,eyebrow:160,footer:160,measure:120,measureName:120,targetTable:512,dateTable:120,dateColumn:120,targetMeasure:120,compareMeasure:120,suffix:40,statusGood:80,statusWarn:80,statusBad:80,sampleSeries:2000};
+// Meeting the boundary counts as success in either business direction.
+export const goalComparisonOperator=direction=>direction==='down'?'<=':'>=';
+export function goalReached(value,target,direction){return Number.isFinite(value)&&Number.isFinite(target)&&target>0&&(direction==='down'?value<=target:value>=target);}
 ENUMS.icon=ICON_OPTIONS.map(x=>x[0]);
 for(const def of Object.values(ELEMENTS))LIMITS[def.sizeKey]=SIZE_LIMITS[def.kind];
 export function healCorruptedText(str){
@@ -109,21 +113,23 @@ export function sanitizeConfig(raw={}){
   if(typeof BASE[k]==='boolean'){c[k]=raw[k]===true;continue;}
   if(typeof BASE[k]==='number'){const v=Number(raw[k]);if(Number.isFinite(v))c[k]=LIMITS[k]?Math.min(LIMITS[k][1],Math.max(LIMITS[k][0],v)):Math.min(1e15,Math.max(-1e15,v));continue;}
   if(/^(accent|positive|negative|warning|background|text|muted|borderColor|effectColor)$/.test(k)){if(/^#[0-9a-f]{6}$/i.test(raw[k]))c[k]=raw[k];continue;}
-  c[k]=healCorruptedText(String(raw[k]).slice(0,k==='sampleSeries'?2000:160));
+  c[k]=healCorruptedText(String(raw[k]).slice(0,STRING_LIMITS[k]??160));
  }
  for(const k of ['decimals','width','height','maxPoints'])c[k]=Math.round(c[k]);
  if(!('progressHeight' in raw)&&c.type==='target')c.progressHeight=8;
  if('_measureBound' in raw)c._measureBound=raw._measureBound===true;
  if('_targetCustomized' in raw)c._targetCustomized=raw._targetCustomized===true;
  if('_dateCustomized' in raw)c._dateCustomized=raw._dateCustomized===true;
+ c.elements=linkedElements(c);
  return c;
 }
 export function familyName(type){return FAMILIES.find(f=>f.id===type)?.name??type;}
 const rendered=(c,id)=>elementEnabled(c,id)&&!elementState(c,id).deleted;
-export function needsTrend(c){return (c.chartKind!=='donut'&&rendered(c,'trend'))||Object.keys(c.elements||{}).some(k=>k.includes('_copy')&&!c.elements[k]?.deleted&&resolveElementDef(k)?.baseId==='trend'&&(c.elements[k]?.chartKind||c.chartKind)!=='donut');}
-export function needsGoal(c){return c.chartKind==='donut'&&rendered(c,'trend')||['goalLabel','progressLabel','progress'].some(id=>rendered(c,id))||Object.keys(c.elements||{}).some(id=>resolveElementDef(id)?.baseId==='trend'&&!c.elements[id]?.deleted&&(c.elements[id]?.chartKind||c.chartKind)==='donut');}
+export function needsTrend(c){return (c.chartKind!=='donut'&&rendered(c,'trend'))||activeDuplicateIds(c).some(k=>resolveElementDef(k).baseId==='trend'&&(c.elements[k].chartKind||c.chartKind)!=='donut');}
+export function needsGoal(c){return c.chartKind==='donut'&&rendered(c,'trend')||['goalLabel','progressLabel','progress'].some(id=>rendered(c,id))||activeDuplicateIds(c).some(id=>['goalLabel','progressLabel','progress'].includes(resolveElementDef(id).baseId)||resolveElementDef(id).baseId==='trend'&&(c.elements[id].chartKind||c.chartKind)==='donut'||resolveElementDef(id).baseId==='delta'&&(c.elements[id].comparison||c.comparison)==='target');}
+export function needsMainGoal(c){return c.chartKind==='donut'&&rendered(c,'trend')||['goalLabel','progressLabel','progress'].some(id=>rendered(c,id))||needsCompare(c)&&c.comparison==='target';}
 export function needsCompare(c){return ['delta','compareLabel'].some(id=>rendered(c,id))||c.type==='comparison'&&['referenceLabel','referenceValue'].some(id=>rendered(c,id))&&c.showComparison;}
-export function needsDate(c){return needsTrend(c)||(needsCompare(c)&&['yoy','mom','previous'].includes(c.comparison))||Object.keys(c.elements||{}).some(k=>k.includes('_copy')&&!c.elements[k]?.deleted&&resolveElementDef(k)?.baseId==='delta'&&['yoy','mom','previous'].includes(c.elements[k]?.comparison||c.comparison));}
+export function needsDate(c){return needsTrend(c)||(needsCompare(c)&&['yoy','mom','previous'].includes(c.comparison))||activeDuplicateIds(c).some(k=>resolveElementDef(k).baseId==='delta'&&['yoy','mom','previous'].includes(c.elements[k].comparison||c.comparison));}
 export function isValidMeasureName(name){
  if(!name||typeof name!=='string')return false;
  const t=name.trim();
@@ -139,7 +145,7 @@ export function getCircularConflict(c){
  if(norm(c.measure)&&target===norm(c.measure)){
   return {type:'medida principal',name:c.measure.trim(),field:'measure'};
  }
- if((needsGoal(c)||(needsCompare(c)&&c.comparison==='target'))&&c.targetMeasure){
+ if(needsMainGoal(c)&&c.targetMeasure){
   const tTrim=c.targetMeasure.trim();
   if(!/^-?\d+(\.\d+)?$/.test(tTrim)&&target===norm(tTrim)){
    return {type:'medida objetivo',name:tTrim,field:'targetMeasure'};
@@ -148,20 +154,18 @@ export function getCircularConflict(c){
  if(needsCompare(c)&&c.comparison==='custom'&&c.compareMeasure&&target===norm(c.compareMeasure)){
   return {type:'medida de referencia',name:c.compareMeasure.trim(),field:'compareMeasure'};
  }
- if(needsDate(c)&&c.dateColumn&&target===norm(c.dateColumn)){
-  return {type:'columna de fechas',name:c.dateColumn.trim(),field:'dateColumn'};
- }
- const dupKeys=Object.keys(c.elements||{}).filter(k=>k.includes('_copy')&&!c.elements[k]?.deleted);
+ const dupKeys=activeDuplicateIds(c);
  for(const dupId of dupKeys){
   const st=c.elements[dupId];
-  if(st.measure&&target===norm(st.measure)){
+  if((!usesValueBinding(c,dupId)||requiresOwnValueBinding(c,dupId))&&!unsupportedCopyDataProperties(dupId,st).includes('measure')&&st.measure&&target===norm(st.measure)){
    return {type:`medida del elemento duplicado (${resolveElementDef(dupId)?.label||dupId})`,name:st.measure.trim(),field:`dup_${dupId}_measure`};
   }
-  if(st.compareMeasure&&target===norm(st.compareMeasure)){
+  if(resolveElementDef(dupId)?.baseId==='delta'&&(st.comparison||c.comparison)==='custom'&&st.compareMeasure&&target===norm(st.compareMeasure)){
    return {type:`medida de referencia del duplicado (${resolveElementDef(dupId)?.label||dupId})`,name:st.compareMeasure.trim(),field:`dup_${dupId}_compare`};
   }
-  if(st.targetMeasure&&target===norm(st.targetMeasure)){
-   return {type:`medida objetivo del duplicado (${resolveElementDef(dupId)?.label||dupId})`,name:st.targetMeasure.trim(),field:dupId};
+  if(usesGoalBinding(c,dupId)){
+   const goal=goalBinding(c,dupId);
+   if(goal.measure?.trim()&&target===norm(goal.measure))return {type:`objetivo de ${resolveElementDef(goal.id)?.label||goal.id}`,name:goal.measure.trim(),field:goal.field};
   }
  }
  return null;
@@ -180,35 +184,37 @@ export function checks(c){
  const circ=getCircularConflict(c);
  if(circ)issues.push({level:'error',text:`Dependencia circular: el nombre de la medida resultante ('${c.measureName.trim()}') no puede coincidir con la ${circ.type} ('${circ.name}'). Modifícalo en KPI Atelier para continuar.`,field:'measureName'});
  if(needsDate(c)&&(!c.dateTable.trim()||!c.dateColumn.trim()))issues.push({level:'error',text:'Completa la tabla calendario y su columna de fecha.',field:!c.dateTable.trim()?'dateTable':'dateColumn'});
- if((needsGoal(c)||(needsCompare(c)&&c.comparison==='target'))&&!c.targetMeasure.trim())issues.push({level:'error',text:'Indica una medida u objetivo numérico (ej. 0 o 100).',field:'targetMeasure'});
+ if(needsMainGoal(c)&&!c.targetMeasure.trim())issues.push({level:'error',text:'Indica una medida u objetivo numérico (ej. 0 o 100).',field:'targetMeasure'});
  if(needsCompare(c)&&c.comparison==='custom'&&!c.compareMeasure.trim())issues.push({level:'error',text:'Indica la medida de comparación.',field:'compareMeasure'});
  if(rendered(c,'status')&&(!Number.isFinite(c.goodThreshold)||!Number.isFinite(c.warnThreshold)))issues.push({level:'error',text:'Los umbrales deben ser números finitos.',field:'goodThreshold'});
  if(rendered(c,'status')&&((c.direction==='down'&&c.goodThreshold>c.warnThreshold)||(c.direction!=='down'&&c.goodThreshold<c.warnThreshold)))issues.push({level:'error',text:'Revisa los umbrales: favorable y alerta deben seguir la dirección elegida.',field:'goodThreshold'});
  if(rendered(c,'status')&&c.direction==='neutral')issues.push({level:'error',text:'Un semáforo necesita dirección favorable: subir o bajar.',field:'direction'});
- if(c.deltaMode==='pp'&&c.format!=='percent')issues.push({level:'error',text:'Los puntos porcentuales requieren formato porcentaje.',field:'format'});
- const dupKeys=Object.keys(c.elements||{}).filter(k=>k.includes('_copy')&&!c.elements[k]?.deleted);
+ if(rendered(c,'delta')&&c.comparison!=='none'&&c.deltaMode==='pp'&&c.format!=='percent')issues.push({level:'error',text:'Los puntos porcentuales requieren formato porcentaje.',field:'format'});
+ const dupKeys=activeDuplicateIds(c);
+ const checkedGoals=new Set();
  for(const dupId of dupKeys){
   const def=resolveElementDef(dupId);
   const st=c.elements[dupId];
+  const ignored=unsupportedCopyDataProperties(dupId,st);
+  if(usesGoalBinding(c,dupId)){
+   const goal=goalBinding(c,dupId);
+   if(!checkedGoals.has(goal.field)&&!goal.measure?.trim())issues.push({level:'error',text:`Objetivo de la copia ${dupId.match(/_copy(\d+)$/)?.[1]}: indica una medida o un valor numérico.`,field:goal.field,elementId:goal.id});
+   checkedGoals.add(goal.field);
+  }
+  if(ignored.length)issues.push({level:'warning',text:`La copia '${def.label}' es decorativa: no se usarán sus propiedades de datos (${ignored.join(', ')}).`,field:dupId,elementId:dupId});
   if(def?.baseId==='status'){
    const direction=st.direction||c.direction,good=st.goodThreshold??c.goodThreshold,warn=st.warnThreshold??c.warnThreshold;
    if(!Number.isFinite(good)||!Number.isFinite(warn)||direction==='neutral'||(direction==='down'?good>warn:good<warn))issues.push({level:'error',text:`Elemento '${def.label}': revisa la dirección y los umbrales favorable/alerta.`,field:dupId,elementId:dupId});
   }
-  if(['value','trend','delta','referenceValue'].includes(def?.baseId)&&!st.measure?.trim()){
-   issues.push({level:'error',text:`Elemento '${def.label}': asigna su medida propia.`,field:def.baseId==='trend'||def.baseId==='delta'?`${dupId}__measure`:dupId,elementId:dupId});
-  }
-  if(def?.baseId==='trend'&&(st.chartKind||c.chartKind)!=='donut'&&(!st.dateTable?.trim()||!st.dateColumn?.trim())){
-   issues.push({level:'error',text:`Elemento '${def.label}': completa su tabla y columna de fecha.`,field:`${dupId}__${!st.dateTable?.trim()?'dateTable':'dateColumn'}`,elementId:dupId});
-  }
-  if(['goalLabel','progressLabel','progress'].includes(def?.baseId)&&!st.targetMeasure?.trim()){
-   issues.push({level:'error',text:`Elemento '${def.label}': indica su medida u objetivo numérico.`,field:dupId,elementId:dupId});
+  if((requiresOwnValueBinding(c,dupId)||['value','referenceValue'].includes(def?.baseId))&&!st.measure?.trim()){
+   issues.push({level:'error',text:`Elemento '${def.label}': asigna su medida propia.`,field:requiresOwnValueBinding(c,dupId)?`${dupId}__measure`:dupId,elementId:dupId});
   }
   const effComp = st.comparison || c.comparison;
+  if(def?.baseId==='delta'&&effComp!=='none'&&(st.deltaMode||c.deltaMode)==='pp'&&(st.format||valueBinding(c,dupId).state.format||c.format)!=='percent'){
+   issues.push({level:'error',text:`Elemento '${def.label}': los puntos porcentuales requieren formato porcentaje.`,field:dupId,elementId:dupId});
+  }
   if(def?.baseId==='delta'&&effComp==='custom'&&!st.compareMeasure?.trim()){
     issues.push({level:'error',text:`Elemento '${def.label}': indica la medida de referencia para la comparativa.`,field:dupId,elementId:dupId});
-  }
-  if(def?.baseId==='delta'&&effComp==='target'&&!st.targetMeasure?.trim()){
-    issues.push({level:'error',text:`Elemento '${def.label}': indica la medida u objetivo para la comparativa.`,field:dupId,elementId:dupId});
   }
  }
  if(c.height<240&&['executive','target','status','spark'].includes(c.type))issues.push({level:'warning',text:'Esta composición puede necesitar más altura. Revisa el resultado a tamaño real.'});

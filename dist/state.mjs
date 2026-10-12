@@ -6,8 +6,9 @@
 import { BASE, sanitizeConfig, THEMES, FAMILIES, TEMPLATES, familyName } from './model.mjs';
 import { sanitizePalette } from './colors.mjs';
 import { icon, esc, cardHTML } from './cards.mjs';
-import { sanitizeModelCatalog } from './schema.mjs';
+import { sanitizeModelCatalog, validateImportedJSON } from './schema.mjs';
 import { ELEMENT_IDS } from './elements.mjs';
+import { COLLECTION_LOCKS, collectionValue, collectionTransaction, hydrateCollections } from './collection-store.mjs';
 
 // Utilería para lectura segura de LocalStorage y DOM
 export const $ = (s, el) => {
@@ -30,6 +31,106 @@ export const read = (k, f) => {
 
 // Puntero de Contexto Activo (garantiza sincronización tanto en navegador como en test sandbox de Node vm)
 let activeCtx = typeof globalThis !== 'undefined' ? globalThis : null;
+const SAVED_KEY = 'kpi-atelier-saved';
+const THEMES_KEY = 'kpi-atelier-themes';
+const DRAFT_SESSION_KEY = 'kpi-atelier-window-draft';
+const RECOVERY_PREFIX = 'kpi-atelier-recovery:';
+let draftId = null;
+let previousDraftId = null;
+let editingSavedRevision = null;
+let storageListener = null;
+let storageEventTarget = null;
+const themeListeners = new Set();
+const storageOf = (ctx = activeCtx) => ctx?.localStorage || (typeof localStorage !== 'undefined' ? localStorage : null);
+function sessionOf(ctx = activeCtx) {
+  try { return ctx?.sessionStorage || ctx?.window?.sessionStorage || null; } catch { return null; }
+}
+function parseStorage(storage, key, fallback = null) {
+  try { const value = collectionValue(storage, key); return value == null ? fallback : JSON.parse(value); } catch { return fallback; }
+}
+function storedDesignEntries(storage = storageOf(), strict = false) {
+  const entries = parseStorage(storage, SAVED_KEY, strict ? null : []);
+  if (strict && collectionValue(storage, SAVED_KEY) !== null && (!Array.isArray(entries) || entries.some(x => !x || typeof x.id !== 'string' || !x.config))) throw new Error('La colección guardada está dañada. Exporta tus cambios; la colección original se ha conservado.');
+  return Array.isArray(entries) ? entries.filter(x => x && typeof x.id === 'string' && x.config) : [];
+}
+function normalizedSavedDesign(raw, revision = JSON.stringify(raw)) {
+  const validation = validateImportedJSON(raw.config);
+  const warnings = [...validation.warnings];
+  if (!validation.valid) warnings.push('Se adaptarán ajustes no compatibles del diseño guardado: ' + validation.errors.slice(0, 3).join('; '));
+  const { normalizationWarnings: _warnings, storageRevision: _revision, ...entry } = raw;
+  return { ...entry, config: validation.config || sanitizeConfig(raw.config), storageRevision: revision, ...(warnings.length ? { normalizationWarnings: warnings } : {}) };
+}
+function storedDesigns(storage = storageOf(), strict = false) {
+  return storedDesignEntries(storage, strict).map(entry => normalizedSavedDesign(entry));
+}
+// Runtime notices never form part of a saved revision or reach localStorage.
+function savedRevision(entry) {
+  if (typeof entry.storageRevision === 'string') return entry.storageRevision;
+  const { normalizationWarnings: _warnings, storageRevision: _revision, ...record } = entry;
+  return JSON.stringify(record);
+}
+function recoveryEntry(id, draft) {
+  return normalizedSavedDesign({ id, name: 'Borrador recuperable · ' + String(draft.config.title || 'Sin título'), date: draft.date, config: draft.config }, JSON.stringify(draft));
+}
+function recoveryDesigns(storage = storageOf()) {
+  const entries = [];
+  for (let i = 0; storage && i < storage.length; i++) {
+    const key = storage.key(i);
+    if (!key?.startsWith(RECOVERY_PREFIX) || key === RECOVERY_PREFIX + draftId || key === RECOVERY_PREFIX + previousDraftId) continue;
+    const draft = parseStorage(storage, key);
+    if (!draft?.config || typeof draft.date !== 'string') continue;
+    entries.push(recoveryEntry('draft:' + key.slice(RECOVERY_PREFIX.length), draft));
+  }
+  return entries.sort((a, b) => b.date.localeCompare(a.date));
+}
+function refreshSaved() {
+  setSaved([...storedDesigns(), ...recoveryDesigns()]);
+}
+function storedCustomThemes(storage = storageOf(), strict = false) {
+  const entries = parseStorage(storage, THEMES_KEY, strict ? null : []);
+  const valid = theme => theme && typeof theme.id === 'string' && /^[\w-]+$/.test(theme.id) && typeof theme.name === 'string' && sanitizePalette(theme.colors);
+  if (strict && collectionValue(storage, THEMES_KEY) !== null && (!Array.isArray(entries) || entries.some(theme => !valid(theme)) || new Set(entries.map(theme => theme.id)).size !== entries.length)) {
+    throw new Error('La colección de paletas está dañada. Las paletas originales se han conservado.');
+  }
+  return Array.isArray(entries) ? entries.filter(valid).map(theme => ({ ...theme, name: theme.name.slice(0, 40), colors: sanitizePalette(theme.colors) })) : [];
+}
+function refreshCustomThemes() {
+  const next = storedCustomThemes();
+  if (JSON.stringify(next) === JSON.stringify(customThemes)) return;
+  customThemes.splice(0, customThemes.length, ...next);
+  for (const listener of themeListeners) listener();
+}
+export function getCustomThemes() { refreshCustomThemes(); return customThemes; }
+/** Update the palette library without replacing an open colour editor. */
+export function subscribeCustomThemes(listener) {
+  themeListeners.add(listener);
+  return () => { themeListeners.delete(listener); };
+}
+function installStorageSync(ctx) {
+  if (storageListener) storageEventTarget?.removeEventListener?.('storage', storageListener);
+  storageEventTarget = ctx?.window || ctx;
+  storageListener = event => {
+    if (event.storageArea && event.storageArea !== storageOf(ctx)) return;
+    if (ctx?.indexedDB || ctx?.window?.indexedDB) {
+      const keys = event.key === null ? [...COLLECTION_LOCKS.values()] : COLLECTION_LOCKS.has(event.key + '-collection') ? [event.key] : [];
+      if (keys.length) {
+        hydrateCollections(ctx, keys).then(() => {
+          if (activeCtx !== ctx) return;
+          refreshSaved(); refreshCustomThemes();
+          if (getView() === 'saved') callCtx('render');
+          reportCollectionWarning(ctx);
+        }).catch(error => { if (activeCtx === ctx) toast(error.message); });
+        return;
+      }
+    }
+    if (event.key === null || event.key === THEMES_KEY) refreshCustomThemes();
+    if (event.key !== null && event.key !== SAVED_KEY && !event.key?.startsWith(RECOVERY_PREFIX)) return;
+    refreshSaved();
+    // Never replace an editor's DOM or its draft because another window saved.
+    if (getView() === 'saved') callCtx('render');
+  };
+  storageEventTarget?.addEventListener?.('storage', storageListener);
+}
 export function setContext(ctx) {
   activeCtx = ctx;
   if (typeof globalThis !== 'undefined' && ctx) {
@@ -43,15 +144,18 @@ export function setContext(ctx) {
       try { globalThis.window = ctx.window; } catch {}
     }
   }
-  c = sanitizeConfig(read('kpi-atelier-draft', BASE));
-  designBindingsLocked = read('kpi-atelier-draft', null) !== null;
-  saved = read('kpi-atelier-saved', []);
-  if (!Array.isArray(saved)) saved = [];
-  saved = saved.filter(x => x && typeof x.id === 'string' && x.config).map(x => ({ ...x, config: sanitizeConfig(x.config) }));
+  const windowDraft = parseStorage(sessionOf(ctx), DRAFT_SESSION_KEY);
+  previousDraftId = typeof windowDraft?.id === 'string' ? windowDraft.id : null;
+  draftId = crypto.randomUUID();
+  c = sanitizeConfig(windowDraft?.config || read('kpi-atelier-draft', BASE));
+  designBindingsLocked = Boolean(windowDraft?.config) || read('kpi-atelier-draft', null) !== null;
+  saved = [...storedDesigns(), ...recoveryDesigns()];
+  refreshCustomThemes();
   pbipModel = sanitizeModelCatalog(read('kpi-atelier-pbip-cache', null));
-  const restoredEditState = read('kpi-atelier-edit-state', null);
+  const restoredEditState = windowDraft || read('kpi-atelier-edit-state', null);
   baseline = restoredEditState?.baseline ? sanitizeConfig(restoredEditState.baseline) : structuredClone(c);
   editingSavedId = typeof restoredEditState?.savedId === 'string' ? restoredEditState.savedId : null;
+  editingSavedRevision = restoredEditState?.savedRevision || null;
   undo = [];
   redo = [];
   lastEdit = 0;
@@ -71,9 +175,12 @@ export function setContext(ctx) {
   context = false;
   railCollapsed = read('kpi-atelier-rail-collapsed', false);
   if (ctx) {
+    ctx.designRevision = (ctx.designRevision || 0) + 1;
+    ctx.savePending = false;
     ctx.c = c;
     ctx.baseline = baseline;
     ctx.editingSavedId = editingSavedId;
+    ctx.editingSavedRevision = editingSavedRevision;
     ctx.saved = saved;
     ctx.pbipModel = pbipModel;
     ctx.undo = undo;
@@ -100,9 +207,36 @@ export function setContext(ctx) {
       try { ctx.document.documentElement.setAttribute('data-ui-theme', uiTheme); } catch {}
     }
   }
+  installStorageSync(ctx);
+  if (ctx) ctx.collectionsReady = hydrateCollections(ctx, [...COLLECTION_LOCKS.values()], true).then(() => {
+    if (activeCtx !== ctx) return true;
+    refreshSaved(); refreshCustomThemes();
+    if (getView() === 'saved') callCtx('render');
+    reportCollectionWarning(ctx);
+    return true;
+  }).catch(error => { if (activeCtx === ctx) toast(error.message); return false; });
+}
+
+function reportCollectionWarning(ctx) {
+  if (ctx.collectionSyncWarning && activeCtx === ctx) {
+    ctx.lastCollectionSyncWarning = ctx.collectionSyncWarning;
+    toast(ctx.collectionSyncWarning);
+    ctx.collectionSyncWarning = null;
+  }
 }
 /** @returns {any} */
 export function getActiveContext() { return activeCtx || (typeof globalThis !== 'undefined' ? globalThis : {}); }
+/** A document identity, independent of ordinary edits made while saving.
+ * @returns {import('./types.d.ts').DesignSession}
+ */
+export function captureDesignSession() {
+  const context = getActiveContext();
+  return { context, revision: context.designRevision || 0 };
+}
+/** @param {import('./types.d.ts').DesignSession} session */
+export function isDesignSessionCurrent(session) {
+  return session.context === getActiveContext() && session.revision === (getActiveContext().designRevision || 0);
+}
 export const callCtx = (fnName, ...args) => {
   if (activeCtx && typeof activeCtx[fnName] === 'function') return activeCtx[fnName](...args);
   if (typeof globalThis[fnName] === 'function') return globalThis[fnName](...args);
@@ -138,11 +272,23 @@ export function setSelectedElement(val) { selectedElement = val; if (activeCtx) 
 export function getCardSelected() { return (activeCtx && activeCtx.cardSelected !== undefined) ? activeCtx.cardSelected : cardSelected; }
 export function setCardSelected(val) { cardSelected = val; if (activeCtx) activeCtx.cardSelected = val; }
 export function getSelectedElements() { return (activeCtx && activeCtx.selectedElements !== undefined) ? activeCtx.selectedElements : selectedElements; }
+/** @returns {import('./types.d.ts').ModelCatalog | null} */
 export function getPbipModel() { return (activeCtx && activeCtx.pbipModel !== undefined) ? activeCtx.pbipModel : pbipModel; }
 export function getUndo() { return (activeCtx && activeCtx.undo !== undefined) ? activeCtx.undo : undo; }
 export function getRedo() { return (activeCtx && activeCtx.redo !== undefined) ? activeCtx.redo : redo; }
-export function getSaved() { return (activeCtx && activeCtx.saved !== undefined) ? activeCtx.saved : saved; }
-export function setSaved(val) { saved = val; if (activeCtx) activeCtx.saved = val; }
+/** @returns {import('./types.d.ts').SavedDesign[]} */
+export function getSaved() {
+  // Read the shared collection at the point of use, including a window opened
+  // before the latest save or a recovery draft left by an interrupted session.
+  refreshSaved();
+  return (activeCtx && activeCtx.saved !== undefined) ? activeCtx.saved : saved;
+}
+export function setSaved(val) {
+  saved = val;
+  if (activeCtx) activeCtx.saved = val;
+  const count = $('[data-action="view-saved"] .count');
+  if (count) count.textContent = String(val.length);
+}
 
 export function getZoom() { return (activeCtx && activeCtx.zoom !== undefined) ? activeCtx.zoom : zoom; }
 export function setZoom(val) { zoom = val; if (activeCtx) activeCtx.zoom = val; }
@@ -229,9 +375,7 @@ export let clipboardElements = [];
 
 // Estado Base Inicial
 export let c = sanitizeConfig(read('kpi-atelier-draft', BASE));
-export let saved = read('kpi-atelier-saved', []);
-if (!Array.isArray(saved)) saved = [];
-saved = saved.filter(x => x && typeof x.id === 'string' && x.config).map(x => ({ ...x, config: sanitizeConfig(x.config) }));
+export let saved = storedDesigns();
 
 export let view = 'designer';
 export let mode = read('kpi-atelier-mode', 'essential');
@@ -269,9 +413,7 @@ export let guideTimer = null;
 export const inspectorSections = new Map();
 export const inspectorPositions = new Map();
 
-export let customThemes = read('kpi-atelier-themes', []);
-if (!Array.isArray(customThemes)) customThemes = [];
-customThemes = customThemes.filter(t => t && typeof t.id === 'string' && /^[\w-]+$/.test(t.id) && sanitizePalette(t.colors)).map(t => ({ ...t, name: String(t.name).slice(0, 40), colors: sanitizePalette(t.colors) }));
+export const customThemes = storedCustomThemes();
 
 export let paletteDraft = null;
 export let colorRole = 'accent';
@@ -404,8 +546,22 @@ export function persist() {
   try {
     const storage = (activeCtx && activeCtx.localStorage) || (typeof localStorage !== 'undefined' ? localStorage : null);
     if (!storage) throw new Error('No storage available');
+    const snapshot = { id: draftId, config: getC(), baseline: getBaseline(), savedId: editingSavedId, savedRevision: editingSavedRevision, date: new Date().toISOString() };
+    // sessionStorage belongs to this window. A unique durable backup also
+    // survives closing/crashing it; other backups remain available in Mis diseños.
+    sessionOf()?.setItem(DRAFT_SESSION_KEY, JSON.stringify(snapshot));
+    if (dirty()) storage.setItem(RECOVERY_PREFIX + draftId, JSON.stringify(snapshot));
+    else storage.removeItem(RECOVERY_PREFIX + draftId);
+    if (previousDraftId) {
+      // sessionStorage is copied into an opener's new window. Matching content
+      // does not prove ownership: only this document's backup may be retired.
+      // Keep inherited/reloaded backups recoverable until explicitly reviewed.
+      previousDraftId = null;
+    }
+    // Compatibility checkpoint for first launch/new windows. Existing windows
+    // restore their own session snapshot, never this last-writer checkpoint.
     storage.setItem('kpi-atelier-draft', JSON.stringify(getC()));
-    storage.setItem('kpi-atelier-edit-state', JSON.stringify({ baseline: getBaseline(), savedId: editingSavedId }));
+    storage.setItem('kpi-atelier-edit-state', JSON.stringify({ baseline: getBaseline(), savedId: editingSavedId, savedRevision: editingSavedRevision }));
     storage.setItem('kpi-atelier-mode', JSON.stringify(getMode()));
     return true;
   } catch {
@@ -455,6 +611,7 @@ export function setConfig(patch, full = false) {
   record();
   setC(nextC);
   if (full) {
+    getActiveContext().designRevision = (getActiveContext().designRevision || 0) + 1;
     clearSelection();
     if (activeCtx) {
       activeCtx.context = false;
@@ -474,7 +631,7 @@ export function setConfig(patch, full = false) {
 }
 
 export function themeSelect(key) {
-  const custom = customThemes.find(t => t.id === key);
+  const custom = getCustomThemes().find(t => t.id === key);
   if (custom) setConfig({ ...custom.colors, theme: 'custom', customThemeName: custom.name });
   else if (THEMES[key]) setConfig({ ...THEMES[key], theme: key, customThemeName: '' });
 }
@@ -494,6 +651,7 @@ export function thumb(conf, cl = '') {
 }
 
 export function loadDesign(config, savedId = null, { template = false } = {}) {
+  getActiveContext().designRevision = (getActiveContext().designRevision || 0) + 1;
   designBindingsLocked = !template;
   const curC = getC();
   const prevDateTable = curC?.dateTable;
@@ -536,9 +694,12 @@ export function loadDesign(config, savedId = null, { template = false } = {}) {
   setGesture(null);
   setBaseline(structuredClone(nextC));
   editingSavedId = savedId;
+  const loadedEntry = [...storedDesigns(), ...recoveryDesigns()].find(entry => entry.id === savedId);
+  editingSavedRevision = loadedEntry ? savedRevision(loadedEntry) : null;
   restoreHistory();
   if (activeCtx) {
     activeCtx.editingSavedId = savedId;
+    activeCtx.editingSavedRevision = editingSavedRevision;
     activeCtx.undo = [];
     activeCtx.redo = [];
     activeCtx.lastEdit = 0;
@@ -563,27 +724,173 @@ export function loadDesign(config, savedId = null, { template = false } = {}) {
   callCtx('render');
 }
 
-export function saveCurrent(name) {
+async function withStorageLock(ctx, name, operation) {
+  ctx.lastCollectionSyncWarning = null;
+  const locks = ctx?.navigator?.locks || ctx?.window?.navigator?.locks;
+  if (!locks?.request) throw new Error('Este navegador no permite guardar con seguridad entre ventanas. Abre la app en una versión actual de Edge o Chrome y exporta el JSON.');
+  if (await ctx.collectionsReady === false) throw new Error('El almacenamiento compartido no está disponible. Tus cambios siguen abiertos; exporta el JSON.');
+  const key = COLLECTION_LOCKS.get(name);
+  const result = await locks.request(name, { mode: 'exclusive' }, () => collectionTransaction(ctx, key, operation));
+  reportCollectionWarning(ctx);
+  return result;
+}
+const withSavedLock = (ctx, operation) => withStorageLock(ctx, 'kpi-atelier-saved-collection', operation);
+
+export async function saveCurrent(name) {
   name = String(name ?? '').trim().slice(0, 80);
   if (!name) { toast('Añade un nombre para el diseño.'); return false; }
-  const curSaved = getSaved();
-  const id = curSaved.some(s => s.id === editingSavedId) ? editingSavedId : crypto.randomUUID();
-  const next = [{ id, name, date: new Date().toISOString(), config: structuredClone(getC()) }, ...curSaved.filter(s => s.id !== id)];
+  const ctx = getActiveContext();
+  if (ctx.savePending) { toast('El guardado anterior sigue en curso. Espera a que termine.'); return false; }
+  const session = captureDesignSession();
+  ctx.savePending = true;
+  ctx.lastSaveConflict = false;
+  const config = structuredClone(getC());
+  const expected = structuredClone(getBaseline());
+  const sourceId = ctx.editingSavedId ?? editingSavedId;
+  const expectedRevision = ctx.editingSavedRevision ?? editingSavedRevision;
+  const storage = storageOf(ctx);
+  let result;
   try {
-    const storage = (activeCtx && activeCtx.localStorage) || (typeof localStorage !== 'undefined' ? localStorage : null);
     if (!storage) throw new Error('No storage available');
-    storage.setItem('kpi-atelier-saved', JSON.stringify(next));
-  } catch {
-    toast('No se pudo guardar. Los cambios siguen abiertos; puedes exportar el JSON.');
+    result = await withSavedLock(ctx, transactionStorage => {
+      const rawCurrent = storedDesignEntries(transactionStorage, true);
+      const current = rawCurrent.map(entry => normalizedSavedDesign(entry));
+      const original = current.find(s => s.id === sourceId);
+      const conflict = Boolean(sourceId && !sourceId.startsWith('draft:') && (!original || JSON.stringify(original.config) !== JSON.stringify(expected) || (expectedRevision && savedRevision(original) !== expectedRevision)));
+      const id = original && !conflict ? original.id : crypto.randomUUID();
+      const savedName = conflict ? name.slice(0, 62) + ' · Copia en conflicto' : name;
+      const entry = { id, name: savedName, date: new Date().toISOString(), config };
+      // Preserve unrelated raw configurations so their compatibility notices
+      // remain available until the user actually opens and reviews them.
+      transactionStorage.setItem(SAVED_KEY, JSON.stringify([entry, ...rawCurrent.filter(s => s.id !== id)]));
+      if (sourceId?.startsWith('draft:')) {
+        const key = RECOVERY_PREFIX + sourceId.slice(6);
+        const recovery = parseStorage(transactionStorage, key);
+        if (recovery && (!expectedRevision || JSON.stringify(recovery) === expectedRevision) && JSON.stringify(sanitizeConfig(recovery.config)) === JSON.stringify(expected)) transactionStorage.removeItem(key);
+      }
+      return { id, conflict, revision: JSON.stringify(entry) };
+    });
+  } catch (error) {
+    toast(/entre ventanas|colección guardada/.test(error.message) ? error.message : 'No se pudo guardar. Los cambios siguen abiertos; puedes exportar el JSON.');
+    return false;
+  } finally {
+    ctx.savePending = false;
+  }
+  if (!isDesignSessionCurrent(session)) {
+    refreshSaved();
+    toast('El diseño anterior se guardó en tu colección. El diseño abierto conserva sus propios cambios.');
+    return true;
+  }
+  editingSavedId = result.id;
+  ctx.editingSavedId = result.id;
+  editingSavedRevision = result.revision;
+  ctx.editingSavedRevision = result.revision;
+  ctx.lastSaveConflict = result.conflict;
+  setBaseline(config);
+  if (!persist()) {
+    ctx.lastCollectionSyncWarning = 'El diseño se guardó en la colección compartida. No se pudo actualizar su copia de recuperación local; la versión guardada se conserva.';
+    toast(ctx.lastCollectionSyncWarning);
+  }
+  refreshSaved();
+  showDirty();
+  if (result.conflict) toast('Otra ventana modificó o eliminó este diseño. Tus cambios se guardaron como «Copia en conflicto»; ambas versiones se conservan.');
+  return true;
+}
+
+/**
+ * Only delete the complete revision reviewed before opening confirmation.
+ * @param {string} id
+ * @param {import('./types.d.ts').SavedDesign} reviewedEntry
+ */
+export async function deleteSaved(id, reviewedEntry) {
+  const ctx = getActiveContext();
+  const storage = storageOf(ctx);
+  ctx.lastDeleteConflict = false;
+  if (!reviewedEntry || reviewedEntry.id !== id || !reviewedEntry.config) {
+    toast('Vuelve a abrir la confirmación para revisar el diseño que quieres eliminar.');
     return false;
   }
-  setSaved(next);
-  editingSavedId = id;
-  if (activeCtx) activeCtx.editingSavedId = id;
-  setBaseline(structuredClone(getC()));
-  persist();
-  showDirty();
-  return true;
+  const expected = structuredClone(reviewedEntry);
+  try {
+    if (!storage) throw new Error('No storage available');
+    await withSavedLock(ctx, transactionStorage => {
+      if (id.startsWith('draft:')) {
+        const key = RECOVERY_PREFIX + id.slice(6);
+        const latest = parseStorage(transactionStorage, key);
+        const latestEntry = latest?.config && typeof latest.date === 'string' ? recoveryEntry(id, latest) : null;
+        if (transactionStorage.getItem(key) !== null && (!latestEntry || savedRevision(latestEntry) !== savedRevision(expected))) throw new Error('changed');
+        transactionStorage.removeItem(key);
+        return;
+      }
+      const rawCurrent = storedDesignEntries(transactionStorage, true);
+      const current = rawCurrent.map(entry => normalizedSavedDesign(entry));
+      const latest = current.find(s => s.id === id);
+      if (latest && savedRevision(latest) !== savedRevision(expected)) throw new Error('changed');
+      transactionStorage.setItem(SAVED_KEY, JSON.stringify(rawCurrent.filter(s => s.id !== id)));
+    });
+    refreshSaved();
+    return true;
+  } catch (error) {
+    ctx.lastDeleteConflict = error.message === 'changed';
+    refreshSaved();
+    toast(error.message === 'changed' ? 'El diseño cambió en otra ventana. Revisa la versión actual antes de eliminarlo.' : error.message?.includes('entre ventanas') ? error.message : 'No se pudo eliminar el diseño. Inténtalo de nuevo.');
+    return false;
+  }
+}
+
+/** Merge with the current collection under the same lock used by all windows. */
+export async function saveCustomTheme(name, palette, reviewedTheme = null) {
+  const ctx = getActiveContext(), storage = storageOf(ctx);
+  const colors = sanitizePalette(palette);
+  name = String(name ?? '').trim().slice(0, 40);
+  if (!name || !colors) { toast('Revisa el nombre y los colores de la paleta.'); return null; }
+  const expected = reviewedTheme ? structuredClone(reviewedTheme) : null;
+  ctx.lastThemeSaveConflict = false;
+  try {
+    if (!storage) throw new Error('No storage available');
+    const result = await withStorageLock(ctx, 'kpi-atelier-themes-collection', transactionStorage => {
+      const current = storedCustomThemes(transactionStorage, true);
+      const original = expected ? current.find(theme => theme.id === expected.id) : null;
+      const nameCollision = current.some(theme => theme.name === name && theme.id !== expected?.id);
+      const conflict = nameCollision || Boolean(expected && (!original || JSON.stringify(original) !== JSON.stringify(expected)));
+      let savedName = conflict ? name.slice(0, 20) + ' · Copia en conflicto' : name;
+      let suffix = 2;
+      const rootName = savedName;
+      while (conflict && current.some(theme => theme.name === savedName)) {
+        const number = ` (${suffix++})`;
+        savedName = rootName.slice(0, 40 - number.length) + number;
+      }
+      const theme = { id: original && !conflict ? original.id : crypto.randomUUID(), name: savedName, colors };
+      transactionStorage.setItem(THEMES_KEY, JSON.stringify([...current.filter(entry => entry.id !== theme.id), theme]));
+      return { theme, conflict };
+    });
+    ctx.lastThemeSaveConflict = result.conflict;
+    refreshCustomThemes();
+    return result.theme;
+  } catch (error) {
+    toast(/entre ventanas|colección de paletas/.test(error.message) ? error.message : 'No se pudo guardar la paleta. Tu edición sigue abierta.');
+    return null;
+  }
+}
+
+export async function deleteCustomTheme(id, reviewedTheme) {
+  const ctx = getActiveContext(), storage = storageOf(ctx);
+  if (!reviewedTheme || reviewedTheme.id !== id) { toast('Revisa la paleta actual antes de eliminarla.'); return false; }
+  const expected = structuredClone(reviewedTheme);
+  try {
+    if (!storage) throw new Error('No storage available');
+    await withStorageLock(ctx, 'kpi-atelier-themes-collection', transactionStorage => {
+      const current = storedCustomThemes(transactionStorage, true), latest = current.find(theme => theme.id === id);
+      if (latest && JSON.stringify(latest) !== JSON.stringify(expected)) throw new Error('changed');
+      transactionStorage.setItem(THEMES_KEY, JSON.stringify(current.filter(theme => theme.id !== id)));
+    });
+    refreshCustomThemes();
+    return true;
+  } catch (error) {
+    refreshCustomThemes();
+    toast(error.message === 'changed' ? 'La paleta cambió en otra ventana. Revisa sus colores antes de eliminarla.' : /entre ventanas|colección de paletas/.test(error.message) ? error.message : 'No se pudo eliminar la paleta.');
+    return false;
+  }
 }
 
 export function requestNavigation(go) {

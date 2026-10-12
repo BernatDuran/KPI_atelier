@@ -16,7 +16,7 @@ import {
 import { icon, esc, sampleData, comparisonLabel } from './cards.mjs';
 import {
   ELEMENTS, SIZE_LIMITS, elementState, elementSize, elementAvailable,
-  elementEnabled, updateElement, moveElement, resolveElementDef
+  elementEnabled, updateElement, moveElement, resolveElementDef, usesValueBinding, valueBinding,goalBinding,usesGoalBinding
 } from './elements.mjs';
 import { COLOR_ROLES } from './colors.mjs';
 import { ICON_OPTIONS } from './icons.mjs';
@@ -132,8 +132,8 @@ export function duplicateContentFields(baseIds) {
       const curBad = st.statusBad !== undefined ? st.statusBad : (c.statusBad || 'Desfavorable');
       const curGTh = st.goodThreshold !== undefined ? st.goodThreshold : c.goodThreshold;
       const curWTh = st.warnThreshold !== undefined ? st.warnThreshold : c.warnThreshold;
-      fields = `<div class="field-row"><div class="field"><label for="f-dup-gth-${dupId}">Umbral favorable</label><input id="f-dup-gth-${dupId}" type="number" data-dupval="goodThreshold" data-dupid="${dupId}" value="${curGTh}"></div>` +
-        `<div class="field"><label for="f-dup-wth-${dupId}">Umbral alerta</label><input id="f-dup-wth-${dupId}" type="number" data-dupval="warnThreshold" data-dupid="${dupId}" value="${curWTh}"></div></div>` +
+      fields = `<div class="field-row"><div class="field"><label for="f-dup-gth-${dupId}">Umbral favorable</label><input id="f-dup-gth-${dupId}" type="number" step="any" data-dupval="goodThreshold" data-dupid="${dupId}" value="${curGTh}"></div>` +
+        `<div class="field"><label for="f-dup-wth-${dupId}">Umbral alerta</label><input id="f-dup-wth-${dupId}" type="number" step="any" data-dupval="warnThreshold" data-dupid="${dupId}" value="${curWTh}"></div></div>` +
         `<div class="field"><label for="f-dup-sg-${dupId}">Texto favorable</label><input id="f-dup-sg-${dupId}" data-dupval="statusGood" data-dupid="${dupId}" value="${esc(curGood)}"></div>` +
         `<div class="field"><label for="f-dup-sw-${dupId}">Texto alerta</label><input id="f-dup-sw-${dupId}" data-dupval="statusWarn" data-dupid="${dupId}" value="${esc(curWarn)}"></div>` +
         `<div class="field"><label for="f-dup-sb-${dupId}">Texto desfavorable</label><input id="f-dup-sb-${dupId}" data-dupval="statusBad" data-dupid="${dupId}" value="${esc(curBad)}"></div>`;
@@ -144,7 +144,7 @@ export function duplicateContentFields(baseIds) {
       const curIcon = st.icon || c.icon;
       fields = `<div class="field"><label for="f-dup-ico-${dupId}">Icono</label><select id="f-dup-ico-${dupId}" data-dupval="icon" data-dupid="${dupId}">${ICON_OPTIONS.map(([k, l]) => `<option value="${k}" ${curIcon === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>`;
     } else if (['goalLabel', 'progressLabel', 'progress'].includes(def.baseId)) {
-      fields = '<p class="field-help">La medida objetivo se configura en Conectar datos del modelo.</p>';
+      fields = '<p class="field-help">Usa el objetivo de su grupo. El avance toma su valor asociado o, sin ese valor, una medida independiente. Vincúlalos en Conectar datos.</p>';
     } else if (def.baseId === 'trend') {
       fields = chartPanel(dupId);
     } else {
@@ -182,7 +182,9 @@ export function updateInspectorTabs() {
     ['style', 'Estilo'],
     ['data', 'Datos & DAX']
   ];
-  tabs.innerHTML = entries.map(([id, label]) => `<button role="tab" aria-selected="${tab === id}" data-tab="${id}" class="${tab === id ? 'active' : ''}">${label}</button>`).join('');
+  const focusedTab = tabs.contains(document.activeElement) ? document.activeElement?.dataset.tab : null;
+  tabs.innerHTML = entries.map(([id, label]) => `<button id="inspector-tab-${id}" role="tab" aria-controls="inspector-fields" tabindex="${tab === id ? 0 : -1}" aria-selected="${tab === id}" data-tab="${id}" class="${tab === id ? 'active' : ''}">${label}</button>`).join('');
+  if (focusedTab) document.getElementById(`inspector-tab-${focusedTab}`)?.focus({ preventScroll: true });
 }
 
 export function iconPickerField() {
@@ -361,7 +363,8 @@ export function dataSummaryCard() {
     const st = elementState(c, id);
     if (!def?.isDuplicate || st.deleted || st.hidden) return false;
     if (def.baseId === 'value') return true;
-    if (def.baseId === 'delta') return (st.comparison || c.comparison) === 'custom';
+    if (def.baseId === 'delta') return (st.comparison || c.comparison) !== 'none';
+    if(def.baseId==='status')return true;
     if (['goalLabel', 'progressLabel', 'progress'].includes(def.baseId)) return needsGoal(c) || (st.comparison || c.comparison) === 'target';
     if (def.baseId === 'trend') return true;
     return false;
@@ -371,15 +374,19 @@ export function dataSummaryCard() {
     for (const dupId of activeDupIds) {
       const def = resolveElementDef(dupId);
       const st = elementState(c, dupId);
-      if (def.baseId === 'trend') {
-        rows.push(`<div class="data-summary-row"><span>${esc(def.label)} (medida)</span><strong title="${esc(st.measure || c.measure || 'Hereda principal')}">${esc(st.measure || c.measure || 'Hereda principal')}</strong></div>`);
-        rows.push(`<div class="data-summary-row"><span>${esc(def.label)} (fecha)</span><strong title="${esc(st.dateTable || c.dateTable || 'Calendario')} [${esc(st.dateColumn || c.dateColumn || 'Fecha')}]">${esc(st.dateTable || c.dateTable || 'Calendario')} [${esc(st.dateColumn || c.dateColumn || 'Fecha')}]</strong></div>`);
+      if (usesValueBinding(c,dupId)) {
+        const source=valueBinding(c,dupId);
+        if(def.baseId!=='goalLabel')rows.push(`<div class="data-summary-row"><span>${esc(def.label)} (${source.id===dupId?'medida independiente':'valor asociado'})</span><strong title="${esc(resolveElementDef(source.id)?.label || 'Valor principal')}">${esc(source.measure || 'Sin asignar')}</strong></div>`);
+        if(def.baseId==='delta'&&(st.comparison||c.comparison)==='custom') rows.push(`<div class="data-summary-row"><span>${esc(def.label)} (referencia)</span><strong>${esc(st.compareMeasure || 'Sin asignar')}</strong></div>`);
+        if(usesGoalBinding(c,dupId))rows.push(`<div class="data-summary-row"><span>${esc(def.label)} (objetivo de la copia)</span><strong>${esc(goalBinding(c,dupId).measure||'Sin asignar')}</strong></div>`);
+        if(def.baseId==='trend'&&(st.chartKind||c.chartKind)!=='donut')rows.push(`<div class="data-summary-row"><span>${esc(def.label)} (calendario compartido)</span><strong>${esc(c.dateTable||'Sin tabla')} [${esc(c.dateColumn||'Sin columna')}]</strong></div>`);
+      } else if (def.baseId === 'trend') {
+        rows.push(`<div class="data-summary-row"><span>${esc(def.label)} (medida)</span><strong title="${esc(st.measure || 'Sin asignar')}">${st.measure ? esc(st.measure) : '<em class="data-unassigned">Sin asignar</em>'}</strong></div>`);
+        if((st.chartKind || c.chartKind) !== 'donut') rows.push(`<div class="data-summary-row"><span>${esc(def.label)} (calendario compartido)</span><strong title="${esc(c.dateTable)} [${esc(c.dateColumn)}]">${esc(c.dateTable || 'Sin tabla')} [${esc(c.dateColumn || 'Sin columna')}]</strong></div>`);
       } else if (def.baseId === 'value') {
-        rows.push(`<div class="data-summary-row"><span>${esc(def.label)}</span><strong title="${esc(st.measure || c.measure || 'Hereda principal')}">${esc(st.measure || c.measure || 'Hereda principal')}</strong></div>`);
+        rows.push(`<div class="data-summary-row"><span>${esc(def.label)}</span><strong title="${esc(st.measure || 'Sin asignar')}">${esc(st.measure || 'Sin asignar')}</strong></div>`);
       } else if (def.baseId === 'delta') {
         rows.push(`<div class="data-summary-row"><span>${esc(def.label)} (ref.)</span><strong title="${esc(st.compareMeasure || 'Sin asignar')}">${st.compareMeasure ? esc(st.compareMeasure) : '<em class="data-unassigned">Sin asignar</em>'}</strong></div>`);
-      } else if (['goalLabel', 'progressLabel', 'progress'].includes(def.baseId)) {
-        rows.push(`<div class="data-summary-row"><span>${esc(def.label)} (objetivo)</span><strong title="${esc(st.targetMeasure || c.targetMeasure || 'Sin asignar')}">${(st.targetMeasure || c.targetMeasure) ? esc(st.targetMeasure || c.targetMeasure) : '<em class="data-unassigned">Sin asignar</em>'}</strong></div>`);
       }
     }
   }
@@ -430,8 +437,8 @@ export function elementInspector() {
       const curBad = p.statusBad !== undefined ? p.statusBad : (c.statusBad || 'Desfavorable');
       const curGTh = p.goodThreshold !== undefined ? p.goodThreshold : c.goodThreshold;
       const curWTh = p.warnThreshold !== undefined ? p.warnThreshold : c.warnThreshold;
-      specific = `<div class="field-row"><div class="field"><label for="f-dup-gth">Umbral favorable</label><input id="f-dup-gth" type="number" data-dupval="goodThreshold" value="${curGTh}"></div>` +
-        `<div class="field"><label for="f-dup-wth">Umbral alerta</label><input id="f-dup-wth" type="number" data-dupval="warnThreshold" value="${curWTh}"></div></div>` +
+      specific = `<div class="field-row"><div class="field"><label for="f-dup-gth">Umbral favorable</label><input id="f-dup-gth" type="number" step="any" data-dupval="goodThreshold" value="${curGTh}"></div>` +
+        `<div class="field"><label for="f-dup-wth">Umbral alerta</label><input id="f-dup-wth" type="number" step="any" data-dupval="warnThreshold" value="${curWTh}"></div></div>` +
         `<div class="field"><label for="f-dup-sg">Texto favorable</label><input id="f-dup-sg" data-dupval="statusGood" value="${esc(curGood)}"></div>` +
         `<div class="field"><label for="f-dup-sw">Texto alerta</label><input id="f-dup-sw" data-dupval="statusWarn" value="${esc(curWarn)}"></div>` +
         `<div class="field"><label for="f-dup-sb">Texto desfavorable</label><input id="f-dup-sb" data-dupval="statusBad" value="${esc(curBad)}"></div>`;
@@ -479,8 +486,7 @@ export function elementInspector() {
     section('04', 'Visibilidad', `<div class="element-action-row">${btn(p.deleted ? 'restore-element' : 'hide-element', p.deleted ? 'Restaurar' : hidden ? 'Mostrar' : 'Ocultar', p.deleted ? 'restore' : hidden ? 'eye' : 'eyeOff', 'button secondary')}${!p.deleted ? btn('delete-element', 'Eliminar', 'trash', 'button quiet') : ''}</div><p class="field-help">Ocultar conserva el espacio. Eliminar retira el elemento. Puedes recuperarlo con Deshacer.</p>${btn('reset-element', 'Restablecer este elemento', 'reset', 'button quiet')}`);
 }
 
-export function renderInspector() {
-  const remembered = rememberInspector();
+export function renderInspector(remembered = rememberInspector()) {
   const c = getC();
   const mode = getMode();
   const tab = getTab();
@@ -503,7 +509,7 @@ export function renderInspector() {
     if (c.type === 'status') h += section('04', 'Reglas del semáforo', `<p class="field-help">${c.direction === 'down' ? 'Verde ≤ favorable; ámbar ≤ alerta; rojo por encima.' : 'Verde ≥ favorable; ámbar ≥ alerta; rojo por debajo.'}${c.format === 'percent' ? ' Usa 0,95 para indicar 95 %.' : ''}</p><div class="field-row">${field('goodThreshold', 'Umbral favorable', 'number')}${field('warnThreshold', 'Umbral de alerta', 'number')}</div>` + (pro ? field('statusGood', 'Texto favorable') + field('statusWarn', 'Texto en alerta') + field('statusBad', 'Texto desfavorable') : '') + duplicateContentFields(['status']));
     if (pro) h += section('05', 'Composición', check('showIcon', 'Mostrar icono') + (c.showIcon ? iconPickerField() : '') + check('showSubtitle', 'Mostrar subtítulo') + check('showComparison', 'Mostrar comparativa') + (['spark', 'executive', 'target'].includes(c.type) ? check('showTrend', 'Mostrar gráfico') : '') + (c.type === 'executive' ? check('showGoal', 'Mostrar objetivo') : '') + check('showFooter', 'Mostrar pie') + (adv ? field('footer', 'Texto del pie') : '') + duplicateContentFields(['icon', 'footer', 'goalLabel', 'progressLabel', 'progress', 'trend']), false);
   } else if (tab === 'style') {
-    h += section('01', 'Paleta', `<button class="palette-launch" data-action="themes">${icon('palette', 17)}<span>Estudio de color<small>Crea, ajusta y guarda tus temas</small></span>${icon('arrow', 15)}</button><div class="theme-grid">${Object.entries(THEMES).map(([k, t]) => `<button data-theme="${k}" class="theme-option ${c.theme === k ? 'active' : ''}"><span style="background:${t.background};border-color:${t.borderColor}"><i style="background:${t.accent}"></i></span>${t.name}</button>`).join('')}</div>` + field('accent', 'Color de acento', 'color') + (pro ? `<div class="field-row">${field('background', 'Fondo', 'color')}${field('text', 'Texto', 'color')}</div>` : '') + (adv ? field('muted', 'Texto secundario', 'color') : '') + (pro ? `<div class="field-row">${field('positive', 'Favorable', 'color')}${field('negative', 'Desfavorable', 'color')}</div>` : '') + (adv ? field('warning', 'Alerta', 'color') : ''));
+    h += section('01', 'Paleta', `<button class="palette-launch" data-action="themes">${icon('palette', 17)}<span>Estudio de color<small>Crea, ajusta y guarda tus temas</small></span>${icon('arrow', 15)}</button><div class="theme-grid">${Object.entries(THEMES).map(([k, t]) => `<button data-theme="${k}" aria-pressed="${c.theme === k}" class="theme-option ${c.theme === k ? 'active' : ''}"><span style="background:${t.background};border-color:${t.borderColor}"><i style="background:${t.accent}"></i></span>${t.name}</button>`).join('')}</div>` + field('accent', 'Color de acento', 'color') + (pro ? `<div class="field-row">${field('background', 'Fondo', 'color')}${field('text', 'Texto', 'color')}</div>` : '') + (adv ? field('muted', 'Texto secundario', 'color') : '') + (pro ? `<div class="field-row">${field('positive', 'Favorable', 'color')}${field('negative', 'Desfavorable', 'color')}</div>` : '') + (adv ? field('warning', 'Alerta', 'color') : ''));
     h += section('02', 'Forma y tamaño', cardDimensionsPanel() + layoutPanel() + range('radius', 'Radio de esquinas', 0, 40) + (pro ? range('padding', 'Espacio interior', 12, 48) + (['solid', 'aurora'].includes(c.surfaceEffect) ? select('shadow', 'Sombra', [['none', 'Sin sombra'], ['soft', 'Suave'], ['strong', 'Profunda']]) : '') : '') + (adv ? range('borderWidth', 'Grosor del borde', 0, 4) + field('borderColor', 'Color del borde', 'color') : ''));
     h += section('03', 'Superficie y efectos', surfaceInspector());
     if (pro) h += section('04', 'Tipografía', select('font', 'Familia tipográfica', [['Segoe UI', 'Segoe UI · Power BI'], ['Arial', 'Arial · Universal'], ['Georgia', 'Georgia · Editorial']]) + range('valueSize', 'Tamaño del valor', 6, 140) + (adv ? range('titleSize', 'Tamaño del título', 6, 140) + select('fontWeight', 'Peso del valor', [[400, 'Regular'], [500, 'Medio'], [600, 'Semibold'], [700, 'Negrita'], [800, 'Extra bold']]) : '') + select('align', 'Alineación', [['left', 'Izquierda'], ['center', 'Centrada']]), false);
@@ -521,6 +527,8 @@ export function renderInspector() {
   if (panel) {
     panel.innerHTML = h;
     panel.dataset.panelTab = tab;
+    panel.setAttribute('role', 'tabpanel');
+    panel.setAttribute('aria-labelledby', `inspector-tab-${tab}`);
     const positions = getActiveContext().inspectorPositions || inspectorPositions;
     panel.scrollTop = positions.get(tab) ?? 0;
     if (remembered?.focus && remembered.tab === tab) {
@@ -528,7 +536,7 @@ export function renderInspector() {
       if (node) {
         node.focus({ preventScroll: true });
         if (remembered.selection && node.setSelectionRange) {
-          try { node.setSelectionRange(...remembered.selection); } catch {}
+          try { node.setSelectionRange(remembered.selection[0], remembered.selection[1]); } catch {}
         }
       }
     }
@@ -602,8 +610,9 @@ export function commitNumber(input) {
   const c = getC();
   const selectedElement = getSelectedElement();
   const key = input.dataset.key;
-  const prop = input.dataset.elprop;
-  const previous = key ? c[key] : elementState(c, selectedElement)[prop];
+  const prop = input.dataset.dupval || input.dataset.elprop;
+  const elementId = input.dataset.dupid || selectedElement;
+  const previous = key ? c[key] : elementState(c, elementId)[prop] ?? c[prop];
 
   if (input.value.trim() === '' || !Number.isFinite(Number(input.value))) {
     input.value = previous;
@@ -617,14 +626,14 @@ export function commitNumber(input) {
   } else if (key) {
     next = { ...c, [key]: value };
   } else {
-    const state = elementState(c, selectedElement);
+    const state = elementState(c, elementId);
     next = ['x', 'y'].includes(prop)
-      ? moveElement(c, selectedElement, prop === 'x' ? value - state.x : 0, prop === 'y' ? value - state.y : 0, 1, callMeasureElementFrame(selectedElement))
-      : updateElement(c, selectedElement, { [prop]: value });
+      ? moveElement(c, elementId, prop === 'x' ? value - state.x : 0, prop === 'y' ? value - state.y : 0, 1, callMeasureElementFrame(elementId))
+      : updateElement(c, elementId, { [prop]: value });
   }
 
   const safe = sanitizeConfig(next);
-  const resolved = key ? safe[key] : elementState(safe, selectedElement)[prop];
+  const resolved = key ? safe[key] : elementState(safe, elementId)[prop];
 
   if (JSON.stringify(safe) !== JSON.stringify(c)) {
     record();
@@ -636,5 +645,5 @@ export function commitNumber(input) {
   }
 
   input.value = resolved;
-  if (resolved !== value) toast(`Valor ajustado a ${resolved} px, dentro del rango permitido.`);
+  if (resolved !== value) toast(`Valor ajustado a ${resolved}, dentro del rango permitido.`);
 }

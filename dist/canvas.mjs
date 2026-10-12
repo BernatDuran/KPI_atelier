@@ -8,14 +8,16 @@ import { resizeCard, applyLayout } from './layout.mjs';
 import { appearance } from './appearance.mjs';
 import { copyElementData, pasteElementData } from './editor-clipboard.mjs';
 import { alignmentGuides } from './guides.mjs';
+import { renderDesignDiagnostics } from './design-diagnostics.mjs';
 import {
   ELEMENTS, ELEMENT_IDS, SIZE_LIMITS, elementState, elementSize,
   elementAvailable, elementEnabled, elementVisible, updateElement,
-  moveElement, resizeElement, restoreElement, clamp, frameFromBounds,
+  moveElement, resizeElement, restoreElement, restorationIssue, resetElement, clamp, frameFromBounds,
   detachElement, releaseElement, layerOrder, moveLayer, reorderLayer,
   resolveElementDef
 } from './elements.mjs';
 import { icon, esc, cardHTML } from './cards.mjs';
+import { contextReport } from './context-preview.mjs';
 import { TEMPLATES, BASE, sanitizeConfig } from './model.mjs';
 import {
   $, btn, ib, getC, setC, getBaseline, setBaseline, dirty,
@@ -59,6 +61,11 @@ function callRememberInspector() {
 let guidePreviewUntil = 0;
 let guideTimer = null;
 let draggedLayer = null;
+let contextAutoFit = true;
+let contextPan = {x:0,y:0};
+export function resetContextViewport(){contextAutoFit=true;contextPan={x:0,y:0};}
+export function setContextManualZoom(){contextAutoFit=false;}
+export function panContext(dx,dy){contextPan={x:contextPan.x+dx,y:contextPan.y+dy};fitMain();}
 
 // Motor de Patching DOM Directo (GPU-accelerated transformations)
 export function patchCardElementTransform(id, x, y) {
@@ -95,67 +102,7 @@ export function renderStage() {
 
   if (context) {
     const [resW, resH] = contextResolution === '1920x1080' ? [1920, 1080] : [1280, 720];
-    stage.innerHTML = `
-      <div class="context-fit" id="context-fit">
-      <div class="context-report-canvas" id="context-viewport" style="width:${resW}px;height:${resH}px">
-        <div class="context-report-topbar">
-          <div class="context-topbar-left">
-            <span class="context-report-title">Executive Overview · Performance Dashboard</span>
-            <span class="context-canvas-badge">${icon('grid', 12)} Lienzo Power BI: ${resW} × ${resH} px (16:9)</span>
-          </div>
-          <div class="context-topbar-slicers">
-            <span class="context-slicer">Año: <strong>2026</strong></span>
-            <span class="context-slicer">Período: <strong>Acumulado</strong></span>
-            <span class="context-slicer">Canal: <strong>Todos</strong></span>
-          </div>
-        </div>
-        <div class="context-report-grid">
-          <div class="context-cards-row">
-            <div class="context-card-slot active-card-slot" style="width:${c.width}px;height:${c.height}px">
-              <span class="context-card-badge">Tu tarjeta · ${c.width} × ${c.height} px</span>
-              ${cardHTML(c, undefined, true)}
-            </div>
-            <div class="context-mock-kpi" style="height:${c.height}px">
-              <span class="mock-kpi-label">MARGEN OPERATIVO</span>
-              <span class="mock-kpi-val">34,8 %</span>
-              <span class="mock-kpi-delta positive">↑ +2.4 pp vs. objetivo</span>
-              <div class="mock-kpi-bar"><div style="width:78%"></div></div>
-            </div>
-            <div class="context-mock-kpi" style="height:${c.height}px">
-              <span class="mock-kpi-label">CLIENTES ACTIVOS</span>
-              <span class="mock-kpi-val">18.420</span>
-              <span class="mock-kpi-delta positive">↑ +12 % vs. mes ant.</span>
-              <div class="mock-kpi-spark"></div>
-            </div>
-          </div>
-          <div class="context-report-lower">
-            <div class="context-mock-visual chart-visual">
-              <div class="mock-visual-head">
-                <strong>Evolución mensual del negocio</strong>
-                <small>Vista agregada anual</small>
-              </div>
-              <svg viewBox="0 0 740 120" preserveAspectRatio="none" class="mock-chart-svg">
-                <path d="M0 100L60 92L120 102L180 75L240 82L300 60L360 68L420 42L480 50L540 28L600 34L680 12L740 8" fill="none" stroke="${c.accent}" stroke-width="2.5"/>
-                <path d="M0 100L60 92L120 102L180 75L240 82L300 60L360 68L420 42L480 50L540 28L600 34L680 12L740 8L740 120L0 120Z" fill="${c.accent}" opacity="0.12"/>
-              </svg>
-              <div class="context-chart-axis"><span>ENE</span><span>FEB</span><span>MAR</span><span>ABR</span><span>MAY</span><span>JUN</span><span>JUL</span><span>AGO</span><span>SEP</span><span>OCT</span><span>NOV</span><span>DIC</span></div>
-            </div>
-            <div class="context-mock-visual table-visual">
-              <div class="mock-visual-head">
-                <strong>Top categorías</strong>
-                <small>Rendimiento por unidad</small>
-              </div>
-              <div class="mock-table-grid">
-                <div class="mock-tr head"><span>Categoría</span><span>Importe</span><span>% Total</span></div>
-                <div class="mock-tr"><span>Bicicletas</span><strong>842.150 €</strong><span>54 %</span></div>
-                <div class="mock-tr"><span>Componentes</span><strong>412.300 €</strong><span>26 %</span></div>
-                <div class="mock-tr"><span>Accesorios</span><strong>215.420 €</strong><span>14 %</span></div>
-                <div class="mock-tr"><span>Ropa & Otros</span><strong>93.680 €</strong><span>6 %</span></div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div></div>`;
+    stage.innerHTML = `<div class="context-pan-viewport" tabindex="0" role="region" aria-label="Lienzo del informe. Arrastra o usa las flechas para desplazar la vista ampliada."><div class="context-fit" id="context-fit">${contextReport(c, resW, resH)}</div></div>`;
   } else {
     const existingFit = stage.querySelector('#card-fit');
     const existingMain = stage.querySelector('#main-card');
@@ -221,14 +168,29 @@ export function fitMain() {
     if (!stage || !v || !fit) return;
     const contextResolution = getContextResolution();
     const [resW, resH] = contextResolution === '1920x1080' ? [1920, 1080] : [1280, 720];
-    const factor = zoom / 100;
+    // Ignore transient collapsed layouts; an auto-fit also grows back after resize.
+    if(stage.clientWidth<=48||stage.clientHeight<=48)return;
+    const availableWidth=stage.clientWidth-48;
+    const availableHeight=stage.clientHeight-48;
+    const fitted=Math.max(1,Math.min(100,Math.floor(Math.min(availableWidth/resW,availableHeight/resH)*100)));
+    const actualZoom=contextAutoFit?fitted:Math.max(1,Math.min(200,zoom));
+    setZoom(actualZoom);
+    const zoomLabel=$('#zoom-text');if(zoomLabel)zoomLabel.textContent=actualZoom+'%';
+    const factor = actualZoom / 100;
     fit.style.width = (resW * factor) + 'px';
     fit.style.height = (resH * factor) + 'px';
+    const maxX=Math.max(0,(resW*factor-availableWidth)/2),maxY=Math.max(0,(resH*factor-availableHeight)/2);
+    contextPan={x:Math.max(-maxX,Math.min(maxX,contextPan.x)),y:Math.max(-maxY,Math.min(maxY,contextPan.y))};
+    fit.style.transform=`translate(${contextPan.x}px,${contextPan.y}px)`;
+    stage.classList.toggle('can-pan',maxX>0||maxY>0);
+    stage.title=maxX>0||maxY>0?'Arrastra para desplazar el lienzo. Ajustar vista muestra el informe completo.':'';
     v.style.transformOrigin = 'top left';
     v.style.transform = `scale(${factor})`;
+    renderDesignDiagnostics(null, c);
     return;
   }
 
+  resetContextViewport();
   const v = $('#card-fit');
   const inner = $('#main-card');
   if (!v || !inner) return;
@@ -270,6 +232,7 @@ export function fitMain() {
   positionSelection();
   renderGuides();
   reportOverflow();
+  renderDesignDiagnostics(inner, c);
 }
 
 export function measureElementFrame(id) {
@@ -687,12 +650,20 @@ export function elementAction(action) {
     if (selectedElements.size > 1) {
       for (const selId of selectedElements) {
         const p = elementState(next, selId);
+        if (p.hidden || p.deleted || !elementEnabled(next, selId)) {
+          const issue = restorationIssue(next, selId);
+          if (issue) { toast(issue); continue; }
+        }
         next = p.hidden || p.deleted || !elementEnabled(next, selId) ? restoreElement(next, selId) : updateElement(next, selId, { hidden: true });
       }
       directChange(next, true, true);
       return;
     }
     const p = elementState(c, selectedElement);
+    if (p.hidden || p.deleted || !elementEnabled(c, selectedElement)) {
+      const issue = restorationIssue(c, selectedElement);
+      if (issue) { toast(issue); return; }
+    }
     next = p.hidden || p.deleted || !elementEnabled(c, selectedElement) ? restoreElement(c, selectedElement) : updateElement(c, selectedElement, { hidden: true });
   }
 
@@ -713,16 +684,22 @@ export function elementAction(action) {
     toast('Elemento eliminado. Recupéralo con Deshacer (Ctrl+Z).');
   }
 
-  if (action === 'restore-element') { next = restoreElement(c, selectedElement); isStructural = true; }
+  if (action === 'restore-element') {
+    const issue = restorationIssue(c, selectedElement);
+    if (issue) { toast(issue); return; }
+    next = restoreElement(c, selectedElement); isStructural = true;
+  }
   if (action === 'release-element') { next = releaseElement(c, selectedElement); isStructural = true; }
   if (action === 'smaller-element' || action === 'bigger-element') { next = resizeElement(c, selectedElement, action === 'bigger-element' ? 1 : -1); isStructural = false; }
   if (action === 'reset-element') {
     isStructural = true;
     const template = TEMPLATES.find(t => t.id === c.id)?.config || BASE;
-    next = restoreElement({ ...c, elements: { ...c.elements, [selectedElement]: { ...template.elements?.[selectedElement], x: 0, y: 0, width: 0 } } }, selectedElement);
-    next[ELEMENTS[selectedElement].sizeKey] = elementSize(template, selectedElement);
+    const issue = restorationIssue(c, selectedElement);
+    if (issue) { toast(issue); return; }
+    next = resetElement(c, selectedElement, template);
   }
 
+  if (next === c) return;
   directChange(next, true, isStructural);
   if (selectedElement) {
     $('#app')?.querySelector(`[data-element="${selectedElement}"]`)?.focus({ preventScroll: true });

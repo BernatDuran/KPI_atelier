@@ -42,9 +42,9 @@ async function editor(){
  for(const match of source.matchAll(/^import \{([^}]+)\} from '([^']+)';$/gm)){const mod=await import(new URL(match[2],appURL));for(const raw of match[1].split(',')){const name=raw.trim();if(typeof mod[name]==='function')context.__imports[name]=mod[name];else context[name]=mod[name];}}
  source=source.replace(/^import .*;$/gm,'');
  const node=id=>{if(!nodes.has(id))nodes.set(id,{innerHTML:'',textContent:'',dataset:{},style:{setProperty(){}},classList:{add(){},remove(){},toggle(){}},get firstElementChild(){return this;},querySelector(s){return node(s);},querySelectorAll(){return [];},contains(){return false;},addEventListener(event,fn){add(id,event,fn);},setAttribute(){},focus(){},getBoundingClientRect(){return {left:0,top:0,width:100,height:100,right:100,bottom:100};},setPointerCapture(){},hasPointerCapture(){return true;},releasePointerCapture(){},closest(s){if(s.includes(id))return this;return null;},showModal(){this.open=true;},close(){this.open=false;}});return nodes.get(id);};
- const fire=(owner,event,e)=>{e.target??=context.document.activeElement;e.preventDefault??=()=>{};for(const f of handlers.get(owner+':'+event)||[])f(e);};
+ const fire=(owner,event,e)=>{e.target??=context.document.activeElement;e.preventDefault??=()=>{};return Promise.all((handlers.get(owner+':'+event)||[]).map(f=>f(e)));};
  const button=dataset=>({dataset,closest(selector){if(selector.includes('button'))return this;if(selector==='[data-layout]'&&dataset.layout)return this;return null;}});
- Object.assign(context,{structuredClone,Date,Intl,crypto:webcrypto,setTimeout(){},clearTimeout(){},requestAnimationFrame(){},localStorage:{getItem(k){return storage.get(k)??null;},setItem(k,v){storage.set(k,v);}},document:{querySelector:node,querySelectorAll(){return [];},activeElement:{tagName:'BODY',focus(){}},getElementById(){return null;},addEventListener(event,fn){add('document',event,fn);},documentElement:node('html')},window:{addEventListener(event,fn){add('window',event,fn);}},fire,button});
+ Object.assign(context,{navigator:{locks:{request:async(_name,_options,fn)=>fn()}},structuredClone,Date,Intl,crypto:webcrypto,setTimeout(){},clearTimeout(){},requestAnimationFrame(){},localStorage:{getItem(k){return storage.get(k)??null;},setItem(k,v){storage.set(k,v);},removeItem(k){storage.delete(k);}},document:{querySelector:node,querySelectorAll(){return [];},activeElement:{tagName:'BODY',focus(){}},getElementById(){return null;},addEventListener(event,fn){add('document',event,fn);},documentElement:node('html')},window:{addEventListener(event,fn){add('window',event,fn);}},fire,button});
  // Imported functions are lexical bindings, as in ESM. Only app.mjs can register
  // callbacks on globalThis; the harness must not repair missing registrations.
  const imports=Object.keys(context.__imports).map(name=>`const ${name}=__imports.${name};`).join('\n');
@@ -84,7 +84,7 @@ test('Large catalogs render bounded dropdowns while searching every measure', as
 });
 
 test('Dirty-navigation gate lets users stay, discard, or save and continue; save failure keeps edits open',async()=>{
- const run=await editor();run(`
+ const run=await editor();await run(`(async()=>{
  loadDesign(BASE);assert.equal(dirty(),false);let navigated=0;
  requestNavigation(()=>navigated++);assert.equal(navigated,1);assert.equal($('#modal').open,undefined);
  c={...c,title:'Edición pendiente'};persist();assert.equal(dirty(),true);
@@ -93,10 +93,10 @@ test('Dirty-navigation gate lets users stay, discard, or save and continue; save
  requestNavigation(()=>navigated++);fire('document','click',{target:button({action:'guard-discard'})});assert.equal(navigated,2);assert.equal(c.title,BASE.title);assert.equal(dirty(),false);
  c={...c,title:'Guardar antes de salir'};requestNavigation(()=>navigated++);$('#guard-name').value='Diseño guardado';
  const originalWrite=localStorage.setItem;localStorage.setItem=()=>{throw Error('quota');};
- fire('document','click',{target:button({action:'guard-save'})});assert.equal(navigated,2);assert.equal(dirty(),true);assert.equal($('#modal').open,true);assert.equal(saved.length,0);
- localStorage.setItem=originalWrite;fire('document','click',{target:button({action:'guard-save'})});assert.equal(navigated,3);assert.equal(dirty(),false);assert.equal(saved.length,1);assert.equal(saved[0].config.title,'Guardar antes de salir');
- c={...c,title:'Nueva edición'};assert.equal(saveCurrent('Mismo diseño'),true);assert.equal(saved.length,1);assert.equal(saved[0].config.title,'Nueva edición');
- `);
+ await fire('document','click',{target:button({action:'guard-save'})});assert.equal(navigated,2);assert.equal(dirty(),true);assert.equal($('#modal').open,true);assert.equal(saved.length,0);
+ localStorage.setItem=originalWrite;await fire('document','click',{target:button({action:'guard-save'})});assert.equal(navigated,3);assert.equal(dirty(),false);assert.equal(saved.length,1);assert.equal(saved[0].config.title,'Guardar antes de salir');
+ c={...c,title:'Nueva edición'};assert.equal(await saveCurrent('Mismo diseño'),true);assert.equal(saved.length,1);assert.equal(saved[0].config.title,'Nueva edición');
+ })()`);
 });
 test('Template and screen changes use the gate, while native tab close only warns for dirty drafts',async()=>{
  const run=await editor();run(`
@@ -165,10 +165,10 @@ test('Bloque 1: Data Binding Studio opens modal, adapts fields dynamically, and 
  const nameInput={value:'KPI_Ventas_Custom',dataset:{bindKey:'measureName'},closest(){return null;}};
  fire('document','input',{target:nameInput});
  assert.equal(c.measureName,'KPI_Ventas_Custom');
- assert.equal(c.title,'Clientes activos');
+ assert.equal(c.title,'KPI_Ventas_Custom');
  const dax=generateDAX(c);
  assert.ok(dax.startsWith('KPI_Ventas_Custom ='));
- assert.ok(dax.includes('Clientes activos'));
+ assert.ok(dax.includes('KPI_Ventas_Custom'));
  closeModal();
  `);
 });
@@ -1155,7 +1155,7 @@ test('Horizontal duplicate adaptive scaling, guide containment, typology parity 
   const sanitized = sanitizeElements({
     delta_copy1: { comparison: 'none', deltaMode: 'absolute', direction: 'down' },
     compareLabel_copy1: { comparison: 'mom' },
-    status_copy1: { goodThreshold: 80, warnThreshold: 50, statusGood: 'Excelente', statusWarn: 'Atención', statusBad: 'Crítico' }
+    status_copy1: { measure:'Estado propio', goodThreshold: 80, warnThreshold: 50, statusGood: 'Excelente', statusWarn: 'Atención', statusBad: 'Crítico' }
   });
   assert.equal(sanitized.delta_copy1.comparison, 'none');
   assert.equal(sanitized.delta_copy1.deltaMode, 'absolute');
@@ -1280,7 +1280,7 @@ test('Duplicate chart SVG rendering, DAX isolation, comparison label tracking, a
   htmlComp = cardHTML(c);
   assert.ok(htmlComp.includes('vs. año anterior'), 'compareLabel_copy1 must dynamically track YoY comparison');
 
-  // 3. Data binding modal exposes duplicate trend fields (measure, dateTable, dateColumn)
+  // 3. Duplicate charts expose their measure and use the single main calendar.
   setPbipModel({
     modelName: 'SalesModel',
     measures: [{ name: 'Ventas', table: 'Fact' }, { name: 'Costes', table: 'Fact' }],
@@ -1289,9 +1289,10 @@ test('Duplicate chart SVG rendering, DAX isolation, comparison label tracking, a
   });
   openDataBindingModal();
   const modalHTML = $('#modal').innerHTML;
-  assert.ok(modalHTML.includes('trend_copy1__measure'), 'Modal must have measure binding for trend_copy1');
-  assert.ok(modalHTML.includes('trend_copy1__dateTable'), 'Modal must have dateTable binding for trend_copy1');
-  assert.ok(modalHTML.includes('trend_copy1__dateColumn'), 'Modal must have dateColumn binding for trend_copy1');
+  assert.ok(modalHTML.includes('trend_copy1__measure'), 'Orphan chart exposes its independent measure');
+  assert.ok(!modalHTML.includes('trend_copy1__dateTable'), 'No independent calendar for copied charts');
+  assert.ok(!modalHTML.includes('trend_copy1__dateColumn'), 'No independent date column for copied charts');
+  assert.ok(modalHTML.includes('Calendario compartido'));
   closeModal();
 
   // 4. Inspector parity: chartPanel rendered for trend_copy1
@@ -1440,7 +1441,7 @@ test('Template Rail: Collapsible sidebar state, workspace classes, and Ctrl+B sh
   let appHTML = $('#app').innerHTML;
   assert.ok(appHTML.includes('class="workspace"'));
   assert.ok(!appHTML.includes('workspace rail-collapsed'));
-  assert.ok(appHTML.includes('Elige tu punto de partida'));
+  assert.ok(appHTML.includes('Elige tu tarjeta'));
   assert.ok(appHTML.includes('data-action="toggle-rail"'));
 
   // 2. Toggle via action collapses the rail
@@ -1457,7 +1458,7 @@ test('Template Rail: Collapsible sidebar state, workspace classes, and Ctrl+B sh
   assert.equal(getRailCollapsed(), false);
   appHTML = $('#app').innerHTML;
   assert.ok(!appHTML.includes('workspace rail-collapsed'));
-  assert.ok(appHTML.includes('Elige tu punto de partida'));
+  assert.ok(appHTML.includes('Elige tu tarjeta'));
   `);
 });
 
@@ -1661,12 +1662,12 @@ test('Report picker cancellation, close and Escape return to data binding withou
 test('Binding highlights follow temporal measures, independent copies and both pointer and focus', async () => {
   const run = await editor();
   run(`
-    loadDesign(BASE);c={...c,elements:{...c.elements,trend_copy1:{measure:'Otra medida',dateTable:'Otro calendario',dateColumn:'Día'}}};
+    loadDesign(BASE);c={...c,elements:{...c.elements,value_copy1:{measure:'Otra medida'},trend_copy1:{measure:'Ignorada',dateTable:'Otro calendario',dateColumn:'Día'}}};
     assert.ok(getBindingElements('dateTable').includes('delta'));
-    assert.ok(!getBindingElements('dateTable').includes('trend_copy1'));
-    assert.equal(getBindingElements('trend_copy1__measure').join(','),'trend_copy1');
+    assert.ok(getBindingElements('dateTable').includes('trend_copy1'));
+    assert.equal(getBindingElements('value_copy1').includes('trend_copy1'),true);
     assert.ok(getBindingElements('measureName').includes('title'));
-    const fields=['measure','measureName','dateTable','dateColumn','trend_copy1__measure'];
+    const fields=['measure','measureName','dateTable','dateColumn','value_copy1'];
     const elements=['value','title','delta','trend','trend_copy1','icon'];
     const makeNode=(dataset)=>({dataset,classes:new Set(),classList:{toggle(cls,active){active?this.owner.classes.add(cls):this.owner.classes.delete(cls)}},closest(){return null;}});
     const fieldNodes=fields.map(bindingField=>makeNode({bindingField}));
@@ -1795,8 +1796,8 @@ test('Clicking a binding field or label opens its dropdown, repeats keep it open
   const toggle={dataset:{action:'toggle-bind-dropdown',field:'measure'},setAttribute(k,v){attrs[k]=v},classList:{add(){},remove(){}},closest(s){return s.includes('button')?this:s==='[data-binding-field]'?bindingField:s==='.binding-dropdown-wrap'?wrap:null}};
   const wrap={querySelector(s){return s==='.binding-dropdown-toggle'?toggle:s==='.binding-input'?input:null}};
   const bindingField={dataset:{bindingField:'measure'},querySelector(){return wrap}};
-  const input={setAttribute(){},closest(s){return s==='[data-binding-field]'?bindingField:s==='.binding-dropdown-wrap'?wrap:null}};
-  const menu={parentElement:wrap,innerHTML:'',classList:{contains(c){return classes.has(c)},add(c){classes.add(c)},remove(c){classes.delete(c)}}};
+  const input={setAttribute(){},removeAttribute(){},focus(){},closest(s){return s==='[data-binding-field]'?bindingField:s==='.binding-dropdown-wrap'?wrap:null}};
+  const menu={parentElement:wrap,innerHTML:'',querySelectorAll(){return []},classList:{contains(c){return classes.has(c)},add(c){classes.add(c)},remove(c){classes.delete(c)}}};
   document.getElementById=id=>id==='dropdown-menu-measure'?menu:null;
   document.querySelectorAll=s=>s==='.binding-dropdown-menu.is-open'&&classes.has('is-open')?[menu]:[];
   fire('document','click',{target:input});assert.ok(classes.has('is-open'));assert.equal(attrs['aria-expanded'],'true');
@@ -1833,7 +1834,7 @@ test('Power BI creation and overwrite block empty copies and recheck references 
  globalThis.fetch=async (url,options)=>{
   if(options?.method==='POST'){
    writes.push(JSON.parse(options.body));
-   return {ok:true,json:async()=>({measureName:'KPI_Ventas',tableName:'Medidas',isNew:!existing})};
+   return {ok:true,json:async()=>({success:true,measureName:'KPI_Ventas',tableName:'Medidas',isNew:!existing})};
   }
   return {ok:true,json:async()=>({server:'localhost:1234',database:'db',modelName:'Modelo',reportName:'Informe',tables:[{name:'Medidas'},{name:'Calendario'}],
    measures:[{name:'Ventas',table:'Medidas'},...(!absent?[{name:'Unidades',table:'Medidas'}]:[]),...(existing?[{name:'KPI_Ventas',table:'Medidas'}]:[])],
@@ -1857,7 +1858,7 @@ test('Power BI creation and overwrite block empty copies and recheck references 
   run("c.elements.value_copy1.measure='Unidades';");
   await inject();
   assert.equal(writes.length,0);
-  run("assert.equal($('#modal').className,'measure-review-modal');assert.ok($('#modal').innerHTML.includes('No encontrada'));assert.ok(/data-action=\"inject-live-measure\" disabled/.test($('#modal').innerHTML));");
+  run("assert.equal($('#modal').className,'measure-review-modal');assert.ok($('#modal').innerHTML.includes('No encontrada'));assert.ok(/data-action=\"proceed-inject-measure\" disabled/.test($('#modal').innerHTML));");
   setup(true);existing=true;absent=false;
   run("c.elements.value_copy1.measure='Unidades';");
   await inject();

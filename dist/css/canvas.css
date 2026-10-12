@@ -157,12 +157,12 @@
   gap:6px
 }
 .canvas-bottom {
-  height:44px;
-  display:flex;
+  min-height:44px;
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);
   align-items:center;
-  justify-content:space-between;
   gap:8px;
-  padding:0 18px;
+  padding:7px 18px;
   border-top:1px solid var(--color-border-subtle);
   border-bottom:1px solid #e7ebe2;
   background:var(--color-surface-panel);
@@ -170,11 +170,14 @@
   font-size:8px
 }
 .canvas-bottom>span:first-child {
-  display:flex;
-  align-items:center;
-  gap:6px
+  min-width:0;
+  line-height:1.5;
+  overflow-wrap:anywhere
 }
+.canvas-bottom>span:first-child svg{vertical-align:middle;margin-right:4px}
 .zoom-controls {
+  grid-column:2;
+  justify-self:center;
   display:flex;
   align-items:center;
   gap:8px;
@@ -196,10 +199,6 @@
   height:12px;
   width:1px;
   background:var(--color-border-subtle)
-}
-.sample-tag {
-  font-size:7px;
-  letter-spacing:1px
 }
 .palette-section {
   display:flex;
@@ -1303,17 +1302,17 @@
   border-radius:7px;
   background:var(--color-surface-panel);
   padding:12px 6px 9px;
-  font-size:9px;
-  color:#839472
+  font-size:12px;
+  color:var(--color-text-primary)
 }
 .effect-option.active {
-  background:#edf3e3;
-  border-color:var(--color-brand-sage-light);
-  color:var(--color-brand-sage);
-  box-shadow:0 0 0 1px #d5e3c3
+  background:var(--color-surface-active);
+  border-color:var(--color-border-active);
+  color:var(--color-text-primary);
+  box-shadow:0 0 0 1px var(--color-border-active)
 }
 .effect-option:hover {
-  border-color:#a4bd87
+  border-color:var(--color-border-focus)
 }
 .effect-sample {
   display:block;

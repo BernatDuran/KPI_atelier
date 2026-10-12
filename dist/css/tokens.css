@@ -26,8 +26,8 @@
   /* --- Textos / Typography Colors --- */
   --color-text-primary: #253235;
   --color-text-secondary: #536e43;
-  --color-text-muted: #7b8585;
-  --color-text-subtle: #7e9171;
+  --color-text-muted: #5e6b6b;
+  --color-text-subtle: #5c704e;
   --color-text-inverse: #ffffff;
   --color-text-dark: #111827;
   --color-text-heading: #1c2b2c;
@@ -49,7 +49,7 @@
   --color-accent-focus: rgba(71, 117, 104, 0.2);
   --color-accent-glow: rgba(107, 147, 75, 0.2);
   --color-brand-sage: #57664c;
-  --color-brand-sage-light: #88947d;
+  --color-brand-sage-light: #5d6b53;
   --color-brand-sage-subtle: #eff3e8;
   --color-brand-forest: #2c3e24;
   --color-brand-highlight: #6b934b;

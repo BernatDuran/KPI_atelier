@@ -1,0 +1,39 @@
+{
+  "date": "2026-10-12",
+  "model": "AventureWorksDW",
+  "method": "Query-scoped DEFINE TABLE / DEFINE MEASURE; no persistent writes",
+  "total": 5,
+  "passed": 5,
+  "results": [
+    {
+      "id": "copy-own-target-and-format",
+      "sha256": "2bc78535af2ce038ef2741ade7e3938ec650f12fb5339177936d1f935874788f",
+      "passed": true,
+      "executionTimeMs": 104
+    },
+    {
+      "id": "goal-blank",
+      "sha256": "cad40f91e470d54a812b44218f2a67931f8c7fff0ece98143289087f341ef62f",
+      "passed": true,
+      "executionTimeMs": 85
+    },
+    {
+      "id": "linked-copy-label-color",
+      "sha256": "374b8c77254b1b550b881b1210b82fff9e3ae82d8291609824476fe2e6a4e168",
+      "passed": true,
+      "executionTimeMs": 107
+    },
+    {
+      "id": "linked-family-independent-objective",
+      "sha256": "a4f6e05d1ef825ef4dfcbd556777db86b31de7767d075ad3615caacd35ebf37a",
+      "passed": true,
+      "executionTimeMs": 994
+    },
+    {
+      "id": "standalone-copy-explicit-measures",
+      "sha256": "c453b0727b1248a9431769cc3c8b33b9743f6b0b018be5912579f0d8bdb767f3",
+      "passed": true,
+      "executionTimeMs": 372
+    }
+  ]
+}

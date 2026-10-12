@@ -9,7 +9,9 @@ import { icon, esc } from './cards.mjs';
 import { checks } from './model.mjs';
 import { generateDAX } from './dax.mjs';
 import { fetchLivePbiModel } from './pbip.mjs';
+import { beginModelRequest } from './model-session.mjs';
 import { reviewMeasure, measureDestination } from './preflight.mjs';
+import { collectCurrentDesignDiagnostics } from './design-diagnostics.mjs';
 import { $, btn, ib, getC, toast, getPbipModel, setPbipModel, getFriendlyReportName, getActiveContext } from './state.mjs';
 
 let lastFocus = null;
@@ -17,6 +19,19 @@ let pendingInjectAction = null;
 let modalDismiss = null;
 let modalRevision = 0;
 let pendingExportAction = null;
+let pendingWriteReviewAction = null;
+export function setPendingWriteReviewAction(action) { pendingWriteReviewAction = action; }
+export function getPendingWriteReviewAction() { return pendingWriteReviewAction; }
+export function clearPendingWriteReviewAction() { pendingWriteReviewAction = null; }
+export function getModalRevision() { return modalRevision; }
+// Dialog contents are replaced often; the live notification must keep its
+// identity, timer and text across those replacements.
+function replaceModalContents(modal, html) {
+  const notification = $('#toast');
+  if (notification && modal.contains?.(notification)) document.body.appendChild(notification);
+  modal.innerHTML = html;
+  if (notification && modal.appendChild) modal.appendChild(notification);
+}
 export function setPendingInjectAction(fn) { pendingInjectAction = fn; }
 export function getPendingInjectAction() { return pendingInjectAction; }
 export function clearPendingInjectAction() { pendingInjectAction = null; }
@@ -25,6 +40,8 @@ export function clearPendingInjectAction() { pendingInjectAction = null; }
 // Ciclo de Vida de Modales Genéricos
 // ----------------------------------------------------
 export function openModal(title, subtitle, body, footer = '', cl = '', onDismiss = null) {
+  clearPendingWriteReviewAction();
+  clearPendingInjectAction();
   const modal = $('#modal');
   if (!modal) return;
   cancelBindingReveal();
@@ -33,11 +50,13 @@ export function openModal(title, subtitle, body, footer = '', cl = '', onDismiss
   if (!modal.open) lastFocus = document.activeElement;
   modal.className = cl;
   modal.setAttribute('aria-labelledby', 'modal-title');
-  modal.innerHTML = `<div class="modal-heading"><div><span class="overline">KPI ATELIER</span><h2 id="modal-title">${title}</h2>${subtitle ? `<p>${subtitle}</p>` : ''}</div>${ib('close-modal', 'Cerrar', 'close')}</div><div class="modal-body">${body}</div>${footer ? `<div class="modal-footer">${footer}</div>` : ''}`;
+  replaceModalContents(modal, `<div class="modal-heading"><div><span class="overline">KPI ATELIER</span><h2 id="modal-title">${title}</h2>${subtitle ? `<p>${subtitle}</p>` : ''}</div>${ib('close-modal', 'Cerrar', 'close')}</div><div class="modal-body">${body}</div>${footer ? `<div class="modal-footer">${footer}</div>` : ''}`);
   if (!modal.open) modal.showModal();
 }
 
 export function closeModal() {
+  clearPendingWriteReviewAction();
+  clearPendingInjectAction();
   cancelBindingReveal();
   const returnTo = modalDismiss;
   modalDismiss = null;
@@ -59,25 +78,29 @@ export function closeModal() {
 // ----------------------------------------------------
 export const filename = () => getC().measureName.trim().replace(/[^\p{L}\p{N}_-]/gu, '_') || 'kpi-atelier';
 
-export function requestExport(action, conf = getC()) {
-  const review = reviewMeasure(conf, getPbipModel());
+export function requestExport(action, conf = getC(), verifyReferences = true) {
+  const review = verifyReferences ? reviewMeasure(conf, getPbipModel()) : { issues: [], missing: [], unverified: [], references: [] };
+  const diagnostics = JSON.stringify(conf) === JSON.stringify(getC()) ? collectCurrentDesignDiagnostics(conf) : [];
   const errors = review.issues.filter(x => x.level === 'error');
-  if (!errors.length && !review.missing.length && !review.unverified.length) return action();
+  if (!errors.length && !review.missing.length && !review.unverified.length && !diagnostics.length) return action();
   const modal = $('#modal');
+  const notification = $('#toast');
+  if (notification && modal?.contains?.(notification)) document.body.appendChild(notification);
   const previous = modal?.open ? { html: modal.innerHTML, className: modal.className, dismiss: modalDismiss } : null;
   const restore = () => {
     pendingExportAction = null;
     if (!previous) return;
     modalRevision++;
     modal.className = previous.className;
-    modal.innerHTML = previous.html;
+    replaceModalContents(modal, previous.html);
     modalDismiss = previous.dismiss;
     if (!modal.open) modal.showModal();
   };
   pendingExportAction = action;
   const pending = review.references.filter(r => r.status === 'error' || r.status === 'unknown');
-  openModal('Exportar con referencias pendientes', 'Revisa estos datos antes de descargar el archivo.',
-    `<p class="export-warning-note">Hay campos vacíos, referencias no encontradas o datos sin comprobar. Puedes exportar igualmente; corrígelos antes de aplicar la medida en Power BI.</p>
+  openModal(diagnostics.length ? 'Revisa el diseño antes de exportar' : 'Exportar con referencias pendientes', 'Revisa estos avisos antes de descargar el archivo.',
+    `${diagnostics.length ? `<div class="export-warning-note"><strong>Avisos de legibilidad en la vista previa</strong><ul>${diagnostics.map(x => `<li>${esc(x.message)}</li>`).join('')}</ul><p>El resultado puede variar con los datos reales. Ajusta el diseño o exporta igualmente.</p></div>` : ''}
+    ${errors.length || review.missing.length || review.unverified.length ? '<p class="export-warning-note">Hay campos vacíos, referencias no encontradas o datos sin comprobar. Puedes exportar igualmente; corrígelos antes de aplicar la medida en Power BI.</p>' : ''}
     <div class="measure-review-references">${pending.map(r => `<div class="measure-review-reference ${r.status}"><div><span>${esc(r.label)}</span><strong>${esc(r.value)}</strong></div><span class="measure-review-ref-status">${r.empty ? 'Sin configurar' : r.status === 'error' ? 'No encontrada' : 'Sin comprobar'}</span></div>`).join('')}</div>
     ${errors.length ? `<div class="measure-review-issues">${errors.map(x => `<p class="error">${icon('info',12)}<span>${esc(x.text)}</span></p>`).join('')}</div>` : ''}`,
     btn('close-modal', 'Cancelar', null, 'button secondary') + btn('confirm-export-anyway', 'Exportar igualmente', 'download', 'button primary'),
@@ -92,6 +115,9 @@ export function confirmExport() {
 }
 
 export function download(name, text, type, conf = getC()) {
+  // Backups and simulated HTML do not depend on a connected semantic model.
+  if (type === 'application/json') return downloadFile(name, text, type);
+  if (type.startsWith('text/html')) return requestExport(() => downloadFile(name, text, type), conf, false);
   return requestExport(() => downloadFile(name, text, type), conf);
 }
 
@@ -136,6 +162,7 @@ export function exportModal() {
   const dax = generateDAX(c, { allowIncomplete: true });
   const isLive = Boolean(pbipModel?.isLiveConnection);
   const alreadyExists = isLive && Boolean(measureDestination(c, pbipModel).existing);
+  const diagnostics = collectCurrentDesignDiagnostics(c);
   const ready = reviewMeasure(c, pbipModel).valid;
   const bannerText = !ready ? 'Vista DAX · Hay referencias pendientes de configurar o comprobar' : isLive ? `Conectado a '${getFriendlyReportName(pbipModel)}' · Referencias verificadas` : 'Medida DAX lista · Compatible con HTML Content Secure en Power BI';
   const injectBtn = isLive ? `<button class="button primary btn-inject" data-action="inject-live-measure" ${ready ? '' : 'disabled title="Corrige las referencias pendientes en Conectar datos"'}>${icon('sparkles', 14)}<span>${alreadyExists ? 'Sobrescribir en Power BI' : 'Crear en Power BI'}</span></button>` : '';
@@ -143,13 +170,13 @@ export function exportModal() {
   openModal(
     'Tu diseño. Tu medida DAX.',
     'Copia, pega y deja que tus datos hagan el resto.',
-    `<div class="export-top-actions">${btn('open-data-modal', 'Conectar datos del modelo', 'chevronLeft', 'button quiet export-back')}${btn('pbi-infographic', '¿Cómo usar en Power BI?', 'book', 'button quiet btn-pbi-guide')}</div><div class="export-banner ${isLive ? 'is-live' : ''}">${icon(isLive ? 'sparkles' : 'code', 15)}<span>${esc(bannerText)}</span></div><div class="code-bar"><span>${icon('code', 15)} ${esc(c.measureName)}.dax</span><div class="code-bar-actions"><span>${dax.split('\n').length} líneas</span>${btn('copy-dax', 'Copiar DAX', 'copy', 'code-copy')}</div></div><pre class="dax-code" tabindex="0"><code>${esc(dax)}</code></pre><div class="export-notice">${icon('info', 16)}<p>${isLive ? 'Comprueba los datos y crea la medida en tu informe conectado. También puedes copiar el código o descargarlo.' : 'En Power BI Desktop, añade el visual HTML Content Secure y arrastra esta medida al campo de valores.'}</p></div>`,
+    `${diagnostics.length ? `<div class="export-warning-note"><strong>Avisos de legibilidad</strong><ul>${diagnostics.map(x => `<li>${esc(x.message)}</li>`).join('' )}</ul></div>` : ''}<div class="export-top-actions">${btn('open-data-modal', 'Conectar datos del modelo', 'chevronLeft', 'button quiet export-back')}${btn('pbi-infographic', '¿Cómo usar en Power BI?', 'book', 'button quiet btn-pbi-guide')}</div><div class="export-banner ${isLive ? 'is-live' : ''}">${icon(isLive ? 'sparkles' : 'code', 15)}<span>${esc(bannerText)}</span></div><div class="code-bar"><span>${icon('code', 15)} ${esc(c.measureName)}.dax</span><div class="code-bar-actions"><span>${dax.split('\n').length} líneas</span>${btn('copy-dax', 'Copiar DAX', 'copy', 'code-copy')}</div></div><pre class="dax-code" tabindex="0"><code>${esc(dax)}</code></pre><div class="export-notice">${icon('info', 16)}<p>${isLive ? 'Comprueba los datos y crea la medida en tu informe conectado. También puedes copiar el código o descargarlo.' : 'En Power BI Desktop, añade el visual HTML Content Secure y arrastra esta medida al campo de valores.'}</p></div>`,
     `<div class="export-other">${btn('download-json', 'Configuración JSON', 'download', 'button quiet export-download')}${btn('download-html', 'Vista HTML', 'download', 'button quiet export-download')}${btn('download-dax', '.dax', 'download', 'button quiet export-download', 'title="Descargar medida DAX"')}</div><div class="export-main">${btn('review-live-measure', 'Comprobar datos', 'check', 'button secondary')}${injectBtn}</div>`,
     'export-modal'
   );
 }
 
-function renderMeasureReview(c, model, connection, error = '') {
+function renderMeasureReview(c, model, connection, error = '', onApply = null) {
   const review = reviewMeasure(c, model);
   const isLive = Boolean(model?.isLiveConnection);
   const connected = connection === 'connected';
@@ -174,26 +201,29 @@ function renderMeasureReview(c, model, connection, error = '') {
     ${review.issues.length ? `<div class="measure-review-issues">${review.issues.map(x => `<p class="${x.level}">${icon('info', 12)}<span>${esc(x.text)}</span></p>`).join('')}</div>` : ''}
     <p class="measure-review-note">Comprueba conexión, configuración y referencias. Los valores y las relaciones se validan al usar la medida en Power BI.</p>`;
   openModal('Comprobar antes de aplicar', 'Revisa el destino y los datos de tu tarjeta.', body,
-    `<div class="measure-review-back">${btn('back-to-export', 'Volver al DAX', 'chevronLeft', 'button secondary')}${btn('open-data-modal', 'Editar datos', 'sliders', 'button quiet')}</div>${isLive ? btn('inject-live-measure', review.existing ? 'Sobrescribir en Power BI' : 'Crear en Power BI', 'sparkles', 'button primary btn-inject', ready ? '' : 'disabled') : ''}`,
+    `<div class="measure-review-back">${btn('back-to-export', 'Volver al DAX', 'chevronLeft', 'button secondary')}${btn('open-data-modal', 'Editar datos', 'sliders', 'button quiet')}</div>${isLive ? btn(onApply ? 'proceed-inject-measure' : 'inject-live-measure', review.existing ? 'Sobrescribir en Power BI' : 'Crear en Power BI', 'sparkles', 'button primary btn-inject', ready ? '' : 'disabled') : ''}`,
     'measure-review-modal', exportModal);
+  if (onApply) setPendingInjectAction(onApply);
   return modalRevision;
 }
 
-export async function openMeasureReviewModal() {
-  const c = structuredClone(getC());
+/** @param {import('./types.d.ts').CardConfig} [config] @param {(() => Promise<void> | void) | null} [onApply] */
+export async function openMeasureReviewModal(config = getC(), onApply = null) {
+  const c = structuredClone(config);
   const model = getPbipModel();
   const isLive = Boolean(model?.isLiveConnection && model.server);
-  const revision = renderMeasureReview(c, model, isLive ? 'loading' : 'offline');
+  const revision = renderMeasureReview(c, model, isLive ? 'loading' : 'offline', '', onApply);
   if (!isLive) return;
+  const request = beginModelRequest();
   try {
-    const catalog = await fetchLivePbiModel(model.server, model.databaseId || model.database || '');
+    const catalog = await fetchLivePbiModel(model.server, model.databaseId || model.database || '', { signal: request.signal });
     if (model.database && catalog.database !== model.database) throw new Error('El modelo conectado ha cambiado. Vuelve a conectar el informe.');
     if (modalRevision !== revision || !$('#modal')?.open) return;
-    setPbipModel(catalog, false);
-    renderMeasureReview(c, catalog, 'connected');
+    if (!request.commit(catalog, false)) return;
+    renderMeasureReview(c, catalog, 'connected', '', onApply);
   } catch (err) {
-    if (modalRevision === revision && $('#modal')?.open) renderMeasureReview(c, model, 'error', err.message || 'No se pudo comprobar el modelo.');
-  }
+    if (request.isCurrent() && modalRevision === revision && $('#modal')?.open) renderMeasureReview(c, model, 'error', err.message || 'No se pudo comprobar el modelo.', onApply);
+  } finally { request.finish(); }
 }
 
 export function shortcutsModal() {
@@ -210,8 +240,8 @@ export function shortcutsModal() {
     {
       title: 'Edición y Selección',
       shortcuts: [
-        { desc: 'Mover elemento (1 px)', keys: 'Flechas' },
-        { desc: 'Mover rápido (10 px)', keys: 'Shift + Flechas' },
+        { desc: 'Mover según paso seleccionado (1 o 5 px)', keys: 'Flechas' },
+        { desc: 'Alternar paso de movimiento (5 o 1 px)', keys: 'Shift + Flechas' },
         { desc: 'Ajustar tamaño', keys: '+ / −', hint: 'con elemento seleccionado' },
         { desc: 'Copiar / Pegar elemento', keys: 'Ctrl + C / V' },
         { desc: 'Eliminar elemento', keys: 'Supr / Backspace' },
@@ -222,8 +252,8 @@ export function shortcutsModal() {
       title: 'Historial y Productividad',
       shortcuts: [
         { desc: 'Deshacer última acción', keys: 'Ctrl + Z' },
-        { desc: 'Rehacer acción', keys: 'Ctrl + Y' },
-        { desc: 'Guardar diseño / DAX', keys: 'Ctrl + S' },
+        { desc: 'Rehacer acción', keys: 'Ctrl + Y / Ctrl + Shift + Z' },
+        { desc: 'Guardar diseño', keys: 'Ctrl + S' },
         { desc: 'Mostrar este menú', keys: '?' },
       ]
     }
@@ -272,13 +302,13 @@ export function pbiInfographicModal() {
   const c = getC();
   openModal(
     '¿Cómo usar esta medida en Power BI?',
-    'Guía paso a paso para renderizar tu tarjeta con fidelidad pixel-perfect en Power BI Desktop.',
+    'Configura el visual y comprueba el resultado con los datos de tu informe en Power BI Desktop.',
     `<div class="pbi-infographic-container">
       <div class="pbi-infographic-step">
         <div class="step-badge">1</div>
         <div class="step-body">
           <div class="step-title">Obtén el visual HTML Content Secure</div>
-          <p class="step-desc">En Power BI Desktop, haz clic en el menú <strong>(...)</strong> del panel de visualizaciones &gt; <em>Obtener más objetos visuales</em>. Busca <strong>HTML Content</strong> o <strong>HTML Content (lite)</strong> de <em>Daniel Marsh-Patrick</em> (visual certificado oficial y 100% gratuito).</p>
+          <p class="step-desc">En Power BI Desktop, abre <em>Obtener más objetos visuales</em> y busca <strong>HTML Content Secure</strong> de <em>Daniel Marsh-Patrick</em>. Es la edición certificada, llamada <strong>HTML Content (lite)</strong> antes de la versión 2.0. HTML Content Regular es un visual distinto. <a href="https://html-content.com/docs/visual-editions" target="_blank" rel="noopener noreferrer">Consultar las ediciones</a>.</p>
         </div>
       </div>
       <div class="pbi-infographic-step">
@@ -292,14 +322,14 @@ export function pbiInfographicModal() {
         <div class="step-badge">3</div>
         <div class="step-body">
           <div class="step-title">Asigna la medida al campo 'Values'</div>
-          <p class="step-desc">Inserta el visual HTML Content en tu lienzo de informe y arrastra tu nueva medida <code>${esc(c.measureName)}</code> al campo <strong>Values</strong> (Valores). El diseño se renderizará de inmediato con datos en vivo.</p>
+          <p class="step-desc">Inserta HTML Content Secure y arrastra <code>${esc(c.measureName)}</code> al campo <strong>Values</strong> (Valores). La vista previa de Atelier usa datos simulados; la conexión verifica referencias del modelo. Comprueba aquí los valores reales y los filtros de tu informe.</p>
         </div>
       </div>
       <div class="pbi-infographic-step">
         <div class="step-badge">4</div>
         <div class="step-body">
           <div class="step-title">Ajuste de dimensiones exactas</div>
-          <p class="step-desc">En el panel de formato del visual &gt; <em>General &gt; Propiedades</em>: establece el tamaño en exactamente <strong>${c.width} px</strong> de ancho por <strong>${c.height} px</strong> de alto, y en <em>Objeto visual &gt; Relleno</em> configura <strong>Padding: 0 px</strong> para eliminar márgenes residuales.</p>
+          <p class="step-desc">Establece <strong>${c.width} × ${c.height} px</strong> y el relleno del visual en <strong>0 px</strong>. Comprueba tipografía, recorte y SVG en tu versión instalada. Si falta contenido en Secure 2.0, consulta <em>Diagnostics &gt; Sanitizer</em> y las <a href="https://html-content.com/docs/sanitization" target="_blank" rel="noopener noreferrer">reglas de filtrado</a>.</p>
         </div>
       </div>
     </div>`,
@@ -346,9 +376,8 @@ export function chooseLiveInstanceModal(instances) {
   );
 }
 
-export function showInjectConfirmModal(missingRefs, existingMeasure, onConfirm) {
-  pendingInjectAction = onConfirm;
-  const c = getC();
+export function showInjectConfirmModal(missingRefs, existingMeasure, onConfirm, config = getC()) {
+  const c = config;
   let body = '';
   if (missingRefs && missingRefs.length > 0) {
     body += `
@@ -386,12 +415,15 @@ export function showInjectConfirmModal(missingRefs, existingMeasure, onConfirm) 
     </button>`,
     'inject-confirm-modal'
   );
+  setPendingInjectAction(onConfirm);
 }
 
-export function showInjectSuccessModal({ measureName, tableName, reportName, isNew = true }) {
-  const c = getC();
+/** @param {{ measureName: string, tableName: string, reportName: string, isNew?: boolean, target?: import('./types.d.ts').MeasureWriteTarget, config?: import('./types.d.ts').CardConfig, targetChanged?: boolean }} options */
+export function showInjectSuccessModal({ measureName, tableName, reportName, isNew = true, target, config, targetChanged = false }) {
+  clearPendingWriteReviewAction();
+  const c = config || getC();
   const title = isNew ? '¡Medida creada con éxito en Power BI!' : '¡Medida sobrescrita con éxito en Power BI!';
-  const desc = 'Tu medida DAX ya está sincronizada y lista para visualizar en tu modelo abierto.';
+  const desc = targetChanged ? 'La operación terminó en el informe original. El modelo seleccionado actualmente se conserva.' : 'La configuración enviada está guardada y lista para visualizar en el informe de destino.';
   const body = `
     <div class="inject-success-card">
       <div class="inject-success-header">
@@ -407,7 +439,7 @@ export function showInjectSuccessModal({ measureName, tableName, reportName, isN
           <span class="inject-meta-val">${icon('folder', 13)} ${esc(tableName)}</span>
         </div>
         <div class="inject-meta-item">
-          <span class="inject-meta-label">Informe conectado</span>
+          <span class="inject-meta-label">Informe de destino</span>
           <span class="inject-meta-val">${icon('monitor', 13)} ${esc(reportName || 'Power BI Desktop')}</span>
         </div>
         <div class="inject-meta-item">
@@ -419,6 +451,7 @@ export function showInjectSuccessModal({ measureName, tableName, reportName, isN
           <span class="inject-meta-val text-success">${icon('sparkles', 13)} En memoria activa</span>
         </div>
       </div>
+      ${target ? `<p class="field-help">Destino de esta operación: ${esc(target.server)} · Modelo ${esc(target.database)} · Tabla ${esc(target.tableName)}</p>` : ''}
       <div class="inject-success-next-steps">
         <div class="next-steps-title">${icon('info', 14)} Pasos para visualizar en tu informe de Power BI:</div>
         <ol class="next-steps-list">
@@ -435,7 +468,7 @@ export function showInjectSuccessModal({ measureName, tableName, reportName, isN
         ${icon('sparkles', 14)} <span>¿Cómo usar en Power BI?</span>
       </button>
       <button type="button" class="button secondary" data-action="back-to-export">
-        ${icon('code', 14)} <span>Ver código DAX</span>
+        ${icon('code', 14)} <span>DAX del diseño abierto</span>
       </button>
       <button type="button" class="button primary" data-action="close-modal">
         ${icon('check', 14)} <span>Listo, volver al diseño</span>
@@ -445,11 +478,12 @@ export function showInjectSuccessModal({ measureName, tableName, reportName, isN
   openModal(title, desc, body, footer, 'inject-success-modal');
 }
 
-export function showInjectErrorModal({ error, measureName, reportName, onRetry }) {
+/** @param {{ error: import('./types.d.ts').BridgeApiError, measureName: string, reportName: string, onRetry?: () => Promise<void> | void, onReview?: () => Promise<void> | void, target?: import('./types.d.ts').MeasureWriteTarget, config?: import('./types.d.ts').CardConfig, targetChanged?: boolean }} options */
+export function showInjectErrorModal({ error, measureName, reportName, onRetry, onReview, target, config, targetChanged = false }) {
   clearPendingInjectAction();
-  if (!error?.outcomeUnknown && typeof onRetry === 'function') setPendingInjectAction(onRetry);
-  const c = getC();
-  const rawMsg = (error && (error.message || error)) || 'Error desconocido';
+  clearPendingWriteReviewAction();
+  const c = config || getC();
+  const rawMsg = String((error && (error.message || error)) || 'Error desconocido');
   let friendlyMsg = rawMsg;
   const isConn = /conexión|connection|denegó|refused|failed|fetch|connect|no se puede establecer/i.test(rawMsg);
   
@@ -464,7 +498,7 @@ export function showInjectErrorModal({ error, measureName, reportName, onRetry }
   }
 
   const title = 'No se pudo sincronizar con Power BI';
-  const desc = 'Se ha producido un problema al intentar escribir la medida en tu informe abierto.';
+  const desc = targetChanged ? 'Este resultado corresponde al informe original de la operación. El modelo seleccionado actualmente se conserva.' : 'Se ha producido un problema al intentar escribir la medida en el informe de destino.';
   const body = `
     <div class="inject-error-card">
       <div class="inject-confirm-alert error">
@@ -472,8 +506,11 @@ export function showInjectErrorModal({ error, measureName, reportName, onRetry }
         <div class="inject-error-text">
           <strong>${esc(friendlyMsg)}</strong>
           ${rawMsg !== friendlyMsg ? `<p class="inject-error-detail"><small>${esc(rawMsg)}</small></p>` : ''}
+          ${error?.code ? `<p class="inject-error-detail"><small>Código: ${esc(error.code)}${error?.requestId ? ` · Referencia: ${esc(error.requestId)}` : ''}</small></p>` : ''}
+          ${error?.diagnostic ? `<details><summary>Detalle técnico</summary><pre>${esc(error.diagnostic)}</pre></details>` : ''}
         </div>
       </div>
+      ${target ? `<section class="measure-review-section"><h3>Destino de la operación</h3><p>Informe: ${esc(reportName || 'Power BI Desktop')}<br>Servidor: ${esc(target.server)}<br>Modelo: ${esc(target.database)}<br>Tabla: ${esc(target.tableName)}<br>Medida: ${esc(measureName)}</p>${targetChanged ? '<p class="measure-review-error">Selecciona este informe original antes de actualizar, revisar o reintentar. Ninguna acción se enviará al modelo seleccionado ahora.</p>' : ''}</section>` : ''}
       <div class="inject-error-help">
         <p><strong>Comprobaciones sugeridas:</strong></p>
         <ul style="margin:6px 0 0;padding-left:18px;">
@@ -492,12 +529,14 @@ export function showInjectErrorModal({ error, measureName, reportName, onRetry }
       <button type="button" class="button secondary" data-action="connect-live-pbi">
         ${icon('sparkles', 14)} <span>Reconectar informe</span>
       </button>
-      <button type="button" class="button primary" data-action="${error?.outcomeUnknown || error?.code === 'CONFLICT' ? 'review-live-measure' : 'proceed-inject-measure'}">
+      <button type="button" class="button primary" data-action="${error?.outcomeUnknown || error?.code === 'CONFLICT' ? 'review-live-measure' : 'proceed-inject-measure'}" ${targetChanged ? 'disabled' : ''}>
         ${icon('sparkles', 14)} <span>${error?.outcomeUnknown || error?.code === 'CONFLICT' ? 'Actualizar y revisar' : 'Reintentar inyección'}</span>
       </button>
     </div>
   `;
   openModal(title, desc, body, footer, 'inject-error-modal');
+  if (!error?.outcomeUnknown && typeof onRetry === 'function') setPendingInjectAction(onRetry);
+  if (typeof onReview === 'function') setPendingWriteReviewAction(onReview);
 }
 
 export function guide() {

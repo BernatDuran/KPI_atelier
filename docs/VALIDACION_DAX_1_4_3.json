@@ -1,0 +1,291 @@
+{
+  "version": "1.4.3",
+  "date": "2026-10-12",
+  "mode": "query-scoped DEFINE TABLE/DEFINE MEASURE, read-only, no SaveChanges",
+  "passed": 47,
+  "failed": 0,
+  "results": [
+    {
+      "id": "inactive-copy-retains-main-context",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 21ms",
+      "querySha256": "961cc0ee4590b91de243c0a5573dd89f13340a1b2dcd8afa35eb91e53cf74a78"
+    },
+    {
+      "id": "copy-shared-target-and-format",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 72ms",
+      "querySha256": "d870757b2012c4876e675e90add176bcdd613ec09b16f9e3c5abdca20ff61d99"
+    },
+    {
+      "id": "copy-same-reference-independent-format",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 88ms",
+      "querySha256": "28ecf2d8b96fe59774f7b08b3f5a3eb741cda8489a03bdf057a1285e38c20c1b"
+    },
+    {
+      "id": "template:executive-night",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 63ms",
+      "querySha256": "d2e383b7238414d251e846400246485c40e8b451367d3451453740cc8b6cff62"
+    },
+    {
+      "id": "template:essential-paper",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 30ms",
+      "querySha256": "4f8eeef477fc83b0da61a7ce97e40701f596d646c16711e55840226fc0c5676d"
+    },
+    {
+      "id": "template:compare-mint",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 32ms",
+      "querySha256": "3a75e559809301d51f1bb830fb3c6f04a84ffc309196e87b9fc7255cad87c0b2"
+    },
+    {
+      "id": "template:target-lavender",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 273ms",
+      "querySha256": "d7684f5214b67308f8b3304078819ff85c69783227376b2a288dce0c5b06e7be"
+    },
+    {
+      "id": "template:status-paper",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 299ms",
+      "querySha256": "8507a823183d861f53f9c3b478e9c25ea1c70aa4a30d1558b2c0b16476acb296"
+    },
+    {
+      "id": "template:spark-paper",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 169ms",
+      "querySha256": "747eedadff1c72047a2c7fc00e20c7ce7e21ec59ce0d18c9e07081ce94f79e76"
+    },
+    {
+      "id": "template:basic-lavender",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 180ms",
+      "querySha256": "05667b2f36e8fc89f41227fd44b4b1d89bfd1984c749c0ec40e063860173f353"
+    },
+    {
+      "id": "template:comparison-sand",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 35ms",
+      "querySha256": "41d7e8680187b3d590a3fce8270171fa430683b54f666446535618594977773a"
+    },
+    {
+      "id": "template:target-mint",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 17ms",
+      "querySha256": "0931df758aca1cf9ff62a3b1b3e564f6e079b812e68fba609a84505569b7f30c"
+    },
+    {
+      "id": "template:status-sand",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 40ms",
+      "querySha256": "5dbde47d66c1db6fcf1426384109c46bcac4378e94983fb0c7d3e4d3835bf036"
+    },
+    {
+      "id": "template:spark-cobalt",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 108ms",
+      "querySha256": "3d66a0273a02038e6f36c6968e58923d41e744393239ac9c0048122b30d4201d"
+    },
+    {
+      "id": "template:executive-paper",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 67ms",
+      "querySha256": "349ec6ec1616bf05249594a632390a7d62e074bd3981aa8993bc9c1552f23d02"
+    },
+    {
+      "id": "template:essential-night",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 27ms",
+      "querySha256": "d7f096f23b49b63545216203903e904c192c753a90fe7e613ada6a8deae6973e"
+    },
+    {
+      "id": "template:executive-sand",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 69ms",
+      "querySha256": "92a06118cf5dd7bd5c5b470d80505e1fd30b2a1a03cbe814bc4a9442099c26d3"
+    },
+    {
+      "id": "template:spark-mint",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 58ms",
+      "querySha256": "f33a10cd52acafd1956602fda210a37eb2c58acd7ecf5fb2b2d4fb70b7ef87d1"
+    },
+    {
+      "id": "template:spark-horizontal",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 71ms",
+      "querySha256": "7b362078d90c342aceac765a495696cca8d12f3521ef28e3ac993ad7e1065919"
+    },
+    {
+      "id": "template:spark-right",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 70ms",
+      "querySha256": "b865945e61b3d31662fa1b2776eacd730afdafd615bd1e428eee8ce3b2d97aa2"
+    },
+    {
+      "id": "template:target-donut",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 18ms",
+      "querySha256": "186cf3f05e22414bfff8fa14c6d81f0bd5bfd2e62209816fedaad0b028154649"
+    },
+    {
+      "id": "shared-copy-calendar",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 117ms",
+      "querySha256": "328eb24919693b7031934210a57fe3f805cf00eef8992adc9bbee0d5c6519a9c"
+    },
+    {
+      "id": "default-window-goal-reference",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 66ms",
+      "querySha256": "53d47cad5d37c8bc3174e933aa59be2cf01ced81c80ec66edd9d247eec495ca7"
+    },
+    {
+      "id": "same-period-goal-reference",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 76ms",
+      "querySha256": "5627f2f1016d1666d44ddd571da983d2ecd338b03503b9af3e96252f363c1fe7"
+    },
+    {
+      "id": "prior-period-complete",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 515ms",
+      "querySha256": "57d274b84efa2b1499841237153132af022239806839865818b9c230dd8a491f"
+    },
+    {
+      "id": "prior-period-incomplete",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 70ms",
+      "querySha256": "a81724292cebfbd91f4f8ca30aee705d268a4c084de1e1c37194ab588cee5628"
+    },
+    {
+      "id": "prior-period-discontinuous",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 63ms",
+      "querySha256": "16bc2e70a20062f49e2a70b671de2653c33e54acb11e5f12e0a7db16ed427249"
+    },
+    {
+      "id": "yoy-leap-day",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 75ms",
+      "querySha256": "6a57ba366c49475b92f70197e6c99b5c9d57620f114e8ef55e1ac72f0b0ce5d8"
+    },
+    {
+      "id": "status-copy:good",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 34ms",
+      "querySha256": "83df007726b11dcee5e0db1878a2e08506bd48afd0ac16eb3c8dbe3ff3298796"
+    },
+    {
+      "id": "status-copy:warn",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 35ms",
+      "querySha256": "ac193ca360ab2837efdc7f75a84132d7a5c5a023c4f0f128544c64b68a008118"
+    },
+    {
+      "id": "status-copy:bad",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 36ms",
+      "querySha256": "736388a0764525462756e6bfe6fa0f1974d2751137b5754923812ed1727bb842"
+    },
+    {
+      "id": "status-copy:blank",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 29ms",
+      "querySha256": "eefd9a28a018dec239e73ef73de46cb2a38fecbbf99fbf2b91291588445454eb"
+    },
+    {
+      "id": "goal-equality:up",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 20ms",
+      "querySha256": "8cdcc45af3396f386a098a0d4d3d15c2d244420ef4dac16d21d99e9e78cd452e"
+    },
+    {
+      "id": "goal-boundary:up:90",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 20ms",
+      "querySha256": "fe43578259d0be8cec88aad5402894886095cff14737a7fb9ad5bb9644a339c2"
+    },
+    {
+      "id": "goal-boundary:up:110",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 21ms",
+      "querySha256": "51b5cd40582a465330d7fe5fc1b2bf17de0141d60dedd60e56c498b7fd078867"
+    },
+    {
+      "id": "goal-equality:down",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 27ms",
+      "querySha256": "24ebb7285dac4a342c0bb4bddeea71401c54c0019b9bb1c06336d1257f78b779"
+    },
+    {
+      "id": "goal-boundary:down:90",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 29ms",
+      "querySha256": "748ca3d838cdabf77440e40d0a61cfd6148be47fbf695678180f0f9444f01ac7"
+    },
+    {
+      "id": "goal-boundary:down:110",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 27ms",
+      "querySha256": "1882d62b11fd52364eddf00559fd762b7e3280148cd8bde0942f846ed04aacb7"
+    },
+    {
+      "id": "goal-equality:neutral",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 22ms",
+      "querySha256": "ab36d3d08cdb9315860a68b7e907f15ae2e4ba1c3a4ee22b60bfffb53fdfc035"
+    },
+    {
+      "id": "goal-blank",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 33ms",
+      "querySha256": "03ab01f8c445547e7c14fd566973c524e981a922b3444af75bec97b3d02b782a"
+    },
+    {
+      "id": "goal-zero-target",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 215ms",
+      "querySha256": "9b2b381b4d4cfd087d4a8693b189341c119d2b2ea13d485fc349913223ca9485"
+    },
+    {
+      "id": "linked-copy-label-color",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 38ms",
+      "querySha256": "3b1c4eddd944daf0559a1f211b9b2545bb3e7a5c291e7272adc631afd4ec3ffb"
+    },
+    {
+      "id": "flat-series-min:false",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 595ms",
+      "querySha256": "fb994e766f5c488bd0f808267f8de1dc1b3e4da490537c3b1e013db7be5b9283"
+    },
+    {
+      "id": "flat-series-min:true",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 1181ms",
+      "querySha256": "5f1a0ae32ff1cc39e019f02a1c1909d72073a2a3a028d47df52840066ecb847b"
+    },
+    {
+      "id": "measure-name-equals-calendar-column",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 97ms",
+      "querySha256": "41375bca356cf6793044e257228d3136f683335a9aa630c9579b397815c3b682"
+    },
+    {
+      "id": "inactive-points-do-not-block",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 29ms",
+      "querySha256": "2c3d48ea2380a3fb27463236032e8905ec9b92595911ce14b25bc2828e18dddf"
+    },
+    {
+      "id": "decorative-copy-has-no-measure-dependency",
+      "pass": true,
+      "message": "DAX query executed successfully, returned 1 rows in 247ms",
+      "querySha256": "245e03e20e6d9ca2081ce3a818aed610c6e1c08fcda4b6423123daa8b70cfac2"
+    }
+  ]
+}

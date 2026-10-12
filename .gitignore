@@ -19,6 +19,7 @@ desktop.ini
 .idea/
 
 # Local backups, release archives & duplicate extractions
+releases/
 *.zip
 *.tar.gz
 *.rar

@@ -34,7 +34,12 @@ export function elementColor(c,id,data={}){
  const baseId=id?.replace(/_copy\d+$/,'');
  const p=appearance(c,id),spec=COLOR_SPEC[id]||COLOR_SPEC[baseId];
  if(p.colorMode==='custom')return p.color;
- if(p.colorMode==='linked'&&(id==='progressLabel'||baseId==='progressLabel'))return elementColor(c,'progress',data);
+ if(p.colorMode==='linked'&&baseId==='progressLabel'){
+  const candidate=id.replace(/^progressLabel/,'progress');
+  // A copied label follows its matching bar; without that bar it follows the main bar.
+  const target=candidate==='progress'||c.elements?.[candidate]&&!c.elements[candidate].deleted?candidate:'progress';
+  return elementColor(c,target,data);
+ }
  if(p.colorMode==='semantic'&&spec?.semantic){const dupKey=(id&&id.includes('_copy'))?`${spec.semantic}_${id}`:spec.semantic;return data[dupKey]||data[spec.semantic]||c.accent;}
  return c[spec?.role||'text'];
 }
@@ -42,7 +47,7 @@ export function elementColor(c,id,data={}){
 export const alphaColor=(color,opacity)=>color+Math.round(Math.max(0,Math.min(100,opacity))*255/100).toString(16).padStart(2,'0');
 export function elementBackground(c,id,data={}){
  const p=appearance(c,id);if(p.backgroundMode==='none')return 'transparent';
- const color=p.backgroundMode==='custom'?p.backgroundColor:id==='progress'?c.muted:elementColor(c,id,data);
+ const color=p.backgroundMode==='custom'?p.backgroundColor:id?.replace(/_copy\d+$/,'')==='progress'?c.muted:elementColor(c,id,data);
  return alphaColor(color,p.backgroundOpacity);
 }
 export function trendFill(c,elementId='trend'){const p=appearance(c,elementId);return p.fillMode==='custom'?p.fillColor:elementColor(c,elementId);}

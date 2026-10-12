@@ -45,13 +45,24 @@ export function sortDateTables(list) {
   });
 }
 
+/** @param {string} line */
+function scalarProperty(line){
+  const property=line.match(/^([a-zA-Z][\w]*)\s*:\s*(.*?)\s*$/);
+  if(!property)return null;
+  let value=property[2];
+  // Text scalars allow double quotes with doubled quotes as their escape.
+  // Quoted whitespace belongs to the value; unquoted whitespace was trimmed.
+  if(value.startsWith('"')){
+    const quoted=value.match(/^"((?:[^"]|"")*)"$/);
+    if(!quoted)return null;
+    value=quoted[1].replaceAll('""','"');
+  }
+  return {name:property[1].toLowerCase(),value};
+}
 /**
- * Parses a single TMDL file content.
- * Extracts the table name, measures and columns (identifying date/dateTime types,
- * dataCategory: Time at table level, and isKey at column level).
- * 
+ * Parses table members and scalar metadata, leaving DAX/M expressions opaque.
  * @param {string} content - Raw TMDL string.
- * @param {string} [defaultTableName=''] - Fallback table name (e.g. from file name).
+ * @param {string} [defaultTableName=''] - Fallback table name.
  * @returns {{table: string, isMarkedDateTable: boolean, primaryDateColumn: string|null, measures: Array<{name: string, table: string}>, columns: Array<{name: string, dataType: string, isKey?: boolean}>, dateColumns: string[]}}
  */
 export function parseTmdl(content, defaultTableName = '') {
@@ -66,68 +77,61 @@ export function parseTmdl(content, defaultTableName = '') {
     return { table: tableName, isMarkedDateTable, primaryDateColumn, measures, columns, dateColumns };
   }
 
-  const lines = content.split(/\r?\n/);
+  const lines = content.replace(/^\uFEFF/, '').split(/\r?\n/);
   let currentCol = null;
-
+  let tableIndent = null;
+  let memberIndent = null;
+  let fencedExpression = false;
+  const nameOf = match => (match[1] !== undefined ? match[1].replace(/''/g, "'") : match[2]).trim();
   const commitCol = () => {
-    if (currentCol) {
-      columns.push(currentCol);
-      const dt = (currentCol.dataType || '').toLowerCase();
-      if (dt === 'datetime' || dt === 'date') {
-        dateColumns.push(currentCol.name);
-        if (currentCol.isKey) {
-          primaryDateColumn = currentCol.name;
-        }
-      }
-      currentCol = null;
+    if (!currentCol) return;
+    columns.push(currentCol);
+    if (['datetime', 'date'].includes(currentCol.dataType.toLowerCase())) {
+      dateColumns.push(currentCol.name);
+      if (currentCol.isKey) primaryDateColumn = currentCol.name;
     }
+    currentCol = null;
   };
 
+  // Catalog extraction is scoped to direct table members and column properties.
+  // DAX/M bodies are opaque: indentation and fenced verbatim expressions follow
+  // the TMDL contract, so declarations embedded in expressions cannot leak out.
+  // https://learn.microsoft.com/analysis-services/tmdl/tmdl-overview#expressions
   for (const rawLine of lines) {
-    const line = rawLine.trimEnd();
-
-    // Check for table declaration: table 'Nombre' or table Nombre
-    const tableMatch = line.match(/^\s*table\s+(?:'((?:[^']|'')*)'|([^\s\r\n]+))/);
-    if (tableMatch) {
+    const line = rawLine.trim();
+    if (fencedExpression) {
+      if (line === '```') fencedExpression = false;
+      continue;
+    }
+    if (!line || line.startsWith('//')) continue;
+    const indent = rawLine.match(/^[ \t]*/)[0].replace(/\t/g, '    ').length;
+    const startsFence = /=\s*```$/.test(line);
+    const property=scalarProperty(line);
+    const tableMatch = line.match(/^table\s+(?:'((?:[^']|'')*)'|([^\s=]+))\s*$/i);
+    if (tableMatch && tableIndent === null && memberIndent === null) {
+      tableName = nameOf(tableMatch);
+      tableIndent = indent;
+      continue;
+    }
+    // A table file has one root. Do not associate members of another root with it.
+    if (tableIndent !== null && indent <= tableIndent) break;
+    if (memberIndent === null) {
+      memberIndent = indent;
+      if (tableIndent === null) tableIndent = Math.max(0, indent - (rawLine.startsWith('\t') ? 4 : indent || 4));
+    }
+    if (indent === memberIndent) {
       commitCol();
-      tableName = (tableMatch[1] ? tableMatch[1].replace(/''/g, "'") : tableMatch[2]).trim();
-      continue;
+      if(property?.name==='datacategory')isMarkedDateTable=property.value.toLowerCase()==='time';
+      const measureMatch = line.match(/^measure\s+(?:'((?:[^']|'')*)'|([^\s=]+))\s*=/i);
+      const columnMatch = line.match(/^column\s+(?:'((?:[^']|'')*)'|([^\s=]+))(?:\s*=|\s*$)/i);
+      if (measureMatch) measures.push({name:nameOf(measureMatch), table:tableName});
+      if (columnMatch) currentCol = {name:nameOf(columnMatch), dataType:'', isKey:false};
+    } else if (currentCol && indent === memberIndent + (memberIndent - tableIndent || 4)) {
+      if(property?.name==='datatype')currentCol.dataType=property.value;
+      if(/^isKey$/i.test(line))currentCol.isKey=true;
+      else if(property?.name==='iskey'&&/^(true|false)$/i.test(property.value))currentCol.isKey=property.value.toLowerCase()==='true';
     }
-
-    // Check for table-level dataCategory: Time (marking official Date table)
-    if (currentCol === null && /^\s*dataCategory:\s*Time\b/i.test(line)) {
-      isMarkedDateTable = true;
-      continue;
-    }
-
-    // Check for measure declaration: measure 'Nombre' = ... or measure Nombre = ...
-    const measureMatch = line.match(/^\s*measure\s+(?:'((?:[^']|'')*)'|([^\s=\r\n]+))\s*=/);
-    if (measureMatch) {
-      commitCol();
-      const mName = (measureMatch[1] ? measureMatch[1].replace(/''/g, "'") : measureMatch[2]).trim();
-      measures.push({ name: mName, table: tableName });
-      continue;
-    }
-
-    // Check for column declaration: column 'Nombre' or column Nombre
-    const colMatch = line.match(/^\s*column\s+(?:'((?:[^']|'')*)'|([^\s\r\n]+))/);
-    if (colMatch) {
-      commitCol();
-      const cName = (colMatch[1] ? colMatch[1].replace(/''/g, "'") : colMatch[2]).trim();
-      currentCol = { name: cName, dataType: '', isKey: false };
-      continue;
-    }
-
-    // Check for properties under current column
-    if (currentCol) {
-      const dtMatch = line.match(/^\s*dataType:\s*(\w+)/i);
-      if (dtMatch) {
-        currentCol.dataType = dtMatch[1];
-      }
-      if (/^\s*isKey\b/i.test(line)) {
-        currentCol.isKey = true;
-      }
-    }
+    if (startsFence) fencedExpression = true;
   }
   commitCol();
 
@@ -314,7 +318,7 @@ async function readModelFiles(files, fallbackName, {signal = undefined} = {}) {
     if (bytes > PBIP_LIMITS.maxFileBytes || totalBytes > PBIP_LIMITS.maxTotalBytes) throw new Error('El modelo supera el límite de lectura local (10 MB por archivo, 50 MB en total).');
     if (/\.tmdl$/i.test(entry.name)) {
       // database.tmdl, model.tmdl, relationships and expressions are not tables.
-      if (/^\s*table\s+/m.test(content)) parsedTables.push(parseTmdl(content, entry.name.replace(/\.tmdl$/i, '')));
+      if (/^\s*table\s+/im.test(content)) parsedTables.push(parseTmdl(content, entry.name.replace(/\.tmdl$/i, '')));
     } else bimContent = content;
   }
   if (parsedTables.length) return buildModelCatalog({modelName, parsedTables});

@@ -1,0 +1,303 @@
+{
+  "date": "2026-10-12",
+  "model": "AventureWorksDW",
+  "method": "Query-scoped DEFINE TABLE / DEFINE MEASURE; no persistent writes",
+  "total": 49,
+  "passed": 49,
+  "results": [
+    {
+      "id": "copy-own-target-and-format",
+      "sha256": "2bc78535af2ce038ef2741ade7e3938ec650f12fb5339177936d1f935874788f",
+      "passed": true,
+      "executionTimeMs": 92
+    },
+    {
+      "id": "shared-copy-calendar",
+      "sha256": "89d42cf685c96bcd4b948e758e7a3ec13fa0f06461489a546008c2570b1d6322",
+      "passed": true,
+      "executionTimeMs": 157
+    },
+    {
+      "id": "linked-family-independent-objective",
+      "sha256": "a4f6e05d1ef825ef4dfcbd556777db86b31de7767d075ad3615caacd35ebf37a",
+      "passed": true,
+      "executionTimeMs": 285
+    },
+    {
+      "id": "linked-family-visible-versus-svg-locale",
+      "sha256": "0e22073c0c3c48bed3d50e365245f6e24e7164a89f39959586d96c6f17f9948f",
+      "passed": true,
+      "executionTimeMs": 139
+    },
+    {
+      "id": "inactive-copy-retains-main-context",
+      "sha256": "b425118031fd18469210bf05f13e6297f715be081f3e67de8aa2d9634a881ac8",
+      "passed": true,
+      "executionTimeMs": 27
+    },
+    {
+      "id": "copy-same-reference-independent-format",
+      "sha256": "7ab2ed59a1cdfdc035525a1320c0f0cc7f4f2a18b6b188d0b5143597b859a99d",
+      "passed": true,
+      "executionTimeMs": 110
+    },
+    {
+      "id": "template:executive-night",
+      "sha256": "34330e17f587c38e8871c2d58f80cb5ffac514e76ae98d7da5658744e9bb1a48",
+      "passed": true,
+      "executionTimeMs": 77
+    },
+    {
+      "id": "template:essential-paper",
+      "sha256": "dbf556eb197f55eca443128a347dc18e241fa197c367e15eaf21f1dffb33c8af",
+      "passed": true,
+      "executionTimeMs": 40
+    },
+    {
+      "id": "template:compare-mint",
+      "sha256": "d9eb735235b8164fa7ed01cfbd1cabddfc218eead1008f18cbad0de086b88577",
+      "passed": true,
+      "executionTimeMs": 45
+    },
+    {
+      "id": "template:target-lavender",
+      "sha256": "4741f7df25aee84ce6bf4d8839f3d51bb7e130e72be6b9e0f70fe3d42af6c3c8",
+      "passed": true,
+      "executionTimeMs": 27
+    },
+    {
+      "id": "template:status-paper",
+      "sha256": "638edd912f5d4b78ffa03b2c40ded04fe71ac3fd4e4a4d5b519a0f47cbb14f6e",
+      "passed": true,
+      "executionTimeMs": 36
+    },
+    {
+      "id": "template:spark-paper",
+      "sha256": "428c8aef2c9594130fba6e495245ba6b2d9a18eaec78bb8a53d34a7b9c6f461d",
+      "passed": true,
+      "executionTimeMs": 58
+    },
+    {
+      "id": "template:basic-lavender",
+      "sha256": "92f17103834eae58c00806ab20406808d77353887cab0ff6d4f2cd627fde9742",
+      "passed": true,
+      "executionTimeMs": 40
+    },
+    {
+      "id": "template:comparison-sand",
+      "sha256": "1a9bdfd6d9ba76fcfe9fe735f79e64594357b2d5ba19a38da903ebd2d93bc932",
+      "passed": true,
+      "executionTimeMs": 39
+    },
+    {
+      "id": "template:target-mint",
+      "sha256": "fd9d451af422b196b35da613b17c23abbabe275c16cef2f316af5512f0f166b9",
+      "passed": true,
+      "executionTimeMs": 22
+    },
+    {
+      "id": "template:status-sand",
+      "sha256": "796f0f939da7799e9d074aec1d5145433a9d007bf3e52f2214cb7088e7445dd2",
+      "passed": true,
+      "executionTimeMs": 40
+    },
+    {
+      "id": "template:spark-cobalt",
+      "sha256": "74e10f45ea0049e094a617fa03829cb66f687f3b230cc1e0582bf21625f67322",
+      "passed": true,
+      "executionTimeMs": 63
+    },
+    {
+      "id": "template:executive-paper",
+      "sha256": "25de1dcf10088e790c1b3d2bb1286538581a8dee2dcb3332288e6a02f868db01",
+      "passed": true,
+      "executionTimeMs": 72
+    },
+    {
+      "id": "template:essential-night",
+      "sha256": "724b828d211393cc52328d81bfd0beebfc42624e3727984d5229189c87eaeb34",
+      "passed": true,
+      "executionTimeMs": 1480
+    },
+    {
+      "id": "template:executive-sand",
+      "sha256": "b8e4191a4b66ba3ccf495efed76a3cd28b6ed40891440e5bafd4102c3d580aec",
+      "passed": true,
+      "executionTimeMs": 216
+    },
+    {
+      "id": "template:spark-mint",
+      "sha256": "a21913872187b364078e35c83e6c4a9a01e04cb7dfeba5a8d6c45a191b1fabfd",
+      "passed": true,
+      "executionTimeMs": 396
+    },
+    {
+      "id": "template:spark-horizontal",
+      "sha256": "c9f4ff97bfaecaa808aee31da2caf193c6ce9f1c4f3e0064342ec04f0eceaefa",
+      "passed": true,
+      "executionTimeMs": 84
+    },
+    {
+      "id": "template:spark-right",
+      "sha256": "4880d8a589387d20a1a40c492ea77c77b9f6b1020f1306eacb26e41507bd7d50",
+      "passed": true,
+      "executionTimeMs": 71
+    },
+    {
+      "id": "template:target-donut",
+      "sha256": "016fb619615c39f7394b915567d816509860860df95e9d422cb0f458a6c8d415",
+      "passed": true,
+      "executionTimeMs": 20
+    },
+    {
+      "id": "default-window-goal-reference",
+      "sha256": "5ad7c3840dce39f621c843cfeec17698a2fd9f8a54f988e0820af9b16a44d057",
+      "passed": true,
+      "executionTimeMs": 67
+    },
+    {
+      "id": "same-period-goal-reference",
+      "sha256": "76a66bf7d601a88890704cb97e385a680128b8283ac8a704e1b16c7b7df3fe47",
+      "passed": true,
+      "executionTimeMs": 76
+    },
+    {
+      "id": "prior-period-complete",
+      "sha256": "a077c2545502591a4e8513546c757fbffc7a38eb65e752c30c24bde778381684",
+      "passed": true,
+      "executionTimeMs": 80
+    },
+    {
+      "id": "prior-period-incomplete",
+      "sha256": "94ba9fbb81e21a016aae52d17a9f7ad67f392ea818c36d08a7b944bac1141fb1",
+      "passed": true,
+      "executionTimeMs": 72
+    },
+    {
+      "id": "prior-period-discontinuous",
+      "sha256": "f14891c287c9340749dcde2ccfe7daafbad03793743ea730320807eba173c327",
+      "passed": true,
+      "executionTimeMs": 82
+    },
+    {
+      "id": "yoy-leap-day",
+      "sha256": "db6d14bf548e2b8a804603b13c0fcb56f130dbf44022b5c304011cc322e154f5",
+      "passed": true,
+      "executionTimeMs": 85
+    },
+    {
+      "id": "status-copy:good",
+      "sha256": "dce23fbec9fb99284d1390687c5135c9c776b5d117745d68a05eff5a36cbf16c",
+      "passed": true,
+      "executionTimeMs": 36
+    },
+    {
+      "id": "status-copy:warn",
+      "sha256": "f1b5f8c0c86332f1522509c37332e1eb6a3a5b9eb14089c314ba097d59867f17",
+      "passed": true,
+      "executionTimeMs": 80
+    },
+    {
+      "id": "status-copy:bad",
+      "sha256": "0ae26be174726a67a374c613dd6c30d8ad90ca0ca5bd3ac839f8c9de7b3b7eaf",
+      "passed": true,
+      "executionTimeMs": 39
+    },
+    {
+      "id": "status-copy:blank",
+      "sha256": "b1443816edc7a12f657617e2cea3b840d9f5276c8ef71873b39e08db91e1a1dd",
+      "passed": true,
+      "executionTimeMs": 37
+    },
+    {
+      "id": "goal-equality:up",
+      "sha256": "88d28419621fce30ec8ecefed16fa4fc8f84bbfab4fe38a48dcad6d4b6fcb767",
+      "passed": true,
+      "executionTimeMs": 23
+    },
+    {
+      "id": "goal-boundary:up:90",
+      "sha256": "b6294aa7c591a6881da453c0667ce1239e2e8746c4f00896d34f01f7b1d3c07d",
+      "passed": true,
+      "executionTimeMs": 23
+    },
+    {
+      "id": "goal-boundary:up:110",
+      "sha256": "55b62ad2e57e14d93ad9d9b33a67e74d8e0bd4d33d24b5102de3886f252480ef",
+      "passed": true,
+      "executionTimeMs": 22
+    },
+    {
+      "id": "goal-equality:down",
+      "sha256": "9bb9bfeee04c74dcbfabe14ddb150a6ca25070e4d2a74a1f4b06c918d2286880",
+      "passed": true,
+      "executionTimeMs": 25
+    },
+    {
+      "id": "goal-boundary:down:90",
+      "sha256": "7e454930e587df3ab9f1a87b883bcc87994538b163c192b822c0f2274a892409",
+      "passed": true,
+      "executionTimeMs": 23
+    },
+    {
+      "id": "goal-boundary:down:110",
+      "sha256": "8081920a72c7384243e03655fb1913250fbbc4d860cc6ec635d0ee0bff1f2a1b",
+      "passed": true,
+      "executionTimeMs": 23
+    },
+    {
+      "id": "goal-equality:neutral",
+      "sha256": "ffd8edcce2e85a270e4cecb73435cdd0d48eec164a5cd7cb070310e05485a40e",
+      "passed": true,
+      "executionTimeMs": 24
+    },
+    {
+      "id": "goal-blank",
+      "sha256": "91f16ef815b4a91bd3cb1334ec8db3a4b87f6bf6bab36377988cbc040b4e5267",
+      "passed": true,
+      "executionTimeMs": 21
+    },
+    {
+      "id": "goal-zero-target",
+      "sha256": "85d053229a6a3dee6e9ed33560aa6d4b5c7b9276560ba4b68aa821d3164a2f16",
+      "passed": true,
+      "executionTimeMs": 22
+    },
+    {
+      "id": "linked-copy-label-color",
+      "sha256": "5a2055b678ff2758e78ac39e0517511ee1ded6744af92f2bd68f861cddf94f67",
+      "passed": true,
+      "executionTimeMs": 26
+    },
+    {
+      "id": "flat-series-min:false",
+      "sha256": "60e41b340160c75ce5dc2cf4567593f5fcd63ce29b34d0cf299a7f9b22296162",
+      "passed": true,
+      "executionTimeMs": 158
+    },
+    {
+      "id": "flat-series-min:true",
+      "sha256": "2ff0f0d14ac60992e2dd6b4fa0c5744371d7690a13688adc6d9749cd0bcd7dd2",
+      "passed": true,
+      "executionTimeMs": 184
+    },
+    {
+      "id": "measure-name-equals-calendar-column",
+      "sha256": "c44d72644476bcb994eddea01d4d39acbd9c01499c525fd1446de0416473be08",
+      "passed": true,
+      "executionTimeMs": 77
+    },
+    {
+      "id": "inactive-points-do-not-block",
+      "sha256": "b3710fa42fba6bde5ae3b9698af197508203af43a7db7e48c9e8547a99151b6f",
+      "passed": true,
+      "executionTimeMs": 20
+    },
+    {
+      "id": "decorative-copy-has-no-measure-dependency",
+      "sha256": "a8427ea8e2e91c80c60212d5b08164cb5691a9ddecd3a979cf6363c8cfdfe3ee",
+      "passed": true,
+      "executionTimeMs": 80
+    }
+  ]
+}

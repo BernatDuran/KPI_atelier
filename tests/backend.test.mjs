@@ -5,6 +5,7 @@ import { EventEmitter, once } from 'node:events';
 import { PassThrough, Writable } from 'node:stream';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
 import { createPbiApi } from '../scripts/pbi_api.mjs';
 import { createBridgeTransport } from '../scripts/pbi_transport.mjs';
 import { MAX_BODY_BYTES, isAllowedHost, isAllowedOrigin } from '../scripts/pbi_http.mjs';
@@ -37,7 +38,8 @@ test('actual server exposes versioned health and protects static pages against r
   t.after(()=>server.kill());
   await Promise.race([once(server.stdout,'data'),once(server,'exit').then(()=>{throw new Error('Local server failed to start');})]);
   const health=await fetch(`http://127.0.0.1:${port}/api/health`);
-  assert.deepEqual(await health.json(),{app:'kpi-atelier',version:'1.4.0',protocol:1});
+  const {version}=JSON.parse(readFileSync(new URL('../package.json',import.meta.url),'utf8'));
+  assert.deepEqual(await health.json(),{app:'kpi-atelier',version,protocol:1});
   const page=await fetch(`http://127.0.0.1:${port}/`);
   assert.equal(page.status,200);assert.match(page.headers.get('content-security-policy'),/script-src 'self';/);
   const response=await new Promise((resolve,reject)=>{
@@ -96,6 +98,21 @@ test('transport bounds startup and rejects process exit before readiness', async
     const transport=createBridgeTransport({spawnProcess:factory,startupMs:20});
     await assert.rejects(transport.request({action:'discover'}));transport.shutdown();
   }
+});
+
+test('Bridge failures retain bounded redacted diagnostics and a request reference', async () => {
+  const transport=createBridgeTransport({spawnProcess:()=>fakeProcess((request,child)=>{
+    child.stderr.write('x'.repeat(10000)+'\npassword=private-value token="secret value"\nTOM assembly load failed');
+    child.stdout.write(JSON.stringify({success:false,requestId:request.requestId,error:'Connection failed',code:'BRIDGE_REJECTED'})+'\n');
+  })});
+  await assert.rejects(transport.request({action:'schema'}),error=>{
+    assert.equal(error.requestId,'1');assert.ok(error.diagnostic.length<=4096);
+    assert.match(error.diagnostic,/TOM assembly load failed/);
+    assert.doesNotMatch(error.diagnostic,/private-value|secret value/);
+    assert.match(error.diagnostic,/\[oculto\]/);
+    return true;
+  });
+  transport.shutdown();
 });
 test('timed-out write is never retried and cancels queued work', async () => {
   let spawns=0,sends=0;

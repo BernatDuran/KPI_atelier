@@ -1,16 +1,21 @@
 import { validateModelCatalog } from './schema.mjs';
 
 /** Bounded requests with explicit mutation uncertainty; callers must not auto-retry writes. */
+/** @param {string} path @param {RequestInit} [options] */
 export async function apiRequest(path, options = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 60000);
+  const abort = () => controller.abort(options.signal?.reason);
+  options.signal?.addEventListener('abort', abort, { once: true });
+  if (options.signal?.aborted) abort();
   const mutation = options.method === 'POST';
   try {
     const response = await fetch(getApiBase() + path, { cache: 'no-store', ...options, signal: controller.signal });
     const data = await response.json();
     if (!response.ok || data.success === false) {
       throw Object.assign(new Error(data.error || 'Error HTTP ' + response.status), {
-        status: response.status, code: data.code, outcomeUnknown: Boolean(data.outcomeUnknown)
+        status: response.status, code: data.code, outcomeUnknown: Boolean(data.outcomeUnknown),
+        diagnostic: typeof data.diagnostic === 'string' ? data.diagnostic.slice(0, 4096) : '', requestId: data.requestId
       });
     }
     return data;
@@ -18,7 +23,7 @@ export async function apiRequest(path, options = {}) {
     if (error.name === 'AbortError') throw Object.assign(new Error('Power BI ha tardado demasiado en responder. Actualiza el estado antes de continuar.', { cause: error }), { name: 'AbortError', outcomeUnknown: mutation });
     if (error.status === undefined && mutation) error.outcomeUnknown = true;
     throw error;
-  } finally { clearTimeout(timer); }
+  } finally { clearTimeout(timer); options.signal?.removeEventListener('abort', abort); }
 }
 
 /**
@@ -34,10 +39,11 @@ export function getApiBase() {
 
 /**
  * Discovers active local Power BI Desktop instances via the bridge server.
- * @returns {Promise<Array<{pid: number, port: number, server: string, reportName?: string, database?: string}>>}
+ * @param {{ signal?: AbortSignal }} [options]
+ * @returns {Promise<import('./types.d.ts').LivePbiInstance[]>}
  */
-export async function discoverLivePbi() {
-  const json = await apiRequest('/api/pbi/discover');
+export async function discoverLivePbi(options = {}) {
+  const json = await apiRequest('/api/pbi/discover', options);
   return json.instances || [];
 }
 
@@ -54,10 +60,11 @@ export async function fetchLivePbiStatus(server = '') {
  * Connects to live Power BI Desktop and builds a full model catalog.
  * @param {string} server
  * @param {string} [database]
- * @returns {Promise<{modelName: string, reportName?: string, isLiveConnection: boolean, server: string, database: string, databaseId: string, tables: string[], measures: Array<{name: string, table: string, expression?: string, configAnnotation?: any}>, dateTables: Array<{name: string, dateColumns: string[], isMarkedDateTable: boolean, primaryDateColumn: string|null, isLikelyCalendar: boolean}>}>}
+ * @param {{ signal?: AbortSignal }} [options]
+ * @returns {Promise<import('./types.d.ts').ModelCatalog>}
  */
-export async function fetchLivePbiModel(server, database = '') {
-  const data = await apiRequest('/api/pbi/model?server=' + encodeURIComponent(server) + (database ? '&database=' + encodeURIComponent(database) : ''));
+export async function fetchLivePbiModel(server, database = '', options = {}) {
+  const data = await apiRequest('/api/pbi/model?server=' + encodeURIComponent(server) + (database ? '&database=' + encodeURIComponent(database) : ''), options);
 
   const allTables = (data.tables || []).map(t => (typeof t === 'string' ? t : t.name)).filter(Boolean);
   const userTables = (data.tables || [])
@@ -107,19 +114,26 @@ export async function fetchLivePbiModel(server, database = '') {
 
 /**
  * Injects or updates a DAX measure directly in Power BI Desktop via the bridge.
- * @param {any} payload
- * @returns {Promise<{success: boolean, measureName: string, tableName: string, isNew: boolean}>}
+ * @param {import('./types.d.ts').MeasureWritePayload} payload
+ * @returns {Promise<import('./types.d.ts').MeasureWriteResult>}
  */
 export async function injectMeasureToLivePbi(payload) {
-  return apiRequest('/api/pbi/measure', {
+  const result = await apiRequest('/api/pbi/measure', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
   });
+  if (!result || result.success !== true || result.measureName !== payload.measureName ||
+      result.tableName !== payload.tableName || typeof result.isNew !== 'boolean') {
+    throw Object.assign(new Error('La respuesta no confirma la medida y la tabla enviadas. Actualiza y revisa el destino original.'), {
+      code: 'INVALID_WRITE_RESPONSE', outcomeUnknown: true
+    });
+  }
+  return result;
 }
 
 /**
  * Connects to the real-time Server-Sent Events stream from the local bridge.
  * Dispatches live updates whenever Power BI Desktop instances appear or disappear.
- * @param {(instances: Array<{pid: number, port: number, server: string, reportName?: string, database?: string}>) => void} onInstancesChange
+ * @param {(instances: import('./types.d.ts').LivePbiInstance[]) => void} onInstancesChange
  * @returns {(() => void) | null} Cleanup function to close the stream
  */
 export function initLivePbiStream(onInstancesChange, onUnavailable = () => {}) {

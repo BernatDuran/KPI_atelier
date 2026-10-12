@@ -3,8 +3,12 @@ import { THEMES } from './model.mjs';
 import { elementState, updateElement, clamp } from './elements.mjs';
 import { ICON_OPTIONS } from './icons.mjs';
 import { COLOR_ROLES, paletteFrom, sanitizePalette, hexToHSV, hsvToHex, contrastRatio } from './colors.mjs';
-import { $, btn, getC, getActiveContext, getPaletteDraft, setPaletteDraft, getColorRole, setColorRole, getColorHSV, setColorHSV, customThemes, setConfig, toast } from './state.mjs';
+import { $, btn, getC, getActiveContext, getPaletteDraft, setPaletteDraft, getColorRole, setColorRole, getColorHSV, setColorHSV, customThemes, getCustomThemes, subscribeCustomThemes, saveCustomTheme, deleteCustomTheme, setConfig, toast } from './state.mjs';
 import { openModal, closeModal } from './modals.mjs';
+
+let reviewedThemes = [];
+let displayedThemes = new Map();
+let studioRevision = 0;
 
 export function handleStudioClick(button) {
   const d = button.dataset;
@@ -16,8 +20,10 @@ export function handleStudioClick(button) {
     closeModal();
     return true;
   }
-  const palette = d.draftTheme ? THEMES[d.draftTheme] : d.draftCustom ? customThemes.find(t => t.id === d.draftCustom)?.colors : null;
+  const selectedTheme = d.draftCustom ? displayedThemes.get(d.draftCustom) : null;
+  const palette = d.draftTheme ? THEMES[d.draftTheme] : selectedTheme?.colors;
   if (palette) {
+    if (selectedTheme) reviewedThemes = [...reviewedThemes.filter(theme => theme.id !== selectedTheme.id), structuredClone(selectedTheme)];
     setPaletteDraft(paletteFrom(palette));
     setColorHSV(hexToHSV(getPaletteDraft()[getColorRole()]));
     updateColorStudio();
@@ -36,33 +42,45 @@ export function handleStudioClick(button) {
     return true;
   }
   if (d.deleteTheme) {
-    const next = customThemes.filter(t => t.id !== d.deleteTheme);
-    try {
-      localStorage.setItem('kpi-atelier-themes', JSON.stringify(next));
-      customThemes.splice(0, customThemes.length, ...next);
-      button.closest('.custom-theme-row')?.remove();
-    } catch { toast('No se pudo eliminar la paleta.'); }
-    return true;
+    if (button.disabled) return true;
+    return (async () => {
+      button.disabled = true;
+      try {
+        await deleteCustomTheme(d.deleteTheme, displayedThemes.get(d.deleteTheme));
+      } finally { button.disabled = false; }
+      return true;
+    })();
   }
   if (['apply-theme', 'save-theme'].includes(d.action)) {
     const colors = sanitizePalette(getPaletteDraft());
     if (!colors) { toast('Revisa los colores de la paleta.'); return true; }
     const name = ($('#theme-name')?.value || 'Mi paleta').trim().slice(0, 40) || 'Mi paleta';
     if (d.action === 'save-theme') {
-      const existing = customThemes.find(t => t.name === name);
-      const theme = { id: existing?.id || crypto.randomUUID(), name, colors };
-      const next = [...customThemes.filter(t => t.id !== theme.id), theme];
-      try {
-        localStorage.setItem('kpi-atelier-themes', JSON.stringify(next));
-        customThemes.splice(0, customThemes.length, ...next);
-      } catch { toast('No se pudo guardar la paleta. Tu edición sigue abierta.'); return true; }
+      if (button.disabled) return true;
+      return saveStudioPalette(button, name, colors);
     }
     setConfig({ ...colors, theme: 'custom', customThemeName: name });
     closeModal();
-    toast(d.action === 'save-theme' ? 'Paleta guardada y aplicada.' : 'Paleta aplicada.');
+    toast('Paleta aplicada.');
     return true;
   }
   return false;
+}
+
+async function saveStudioPalette(button, name, colors) {
+  const revision = studioRevision;
+  const modal = $('#modal');
+  const existing = reviewedThemes.find(theme => theme.name === name) || null;
+  button.disabled = true;
+  let theme;
+  try {
+    theme = await saveCustomTheme(name, colors, existing);
+  } finally { button.disabled = false; }
+  if (!theme || revision !== studioRevision || !modal?.open || modal.className !== 'theme-modal') return true;
+  setConfig({ ...colors, theme: 'custom', customThemeName: theme.name });
+  closeModal();
+  toast(getActiveContext().lastCollectionSyncWarning || (getActiveContext().lastThemeSaveConflict ? 'Otra ventana modificó esta paleta. Se guardó y aplicó una copia en conflicto; ambas versiones se conservan.' : 'Paleta guardada y aplicada.'));
+  return true;
 }
 
 export function handleStudioInput(input) {
@@ -133,7 +151,24 @@ export function themeTile(id, name, colors, custom = false) {
   return `<button ${custom ? 'data-draft-custom' : 'data-draft-theme'}="${id}" class="studio-theme-tile"><span class="theme-strip">${['background', 'accent', 'text', 'positive'].map(key => `<i style="background:${colors[key]}"></i>`).join('')}</span><span>${esc(name)}</span>${icon('chevron', 12)}</button>`;
 }
 
+function customThemeList() {
+  displayedThemes = new Map(customThemes.map(theme => [theme.id, structuredClone(theme)]));
+  return customThemes.length ? customThemes.map(theme => `<div class="custom-theme-row">${themeTile(theme.id, theme.name, theme.colors, true)}<button data-delete-theme="${theme.id}" title="Eliminar tema guardado" aria-label="Eliminar tema ${esc(theme.name)}">${icon('trash', 13)}</button></div>`).join('') : '<p class="geometry-note">Guarda tu primera paleta para reutilizarla.</p>';
+}
+function refreshThemeLibrary() {
+  const list = $('#custom-theme-list');
+  if (!list || !$('#modal')?.open) return;
+  const focused = document.activeElement;
+  const focusedTheme = focused?.dataset?.draftCustom || focused?.dataset?.deleteTheme;
+  const focusedAction = focused?.dataset?.deleteTheme ? 'data-delete-theme' : 'data-draft-custom';
+  list.innerHTML = customThemeList();
+  if (focusedTheme) (list.querySelector(`[${focusedAction}="${focusedTheme}"]`) || list.querySelector('[data-draft-custom]') || $('#theme-name'))?.focus();
+}
+subscribeCustomThemes(refreshThemeLibrary);
+
 export function openThemeStudio() {
+  studioRevision++;
+  reviewedThemes = structuredClone(getCustomThemes());
   const c = getC();
   const draft = paletteFrom(c);
   setPaletteDraft(draft);
@@ -143,7 +178,7 @@ export function openThemeStudio() {
   openModal(
     'El color también cuenta tu historia.',
     'Explora una paleta, afina los matices y hazla tuya.',
-    `<div class="theme-studio"><aside class="theme-library"><h3>Paletas curadas <span>${Object.keys(THEMES).length}</span></h3>${Object.entries(THEMES).map(([id, t]) => themeTile(id, t.name, t)).join('')}<div class="custom-theme-heading"><h3>Tus temas</h3></div><div id="custom-theme-list">${customThemes.length ? customThemes.map(t => `<div class="custom-theme-row">${themeTile(t.id, t.name, t.colors, true)}<button data-delete-theme="${t.id}" title="Eliminar tema guardado" aria-label="Eliminar tema ${esc(t.name)}">${icon('trash', 13)}</button></div>`).join('') : '<p class="geometry-note">Guarda tu primera paleta para reutilizarla.</p>'}</div></aside><section class="color-workbench"><h3>Ajusta un color</h3><div class="color-roles">${COLOR_ROLES.map(([key, label]) => `<button data-color-role="${key}" class="${key === 'accent' ? 'active' : ''}"><i style="background:${draft[key]}"></i><span>${label}</span></button>`).join('')}</div><div class="color-map-label"><strong id="active-color-label">Acento</strong><span>Saturación · luminosidad</span></div><div id="color-map" class="color-map" tabindex="0" role="slider" aria-label="Mapa de color. Flechas izquierda y derecha: saturación. Arriba y abajo: luminosidad." aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(getColorHSV().s * 100)}"><span id="color-map-cursor"></span></div><label class="hue-label" for="color-hue">Matiz <span id="hue-value"></span></label><input id="color-hue" class="hue-slider" type="range" min="0" max="360" step="1" value="${Math.round(getColorHSV().h)}"><div class="color-hex-row"><span id="active-color-preview"></span><label for="color-hex">HEX</label><input id="color-hex" maxlength="7" value="${draft.accent.toUpperCase()}" spellcheck="false" aria-label="Código hexadecimal"><span id="hex-error" role="status"></span></div><div class="quick-colors">${['#ffffff', '#17272b', '#c3ec83', '#477568', '#8771bb', '#bd8144', '#527bdd', '#bd758b', '#3d9596', '#b8664d', '#c0b2ee', '#000000'].map(color => `<button data-quick-color="${color}" style="background:${color}" title="${color}" aria-label="Usar ${color}"></button>`).join('')}</div><p class="geometry-note">Arrastra sobre el mapa o usa las flechas. Mayús ajusta de 5 en 5.</p></section><section class="palette-preview-column"><h3>Así se verá tu tarjeta</h3><div id="palette-preview" class="palette-preview"></div><div id="palette-contrast" class="palette-contrast"></div><label class="save-label" for="theme-name">Nombre para tu paleta</label><input id="theme-name" class="save-input" maxlength="40" value="${esc(c.customThemeName || 'Mi paleta')}"><p class="geometry-note">Tus paletas se guardan en este navegador. Los colores también viajan con el JSON de cada tarjeta.</p></section></div>`,
+    `<div class="theme-studio"><aside class="theme-library"><h3>Paletas curadas <span>${Object.keys(THEMES).length}</span></h3>${Object.entries(THEMES).map(([id, t]) => themeTile(id, t.name, t)).join('')}<div class="custom-theme-heading"><h3>Tus temas</h3></div><div id="custom-theme-list">${customThemeList()}</div></aside><section class="color-workbench"><h3>Ajusta un color</h3><div class="color-roles">${COLOR_ROLES.map(([key, label]) => `<button data-color-role="${key}" class="${key === 'accent' ? 'active' : ''}"><i style="background:${draft[key]}"></i><span>${label}</span></button>`).join('')}</div><div class="color-map-label"><strong id="active-color-label">Acento</strong><span>Saturación · luminosidad</span></div><div id="color-map" class="color-map" tabindex="0" role="slider" aria-label="Mapa de color. Flechas izquierda y derecha: saturación. Arriba y abajo: luminosidad." aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(getColorHSV().s * 100)}"><span id="color-map-cursor"></span></div><label class="hue-label" for="color-hue">Matiz <span id="hue-value"></span></label><input id="color-hue" class="hue-slider" type="range" min="0" max="360" step="1" value="${Math.round(getColorHSV().h)}"><div class="color-hex-row"><span id="active-color-preview"></span><label for="color-hex">HEX</label><input id="color-hex" maxlength="7" value="${draft.accent.toUpperCase()}" spellcheck="false" aria-label="Código hexadecimal"><span id="hex-error" role="status"></span></div><div class="quick-colors">${['#ffffff', '#17272b', '#c3ec83', '#477568', '#8771bb', '#bd8144', '#527bdd', '#bd758b', '#3d9596', '#b8664d', '#c0b2ee', '#000000'].map(color => `<button data-quick-color="${color}" style="background:${color}" title="${color}" aria-label="Usar ${color}"></button>`).join('')}</div><p class="geometry-note">Arrastra sobre el mapa o usa las flechas. Mayús ajusta de 5 en 5.</p></section><section class="palette-preview-column"><h3>Así se verá tu tarjeta</h3><div id="palette-preview" class="palette-preview"></div><div id="palette-contrast" class="palette-contrast"></div><label class="save-label" for="theme-name">Nombre para tu paleta</label><input id="theme-name" class="save-input" maxlength="40" value="${esc(c.customThemeName || 'Mi paleta')}"><p class="geometry-note">Tus paletas se guardan en este navegador. Los colores también viajan con el JSON de cada tarjeta.</p></section></div>`,
     btn('close-modal', 'Cancelar', null, 'button quiet') + btn('save-theme', 'Guardar y aplicar', 'save', 'button secondary') + btn('apply-theme', 'Aplicar paleta', 'check', 'button primary'),
     'theme-modal'
   );

@@ -4,8 +4,11 @@
  * and JSON import contract verification for CardConfig and sub-entities.
  */
 
-import {BASE, LIMITS, ENUMS, THEMES} from './model.mjs';
-import {resolveElementDef} from './elements.mjs';
+import {BASE, LIMITS, ENUMS, THEMES,STRING_LIMITS,sanitizeConfig} from './model.mjs';
+import {resolveElementDef,ELEMENT_IDS,SIZE_LIMITS,MAX_DUPLICATES,MAX_DUPLICATES_PER_TYPE,usesValueBinding,valueBinding,goalBinding,usesGoalBinding,unsupportedCopyDataProperties} from './elements.mjs';
+import {colorModes} from './appearance.mjs';
+
+export const MAX_CONFIG_BYTES=512000;
 
 export const HEX_COLOR_REGEX = /^#[0-9a-fA-F]{6}$/;
 
@@ -98,6 +101,7 @@ export const CONFIG_SCHEMA = {
   footer: { type: 'string', maxLength: 160 },
   measure: { type: 'string', maxLength: 120 },
   measureName: { type: 'string', maxLength: 120 },
+  targetTable: { type: 'string', maxLength: 512 },
   dateTable: { type: 'string', maxLength: 120 },
   dateColumn: { type: 'string', maxLength: 120 },
   targetMeasure: { type: 'string', maxLength: 120 },
@@ -112,6 +116,7 @@ export const CONFIG_SCHEMA = {
 // Derive all numeric bounds from the same contract used by the editor sanitizer.
 const integerFields = new Set(['geometryVersion', 'width', 'height', 'decimals', 'maxPoints']);
 for (const [key, bounds] of Object.entries(LIMITS)) CONFIG_SCHEMA[key] = {type:'number', min:bounds[0], max:bounds[1], integer:integerFields.has(key)};
+for(const [key,maxLength] of Object.entries(STRING_LIMITS))CONFIG_SCHEMA[key]={...CONFIG_SCHEMA[key],maxLength};
 for (const [key, value] of Object.entries(BASE)) {
   if (CONFIG_SCHEMA[key] || ['elements', 'layerOrder'].includes(key)) continue;
   CONFIG_SCHEMA[key] = ENUMS[key] ? {type:'enum', values:ENUMS[key]} : typeof value === 'number' ? {type:'number', min:-1e15, max:1e15} : {type:typeof value};
@@ -135,6 +140,8 @@ export function validateElementCustomization(id, el) {
   if (!def) {
     warnings.push(`Element identifier '${id}' is not in standard catalog or duplicate format`);
   }
+  const ignored=unsupportedCopyDataProperties(id,el);
+  if(ignored.length)warnings.push(`La copia '${id}' es decorativa; se retirarán sus propiedades de datos (${ignored.join(', ')}), conservando texto, icono y apariencia.`);
 
   // Bounds check
   for (const coord of ['x', 'y']) {
@@ -155,8 +162,9 @@ export function validateElementCustomization(id, el) {
 
   if ('size' in el) {
     const s = Number(el.size);
-    if (typeof el.size !== 'number' || !Number.isFinite(s) || s < 6 || s > 240) {
-      errors.push(`Element ${id}.size must be a number between 6 and 240`);
+    const [min,max]=SIZE_LIMITS[def?.kind]||[6,240];
+    if (typeof el.size !== 'number' || !Number.isFinite(s) || s < min || s > max) {
+      errors.push(`Element ${id}.size must be a number between ${min} and ${max}`);
     }
   }
 
@@ -181,7 +189,9 @@ export function validateElementCustomization(id, el) {
   }
   for (const key of ['measure','dateTable','dateColumn','targetMeasure','compareMeasure','statusGood','statusWarn','statusBad','text']) if (key in el && typeof el[key] !== 'string') errors.push(`Element ${id}.${key} must be a string`);
   for (const key of ['goodThreshold','warnThreshold']) if (key in el && (typeof el[key] !== 'number' || !Number.isFinite(el[key]))) errors.push(`Element ${id}.${key} must be finite`);
-  for (const key of ['comparison','direction','format','unit','currency','deltaMode','chartKind','trendStyle','trendCurve','areaFill','granularity']) if (key in el && !ENUMS[key].includes(el[key])) errors.push(`Element ${id}.${key} is invalid`);
+  for (const key of ['comparison','direction','format','unit','currency','deltaMode','chartKind','trendStyle','trendCurve','areaFill','granularity','trendGrid']) if (key in el && !ENUMS[key].includes(el[key])) errors.push(`Element ${id}.${key} is invalid`);
+  for (const [key, values] of Object.entries({colorMode:colorModes(id),backgroundMode:['auto','custom','none'],fillMode:['linked','custom']})) if (key in el && !values.includes(el[key])) errors.push(`Element ${id}.${key} is invalid`);
+  for (const key of ['suffix','icon']) if (key in el && typeof el[key] !== 'string') errors.push(`Element ${id}.${key} must be a string`);
 
   return { valid: errors.length === 0, errors, warnings };
 }
@@ -201,8 +211,8 @@ export function validateCardConfig(raw, options = {}) {
   }
 
   // Legacy geometry detection
-  if (raw.geometryVersion === 1) {
-    warnings.push('Legacy geometry version 1 detected. Layout will migrate to version 2 standards.');
+  if (raw.geometryVersion === 1 || raw.geometryVersion === undefined) {
+    warnings.push('Distribución antigua (versión 1): se adaptará a la geometría actual al abrir el diseño.');
   }
 
   // Check defined properties
@@ -254,7 +264,7 @@ export function validateCardConfig(raw, options = {}) {
         if (typeof val !== 'string') {
           errors.push(`Field '${key}' must be a string, received ${typeof val}`);
         } else if (rule.maxLength && val.length > rule.maxLength) {
-          warnings.push(`Field '${key}' exceeds max length ${rule.maxLength} (length: ${val.length})`);
+          warnings.push(`Se recortará '${key}' a ${rule.maxLength} caracteres (contiene ${val.length}).`);
         }
         break;
     }
@@ -265,7 +275,7 @@ export function validateCardConfig(raw, options = {}) {
     const knownKeys = new Set([...Object.keys(BASE), '_measureBound', '_targetCustomized', '_dateCustomized']);
     for (const k of Object.keys(raw)) {
       if (!knownKeys.has(k)) {
-        warnings.push(`Unknown property detected: '${k}'`);
+        warnings.push(`Se ignorará la propiedad no compatible '${k}'.`);
       }
     }
   }
@@ -275,6 +285,13 @@ export function validateCardConfig(raw, options = {}) {
     if (typeof raw.elements !== 'object' || Array.isArray(raw.elements) || raw.elements === null) {
       errors.push("'elements' must be a valid key-value map");
     } else {
+      const copies=Object.entries(raw.elements).filter(([id])=>resolveElementDef(id)?.isDuplicate);
+      if(copies.length>ELEMENT_IDS.length*MAX_DUPLICATES_PER_TYPE)errors.push('Too many stored duplicate elements');
+      const active=copies.filter(([,el])=>el?.deleted!==true);
+      if(active.length>MAX_DUPLICATES)errors.push(`A card supports at most ${MAX_DUPLICATES} active copies`);
+      const counts=new Map();
+      for(const [id] of active){const base=resolveElementDef(id).baseId;counts.set(base,(counts.get(base)||0)+1);}
+      for(const [base,count] of counts)if(count>MAX_DUPLICATES_PER_TYPE)errors.push(`Element ${base} supports at most ${MAX_DUPLICATES_PER_TYPE} active copies`);
       for (const [elId, elData] of Object.entries(raw.elements)) {
         const res = validateElementCustomization(elId, elData);
         if (!res.valid) {
@@ -316,6 +333,7 @@ export function validateCardConfig(raw, options = {}) {
 export function validateImportedJSON(rawInput, options = {}) {
   let parsed;
   if (typeof rawInput === 'string') {
+    if(new TextEncoder().encode(rawInput).byteLength>MAX_CONFIG_BYTES)return {valid:false,errors:['Configuration exceeds the 512 KB import limit'],warnings:[]};
     try {
       parsed = JSON.parse(rawInput);
     } catch (e) {
@@ -352,15 +370,53 @@ export function validateImportedJSON(rawInput, options = {}) {
   }
 
   if (!Object.keys(targetConfig).some(key => Object.hasOwn(BASE, key))) return {valid:false, errors:['Payload does not contain card configuration fields'], warnings:[]};
-  const result = validateCardConfig(targetConfig, options);
+  const result = validateCardConfig(targetConfig, {...options,strictUnknown:options.strictUnknown??true});
+  const config=result.valid?sanitizeConfig(targetConfig):undefined;
+  const warnings=[...result.warnings];
+  if(config)warnings.push(...normalizationWarnings(targetConfig,config));
 
   return {
     valid: result.valid,
     errors: result.errors,
-    warnings: result.warnings,
-    config: result.data,
+    warnings: [...new Set(warnings)],
+    config,
     metadata
   };
+}
+
+// Describe every accepted input value that normalization changes or removes.
+// Added defaults and the completed layer order are ordinary compatibility, not lost input.
+function normalizationWarnings(raw,config){
+ const warnings=[];
+ const changed=(path,before,after)=>{
+  if(JSON.stringify(before)===JSON.stringify(after))return;
+  if(typeof before==='string'&&typeof after==='string'&&before.length>after.length&&before.startsWith(after))warnings.push(`Se recortará '${path}' de ${before.length} a ${after.length} caracteres.`);
+  else warnings.push(after===undefined?`Se ignorará '${path}', que no forma parte de la configuración actual.`:`Se normalizará '${path}' para ajustarlo al contrato actual.`);
+ };
+ for(const [key,value] of Object.entries(raw)){
+  if(key==='elements'||key==='layerOrder'||key==='geometryVersion'||!Object.hasOwn(BASE,key))continue;
+  if(typeof value==='string'&&STRING_LIMITS[key]&&value.length>STRING_LIMITS[key])continue;
+  changed(key,value,config[key]);
+ }
+ for(const [id,state] of Object.entries(raw.elements||{})){
+  const def=resolveElementDef(id),normalized=config.elements[id];
+  if(!def||!state||typeof state!=='object')continue;
+  if(def.isDuplicate&&def.baseId==='trend'&&('dateTable' in state||'dateColumn' in state)){
+   warnings.push(`El gráfico '${id}' usará el calendario compartido '${config.dateTable}[${config.dateColumn}]'; se retirarán sus referencias de calendario antiguas.`);
+  }
+  const associated=def.isDuplicate&&usesValueBinding(config,id);
+  const ignored=unsupportedCopyDataProperties(id,state);
+  if(associated&&'measure' in state&&normalized?.measure===undefined){const source=valueBinding(config,id);warnings.push(`'${id}' usará el valor asociado '${source.measure||'Sin configurar'}' (${source.id}); se retirará su medida antigua '${String(state.measure).slice(0,120)}'.`);}
+  if(associated&&usesGoalBinding(config,id)&&'targetMeasure' in state&&state.targetMeasure!==normalized?.targetMeasure){const goal=goalBinding(config,id);warnings.push(`'${id}' usará el objetivo de su grupo '${goal.measure||'Sin configurar'}' (${goal.id}); la asignación se conserva en un único campo por copia.`);}
+  for(const [key,value] of Object.entries(state)){
+   if(def.isDuplicate&&def.baseId==='trend'&&['dateTable','dateColumn'].includes(key))continue;
+   if(associated&&key==='measure'&&normalized?.measure===undefined)continue;
+   if(associated&&usesGoalBinding(config,id)&&key==='targetMeasure')continue;
+   if(ignored.includes(key))continue;
+   changed(`elements.${id}.${key}`,value,normalized?.[key]);
+  }
+ }
+ return warnings;
 }
 
 /**
@@ -401,7 +457,11 @@ export function sanitizeModelCatalog(raw) {
     databaseId: typeof raw.databaseId === 'string' ? raw.databaseId : '',
     isLiveConnection: raw.isLiveConnection === true,
     tables: [...raw.tables],
-    measures: raw.measures.map(m => ({name:m.name, table:m.table, expression:typeof m.expression === 'string' ? m.expression : '', formatString:typeof m.formatString === 'string' ? m.formatString : '', configAnnotation:m.configAnnotation && validateImportedJSON(m.configAnnotation).valid ? structuredClone(validateImportedJSON(m.configAnnotation).config) : null})),
+    measures: raw.measures.map(m => {
+      const annotation=m.configAnnotation?validateImportedJSON(m.configAnnotation):null;
+      const retained=Array.isArray(m.configWarnings)?m.configWarnings.filter(w=>typeof w==='string').slice(0,50).map(w=>w.slice(0,1000)):[];
+      return {name:m.name,table:m.table,expression:typeof m.expression==='string'?m.expression:'',formatString:typeof m.formatString==='string'?m.formatString:'',configAnnotation:annotation?.valid?structuredClone(annotation.config):null,configWarnings:annotation?.valid?[...new Set([...retained,...annotation.warnings])].slice(0,50):[]};
+    }),
     dateTables: raw.dateTables.map(t => ({name:t.name, dateColumns:[...t.dateColumns], isMarkedDateTable:t.isMarkedDateTable === true, primaryDateColumn:t.dateColumns.includes(t.primaryDateColumn) ? t.primaryDateColumn : t.dateColumns[0] || null, isLikelyCalendar:t.isLikelyCalendar === true}))
   };
 }

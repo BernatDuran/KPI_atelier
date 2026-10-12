@@ -5,21 +5,25 @@ import { fileURLToPath } from 'node:url';
 const bridgeScript = fileURLToPath(new URL('./pbi_bridge.ps1', import.meta.url));
 const WRITES = new Set(['inject-measure', 'delete-measure']);
 export class BridgeError extends Error {
-  constructor(message, code = 'BRIDGE_UNAVAILABLE', outcomeUnknown = false) {
+  constructor(message, code = 'BRIDGE_UNAVAILABLE', outcomeUnknown = false, diagnostic = '', requestId = '') {
     super(message); this.code = code; this.outcomeUnknown = outcomeUnknown;
+    this.diagnostic = diagnostic; this.requestId = requestId;
   }
 }
 
 // Requests are serialized and correlated. Never retry an uncertain model write.
 export function createBridgeTransport({ spawnProcess = spawn, startupMs = 15000, operationMs = 30000, maxPending = 16 } = {}) {
   let child = null, starting = null, rejectStart = null, active = null, serial = Promise.resolve(), pending = 0, sequence = 0, generation = 0, closed = false;
+  let stderrTail = '';
+  const diagnostic = () => stderrTail.replace(/((?:password|pwd|token|secret|authorization)\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s;]+)/gi, '$1[oculto]').slice(-4096);
   function stop(error = new BridgeError('Conexión Power BI cerrada.')) {
+    error.diagnostic ||= diagnostic();
     generation++;
     const previous = child; child = null;
     rejectStart?.(error); rejectStart = null; starting = null;
     if (active) {
       const current = active; active = null; clearTimeout(current.timer);
-      current.reject(new BridgeError(error.message, error.code, current.isWrite));
+      current.reject(new BridgeError(error.message, error.code, current.isWrite, error.diagnostic, String(current.id)));
     }
     if (previous) { previous.stdin.destroy(); previous.kill(); }
   }
@@ -31,11 +35,12 @@ export function createBridgeTransport({ spawnProcess = spawn, startupMs = 15000,
       try { current = spawnProcess('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', bridgeScript, '-Interactive'], { stdio:['pipe','pipe','pipe'], windowsHide:true }); }
       catch (err) { reject(err); return; }
       child = current;
+      stderrTail = '';
       let ready = false;
       const timer = setTimeout(() => stop(new BridgeError('Power BI no respondió al iniciar.', 'BRIDGE_TIMEOUT')), startupMs);
       rejectStart = err => { clearTimeout(timer); reject(err); };
       current.stdout.setEncoding('utf8'); current.stderr.setEncoding('utf8');
-      current.stderr.on('data', () => {});
+      current.stderr.on('data', chunk => { if (child === current) stderrTail = (stderrTail + chunk).slice(-8192); });
       current.stdin.on('error', err => { if (child === current) stop(new BridgeError(err.message)); });
       const lines = readline.createInterface({ input:current.stdout, terminal:false });
       lines.on('line', line => {
@@ -48,7 +53,7 @@ export function createBridgeTransport({ spawnProcess = spawn, startupMs = 15000,
         }
         if (!active || data.requestId !== active.id) { stop(new BridgeError('Respuesta Power BI fuera de secuencia.', 'BRIDGE_PROTOCOL')); return; }
         const request = active; active = null; clearTimeout(request.timer);
-        if (data.success === false) request.reject(new BridgeError(data.error || 'Power BI rechazó la operación.', data.code || 'BRIDGE_REJECTED', Boolean(data.outcomeUnknown)));
+        if (data.success === false) request.reject(new BridgeError(data.error || 'Power BI rechazó la operación.', data.code || 'BRIDGE_REJECTED', Boolean(data.outcomeUnknown), diagnostic(), String(request.id)));
         else { delete data.requestId; request.resolve(data); }
       });
       current.on('error', err => { if (child === current) stop(new BridgeError(err.message)); });
@@ -68,6 +73,7 @@ export function createBridgeTransport({ spawnProcess = spawn, startupMs = 15000,
       const process = await start();
       return new Promise((resolve, reject) => {
         const id = ++sequence;
+        stderrTail = '';
         const timer = setTimeout(() => stop(new BridgeError('Power BI ha superado el tiempo de espera. Comprueba el modelo antes de volver a guardar.', 'BRIDGE_TIMEOUT')), operationMs);
         active = { id, resolve, reject, timer, isWrite:WRITES.has(payload.action) };
         try {

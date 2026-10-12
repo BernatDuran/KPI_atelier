@@ -395,7 +395,9 @@ body.ui-dark .overline {
 .rail-heading-actions {
   display:flex;
   align-items:center;
-  gap:6px
+  gap:6px;
+  flex-shrink:0;
+  white-space:nowrap
 }
 .rail-toggle-btn {
   width:22px;

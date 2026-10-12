@@ -22,7 +22,8 @@ function editor(initial = {}) {
   };
   const context = {
     document: { querySelector: () => null, documentElement: { setAttribute() {} } },
-    localStorage: storage
+    localStorage: storage,
+    navigator: { locks: { request: async (_name, _options, operation) => operation() } }
   };
   setContext(context);
   return { context, values, storage };
@@ -186,12 +187,12 @@ test('Restoring a snapshot without a duplicated element releases its stale selec
   assert.equal(context.tab, 'content');
 });
 
-test('A failed save keeps the pending design, baseline and saved library intact', () => {
+test('A failed save keeps the pending design, baseline and saved library intact', async () => {
   const { storage } = editor();
   const baseline = structuredClone(getBaseline());
   setC({ ...getC(), title: 'Edición valiosa' });
   storage.setItem = () => { throw new Error('Quota exceeded'); };
-  assert.equal(saveCurrent('Mi diseño'), false);
+  assert.equal(await saveCurrent('Mi diseño'), false);
   assert.equal(getSaved().length, 0);
   assert.deepEqual(getBaseline(), baseline);
   assert.equal(getC().title, 'Edición valiosa');

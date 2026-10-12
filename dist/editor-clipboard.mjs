@@ -1,4 +1,4 @@
-import { ELEMENTS, elementState, resolveElementDef, layerOrder } from './elements.mjs';
+import { ELEMENTS, elementState, resolveElementDef, layerOrder, MAX_DUPLICATES, MAX_DUPLICATES_PER_TYPE, linkedElements,usesGoalBinding,goalBinding,usesValueBinding,valueBinding } from './elements.mjs';
 import { elementFrame } from './layout.mjs';
 
 /** Capture content and styles independently of the current canvas selection. */
@@ -9,7 +9,7 @@ export function copyElementData(config, id, measuredFrame = null) {
   const baseId = def.baseId || id;
   const properties = keys => Object.fromEntries(keys.map(key => [key, state[key] ?? config[key]]));
   return {
-    id, baseId, state: structuredClone({ ...state, frame: state.frame || measuredFrame || elementFrame(config, id) }), label: def.label || id,
+    id, baseId, state: structuredClone({ ...state,...(usesValueBinding(config,id)&&baseId!=='goalLabel'?{measure:valueBinding(config,id).measure}:{}),...(usesGoalBinding(config,id)?{targetMeasure:goalBinding(config,id).measure}:{}), frame: state.frame || measuredFrame || elementFrame(config, id) }), label: def.label || id,
     text: state.text?.trim() ? state.text : (def.contentKey ? config[def.contentKey] : undefined),
     icon: state.icon || config.icon,
     valProps: baseId === 'value' ? properties(['format', 'currency', 'unit', 'decimals', 'suffix', 'measure']) : {},
@@ -17,7 +17,7 @@ export function copyElementData(config, id, measuredFrame = null) {
     trendProps: baseId === 'trend' ? properties([
       'chartKind', 'trendStyle', 'trendCurve', 'areaFill', 'fillOpacity', 'lineWidth',
       'showMax', 'showMin', 'showDot', 'showMarkerGuides', 'zeroBase', 'trendGrid',
-      'donutThickness', 'donutLabel', 'measure', 'dateTable', 'dateColumn'
+      'donutThickness', 'donutLabel', 'granularity'
     ]) : {}
   };
 }
@@ -25,7 +25,7 @@ export function copyElementData(config, id, measuredFrame = null) {
 /** Produce one immutable paste transaction, retaining layer order and limits. */
 export function pasteElementData(config, items, measureFrame = (_id) => null) {
   const activeCopies = Object.keys(config.elements || {}).filter(id => id.includes('_copy') && !config.elements[id].deleted);
-  if (activeCopies.length + items.length > 8) {
+  if (activeCopies.length + items.length > MAX_DUPLICATES) {
     return { config, ids: [], notices: ['Límite de duplicados alcanzado (máximo 8 copias en la tarjeta).'] };
   }
   let next = config;
@@ -34,7 +34,7 @@ export function pasteElementData(config, items, measureFrame = (_id) => null) {
     const def = resolveElementDef(item.baseId) || ELEMENTS[item.baseId];
     if (!def) continue;
     const copies = Object.keys(next.elements || {}).filter(id => id.startsWith(item.baseId + '_copy') && !next.elements[id].deleted);
-    if (copies.length >= 2) {
+    if (copies.length >= MAX_DUPLICATES_PER_TYPE) {
       notices.push(`Límite alcanzado: máximo 2 copias para ${def.label}.`);
       continue;
     }
@@ -50,8 +50,9 @@ export function pasteElementData(config, items, measureFrame = (_id) => null) {
       ...(item.text !== undefined ? { text: item.text } : {}),
       ...(item.icon ? { icon: item.icon } : {})
     };
+    if (item.baseId === 'trend') { delete state.dateTable; delete state.dateColumn; }
     next = { ...next, elements: { ...next.elements, [id]: state }, layerOrder: [id, ...layerOrder(next).filter(key => key !== id)] };
     ids.push(id);
   }
-  return { config: next, ids, notices };
+  return { config: ids.length?{...next,elements:linkedElements(next)}:config, ids, notices };
 }

@@ -24,6 +24,7 @@
   "include": [
     "dist/**/*.mjs",
     "dist/**/*.d.ts",
-    "scripts/**/*.mjs"
+    "scripts/**/*.mjs",
+    "tests/type-contracts.ts"
   ]
 }

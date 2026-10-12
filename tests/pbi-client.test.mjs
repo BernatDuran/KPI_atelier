@@ -9,7 +9,7 @@ test('client preserves optimistic write contract and sends JSON exactly once', a
     calls++;assert.match(url,/\/api\/pbi\/measure$/);assert.equal(options.method,'POST');
     assert.equal(options.headers['Content-Type'],'application/json');assert.deepEqual(JSON.parse(options.body),payload);
     assert.ok(options.signal instanceof AbortSignal);
-    return Response.json({success:true,measureName:payload.measureName});
+    return Response.json({success:true,measureName:payload.measureName,tableName:payload.tableName,isNew:false});
   });
   const result=await injectMeasureToLivePbi(payload);assert.equal(result.success,true);assert.equal(calls,1);
 });
@@ -56,4 +56,22 @@ test('client validates live catalog and preserves exact reviewed expression', as
   const model=await fetchLivePbiModel('localhost:1234','id-1');assert.equal(model.measures[0].expression,expression);
   t.mock.method(globalThis,'fetch',async()=>Response.json({success:true,server:'localhost:1234',database:'Model',tables:[{name:'Medidas'}],measures:[{name:42,table:'Medidas'}]}));
   await assert.rejects(fetchLivePbiModel('localhost:1234','id-1'),/catálogo recibido no es válido/);
+});
+
+test('A success response for a different destination remains uncertain without replaying the mutation', async t => {
+  const payload = { server: 'localhost:1234', database: 'guid-a', tableName: 'Measures', measureName: 'Card', daxExpression: '1', expectedExpression: null };
+  let calls = 0;
+  t.mock.method(globalThis, 'fetch', async () => {
+    calls++;
+    return Response.json({ success: true, measureName: 'Card', tableName: 'AnotherTable', isNew: true });
+  });
+  await assert.rejects(injectMeasureToLivePbi(payload), error => error.code === 'INVALID_WRITE_RESPONSE' && error.outcomeUnknown === true);
+  assert.equal(calls, 1);
+});
+
+test('Incomplete valid JSON cannot be reported as a confirmed write', async t => {
+  let calls = 0;
+  t.mock.method(globalThis, 'fetch', async () => { calls++; return Response.json({ success: true }); });
+  await assert.rejects(injectMeasureToLivePbi({ measureName: 'Card', tableName: 'Measures' }), error => error.outcomeUnknown === true);
+  assert.equal(calls, 1);
 });

@@ -32,7 +32,9 @@ export function renderSeries(c,values,format,elementId='trend'){
  let annotations='';const marked=new Set();
  for(const [kind,p,show]of [['max',max,c.showMax],['min',min,c.showMin&&(!c.showMax||min.value!==max.value)]])if(show){marked.add(p);const anchor=p.x<g.width*.3?'start':p.x>g.width*.7?'end':'middle';annotations+=markerSVG(c,kind,{...p,anchor,label:(kind==='max'?'Máx. ':'Mín. ')+format(p.value),labelY:kind==='max'?12:g.height-4},elementId);}
  if((c.showDot||pts.length===1)&&!marked.has(pts.at(-1)))annotations+=markerSVG(c,'last',pts.at(-1),elementId);
- return trendSVG(c,{path,first:pts[0].x,last:pts.at(-1).x,bars,annotations},elementId);
+ // The exported DAX suppresses area fills for a single point and negative series.
+ const area=c.trendStyle==='area'&&(pts.length===1||low<0)?'':null;
+ return trendSVG(c,{path,first:pts[0].x,last:pts.at(-1).x,bars,annotations,area},elementId);
 }
 export function renderDonut(c,d,elementId='trend'){
  const color=elementColor(c,elementId,d),r=64,track=elementBackground(c,elementId,d),g=chartDimensions(c,elementId);

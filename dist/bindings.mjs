@@ -1,4 +1,4 @@
-import { ELEMENT_IDS, resolveElementDef, elementState } from './elements.mjs';
+import { ELEMENT_IDS, resolveElementDef, elementState, usesValueBinding, valueBinding, goalBinding } from './elements.mjs';
 
 const temporalComparisons = ['yoy', 'mom', 'previous'];
 
@@ -13,14 +13,13 @@ export function directBindingFields(c, id) {
   const comparison = duplicate ? st.comparison || c.comparison : c.comparison;
   const chartKind = duplicate ? st.chartKind || c.chartKind : c.chartKind;
   const own = prop => duplicate ? base === 'trend' ? `${id}__${prop}` : id : prop;
-  const metric = duplicate && ['value','referenceValue','trend','delta'].includes(base) ? [base === 'delta' ? `${id}__measure` : own('measure')] : ['measure'];
-  const dates = duplicate && base === 'trend' ? ['dateTable', 'dateColumn'].flatMap(prop =>
-    [own(prop)]) : ['dateTable', 'dateColumn'];
+  const metric = usesValueBinding(c,id) ? [valueBinding(c,id).field] : duplicate && ['value','referenceValue','trend'].includes(base) ? [own('measure')] : ['measure'];
+  const dates = ['dateTable', 'dateColumn'];
 
-  const reference = comparison === 'target' ? [duplicate ? own('targetMeasure') : 'targetMeasure'] :
+  const target = [goalBinding(c,id).field];
+  const reference = comparison === 'target' ? target :
     comparison === 'custom' ? [duplicate ? own('compareMeasure') : 'compareMeasure'] :
     temporalComparisons.includes(comparison) ? dates : [];
-  const target = duplicate ? [own('targetMeasure')] : ['targetMeasure'];
   let fields = [];
   if (base === 'title' && !duplicate) fields = ['measureName'];
   if (base === 'value' || base === 'status') fields = metric;
@@ -29,7 +28,7 @@ export function directBindingFields(c, id) {
   if (base === 'period' && !duplicate) fields = dates;
   if (base === 'goalLabel') fields = target;
   if (base === 'progress' || base === 'progressLabel') fields = [...metric, ...target];
-  if (base === 'trend') fields = chartKind === 'donut' ? [...metric, 'targetMeasure'] : [...metric, ...dates, ...(!duplicate || !st.granularity ? ['granularity'] : [])];
+  if (base === 'trend') fields = chartKind === 'donut' ? [...metric, ...target] : [...metric, ...dates, ...(!duplicate || !st.granularity ? ['granularity'] : [])];
   return [...new Set(fields)];
 }
 

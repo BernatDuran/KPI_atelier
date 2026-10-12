@@ -27,7 +27,7 @@ test('Custom references, targets and donut charts only link to their own calcula
   assert.deepEqual(directBindingFields({ ...BASE, comparison: 'custom' }, 'referenceValue'), ['compareMeasure']);
 });
 
-test('Independent copies always use their own fields without inheriting empty assignments', () => {
+test('Copies retain explicit measures and share the main calendar in both hover directions', () => {
   const c = { ...BASE, elements: {
     value_copy1: { measure: 'Margen' },
     delta_copy1: { comparison: 'custom', compareMeasure: 'Margen anterior' },
@@ -35,14 +35,29 @@ test('Independent copies always use their own fields without inheriting empty as
     value_copy2: {}, trend_copy2: {}, value_copy3: { hidden: true }, value_copy4: { deleted: true }
   } };
   assert.deepEqual(directBindingFields(c, 'value_copy1'), ['value_copy1']);
-  assert.deepEqual(directBindingFields(c, 'delta_copy1'), ['delta_copy1__measure', 'delta_copy1']);
-  assert.deepEqual(directBindingFields(c, 'trend_copy1'), ['trend_copy1__measure', 'trend_copy1__dateTable', 'trend_copy1__dateColumn', 'granularity']);
+  assert.deepEqual(directBindingFields(c, 'delta_copy1'), ['value_copy1', 'delta_copy1']);
+  assert.deepEqual(directBindingFields(c, 'trend_copy1'), ['value_copy1', 'dateTable', 'dateColumn', 'granularity']);
   assert.deepEqual(directBindingFields(c, 'value_copy2'), ['value_copy2']);
   assert.ok(!directBindingElements(c, 'measure').includes('value_copy1'));
-  assert.ok(!directBindingElements(c, 'dateColumn').includes('trend_copy2'));
-  assert.ok(!directBindingElements(c, 'dateColumn').includes('trend_copy1'));
+  assert.ok(directBindingElements(c, 'dateColumn').includes('trend_copy2'));
+  assert.ok(directBindingElements(c, 'dateColumn').includes('trend_copy1'));
+  assert.deepEqual(directBindingElements(c, 'trend_copy1__measure'), []);
+  assert.ok(directBindingElements(c,'value_copy1').includes('trend_copy1'));
   assert.deepEqual(directBindingFields(c, 'value_copy3'), []);
   assert.deepEqual(directBindingFields(c, 'value_copy4'), []);
+});
+
+test('Variations and goal visuals inherit the exact numbered value and a single shared objective',()=>{
+ const c={...BASE,elements:{value_copy1:{measure:'Costes'},value_copy2:{measure:''},delta_copy1:{measure:'Ignorada',comparison:'target'},progress_copy1:{targetMeasure:'Ignorado'},goalLabel_copy1:{},delta_copy2:{comparison:'yoy'}}};
+ assert.deepEqual(directBindingFields(c,'delta_copy1'),['value_copy1','goalLabel_copy1__targetMeasure']);
+ assert.deepEqual(directBindingFields(c,'progress_copy1'),['value_copy1','goalLabel_copy1__targetMeasure']);
+ assert.deepEqual(directBindingFields(c,'goalLabel_copy1'),['goalLabel_copy1__targetMeasure']);
+ assert.deepEqual(directBindingFields(c,'delta_copy2'),['value_copy2','dateTable','dateColumn']);
+ assert.ok(directBindingElements(c,'value_copy1').includes('delta_copy1'));
+ assert.ok(directBindingElements(c,'goalLabel_copy1__targetMeasure').includes('progress_copy1'));
+ assert.deepEqual(directBindingElements(c,'delta_copy1__measure'),[]);
+ c.elements.value_copy1.deleted=true;
+ assert.deepEqual(directBindingFields(c,'delta_copy1'),['delta_copy1__measure','goalLabel_copy1__targetMeasure']);
 });
 
 test('Automatic reveal leaves visible fields still and moves only enough within the scroll boundaries', () => {
