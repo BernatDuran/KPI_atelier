@@ -1,7 +1,7 @@
 {
   "app": "KPI Atelier",
   "version": "1.4.3",
-  "source_commit": "b4d76508d0e36371268acb051d660c4000af181e",
+  "source_commit": "b4fa778ee65d1bfee7f5b2a4c932572ad142de86",
   "working_tree_modified": true,
   "files": [
     ".editorconfig",

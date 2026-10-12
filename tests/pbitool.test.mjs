@@ -69,7 +69,9 @@ test('scripts/install-pbitool.ps1 and uninstall-pbitool.ps1 exist and target Ext
   assert.equal(uninstallContent.includes('Microsoft Shared\\Power BI Desktop\\External Tools'), true);
 });
 
-test('pbi_bridge.ps1 supports discover and status actions', async () => {
+test('pbi_bridge.ps1 supports discover and status actions', {
+  skip: process.platform !== 'win32' ? 'Power BI Desktop discovery requires Windows PowerShell.' : false,
+}, async () => {
   const instances = await runBridge(['-Action', 'discover']);
   assert.equal(instances.success, true, 'discover must succeed');
   assert.equal(Array.isArray(instances.instances), true, 'instances must be an array');
