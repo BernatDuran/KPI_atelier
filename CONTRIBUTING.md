@@ -14,14 +14,14 @@ Gracias por tu interés en contribuir a **KPI Atelier**. Para mantener la calida
 
 ---
 
-## 2. Flujo de Trabajo en Git (Git Flow simplificado)
+## 2. Flujo de Trabajo en Git
 
 1. **Ramas Principales**:
    - `main`: Código en producción, siempre estable y probado. Cada versión desplegada se marca con un tag semántico (ej. `v1.4.0`).
-   - `dev`: Rama de integración de este trabajo. Los cambios actuales se mantienen aquí; no se fusionan en `main` sin una decisión explícita.
+   - `main` es la única rama permanente. Las antiguas ramas `dev` y `develop` se han integrado y retirado por decisión explícita.
 
 2. **Ramas de Trabajo**:
-   - Respeta la rama solicitada para la tarea. Si se autoriza una rama adicional, usa un nombre descriptivo y parte de `dev`; los agentes Codex utilizan el prefijo `codex/` por defecto.
+   - Respeta la rama solicitada para la tarea. Si se autoriza una rama temporal adicional, usa un nombre descriptivo y parte de `main`; los agentes Codex utilizan el prefijo `codex/` por defecto. Retírala después de integrar el trabajo.
    - No incluyas cambios ajenos ni promociones automáticamente una rama a producción.
 
 ---
